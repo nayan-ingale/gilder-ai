@@ -1,0 +1,12 @@
+packages:
+  - frontend
+  - backend/gateway
+  - backend/services/*
+  - backend/shared
+  - docs-explorer
+
+# pnpm 11 runs a dependency's install script only when it is allowed here.
+allowBuilds:
+  mongodb-memory-server: false # downloads the MongoDB test binary on the first test run instead
+  sharp: false # Next.js image optimizer; uses prebuilt binaries, no build needed
+  unrs-resolver: false # ESLint import resolver; uses prebuilt binaries

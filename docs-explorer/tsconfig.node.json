@@ -1,0 +1,6 @@
+{
+  // Files that run in Node, not the browser: the Vite config and the indexing scripts.
+  // Same strict settings as the backend.
+  "extends": "../tsconfig.base.json",
+  "include": ["vite.config.ts", "scripts"]
+}

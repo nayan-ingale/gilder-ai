@@ -1,0 +1,44 @@
+# Dependencies
+node_modules/
+.pnpm-store/
+
+# Environment files: only the examples are committed
+.env
+.env.*
+!.env.example
+
+# Build output and caches
+dist/
+build/
+out/
+.next/
+.turbo/
+coverage/
+*.tsbuildinfo
+
+# Logs
+*.log
+npm-debug.log*
+pnpm-debug.log*
+
+# Test reports
+playwright-report/
+test-results/
+
+# Secrets that must never be committed
+*.pem
+*serviceAccount*.json
+firebase-adminsdk*.json
+
+# OS and editor files
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/*
+!.vscode/extensions.json
+!.vscode/settings.json
+
+
+
+# docs 
+docs

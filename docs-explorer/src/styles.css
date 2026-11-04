@@ -1,0 +1,11 @@
+@import 'tailwindcss';
+
+/* Dark developer-tool look. The full set of design tokens arrives in step E6. */
+@layer base {
+  body {
+    background-color: var(--color-neutral-950);
+    color: var(--color-neutral-300);
+    font-family: var(--font-sans);
+    -webkit-font-smoothing: antialiased;
+  }
+}

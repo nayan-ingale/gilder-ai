@@ -1,0 +1,61 @@
+# Local infrastructure for GilderAi. Run from the repo root: pnpm infra:up | infra:ps | infra:logs | infra:down
+# Host ports avoid the defaults (27017 / 6379 / 6333) so GilderAi can run next to other local projects.
+# Files are stored in AWS S3, even in development, so there is no storage container here.
+
+name: gilder-ai
+
+services:
+  mongo:
+    image: mongo:8
+    restart: unless-stopped
+    # A single-node replica set: MongoDB transactions (used by the credits ledger) need one.
+    command: ['--replSet', 'rs0', '--bind_ip_all']
+    ports:
+      - '${MONGO_PORT:-27018}:27017'
+    volumes:
+      - mongo-data:/data/db
+    healthcheck:
+      # Healthy once the replica set is up; initiates it on the first run.
+      test:
+        - CMD-SHELL
+        - >-
+          mongosh --quiet --eval "try { rs.status().ok } catch (e) {
+          rs.initiate({ _id: 'rs0', members: [{ _id: 0, host: 'localhost:27017' }] }).ok }"
+      interval: 5s
+      timeout: 10s
+      retries: 20
+      start_period: 10s
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    # noeviction: sessions must never be silently dropped; every key has a TTL instead.
+    command: ['redis-server', '--appendonly', 'yes', '--maxmemory-policy', 'noeviction']
+    ports:
+      - '${REDIS_PORT:-6380}:6379'
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ['CMD', 'redis-cli', 'ping']
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  qdrant:
+    image: qdrant/qdrant:v1.16.0
+    restart: unless-stopped
+    ports:
+      - '${QDRANT_PORT:-6335}:6333'
+    volumes:
+      - qdrant-data:/qdrant/storage
+    healthcheck:
+      # The image has no curl, so check that the HTTP port accepts connections.
+      test: ['CMD-SHELL', 'bash -c ":> /dev/tcp/127.0.0.1/6333"']
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+volumes:
+  mongo-data:
+  redis-data:
+  qdrant-data:

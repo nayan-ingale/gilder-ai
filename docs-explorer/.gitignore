@@ -1,0 +1,2 @@
+# Built from the real code by scripts/index-source.ts on every dev and build run
+src/data/generated/
