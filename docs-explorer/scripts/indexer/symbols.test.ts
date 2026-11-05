@@ -175,5 +175,10 @@ describe('the real repository', () => {
       'GET /readyz',
     ]);
     expect(healthRouter?.calledBy).toContain('backend/shared/src/service.ts#createService');
+    // router.get and res.json are declared in Express's types-only package; they count as express.
+    expect(healthRouter?.externalCalls).toContainEqual({ package: 'express', name: 'json' });
+    expect(healthRouter?.externalCalls.map((call) => call.package)).not.toContain(
+      'express-serve-static-core',
+    );
   }, 60_000);
 });

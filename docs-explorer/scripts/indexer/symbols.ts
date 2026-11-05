@@ -381,6 +381,13 @@ function declarationKey(repoRoot: string, node: ts.Node): string {
 }
 
 /** The npm package a declaration file belongs to (`@types/express` counts as `express`). */
+/**
+ * Packages whose types live in a separate types-only package. A call is credited to the package
+ * the code installs and imports: Express declares router.get and res.json in
+ * @types/express-serve-static-core, but they are Express calls.
+ */
+const TYPES_ONLY_PACKAGES: Record<string, string> = { 'express-serve-static-core': 'express' };
+
 function packageOf(fileName: string): string | undefined {
   const marker = '/node_modules/';
   const at = fileName.lastIndexOf(marker);
@@ -389,7 +396,8 @@ function packageOf(fileName: string): string | undefined {
   }
   const [scopeOrName, name] = fileName.slice(at + marker.length).split('/');
   const packageName = scopeOrName?.startsWith('@') ? `${scopeOrName}/${name}` : scopeOrName;
-  return packageName?.replace(/^@types\//, '');
+  const plainName = packageName?.replace(/^@types\//, '');
+  return plainName && (TYPES_ONLY_PACKAGES[plainName] ?? plainName);
 }
 
 /** frontend/… → frontend, backend/shared/… → shared, backend/services/auth/… → auth. */

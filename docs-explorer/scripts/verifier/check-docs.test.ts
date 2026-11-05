@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
-import type { Flow } from '../../src/data/schema.ts';
+import type { DocsData, Flow } from '../../src/data/schema.ts';
 import type { IndexedSymbol, SourceIndex } from '../../src/data/source-index.ts';
-import { checkDocs, type DocsData, type RepoAccess } from './check-docs.ts';
+import { checkDocs, type RepoAccess } from './check-docs.ts';
 
 const CODE = `export function healthRouter() {
   router.get('/healthz', handler);
@@ -186,6 +186,25 @@ describe('checkDocs', () => {
       "component shared: folder backend/missing doesn't exist",
       "component s3: planned, but plannedIn doesn't name the feature that adds it",
       'link shared → ghost: no component ghost',
+    ]);
+  });
+
+  it('rejects a flow app that has no component on the map', () => {
+    const docs = validDocs();
+    docs.components = docs.components.filter((component) => component.id !== 'shared');
+    docs.links = [];
+
+    expect(problemsOf(docs)).toEqual([
+      'flow health-check: app shared has no component in the architecture',
+    ]);
+  });
+
+  it('rejects a planned note that does not name the feature that wires it in', () => {
+    const docs = validDocs();
+    docs.notes[0]!.status = 'planned';
+
+    expect(problemsOf(docs)).toEqual([
+      "note backend/shared/src/health.ts#healthRouter: planned, but plannedIn doesn't name the feature that adds it",
     ]);
   });
 

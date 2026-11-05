@@ -37,8 +37,8 @@ export const STATUS_INFO: Record<Status, { label: string; description: string }>
 
 /**
  * A pointer to real code: a symbol ID from the generated index, such as
- * `backend/shared/src/health.ts#healthRouter`. The checker (step E5) fails the build if one
- * points at code that doesn't exist.
+ * `backend/shared/src/health.ts#healthRouter`. The checker (scripts/verify-docs.ts) fails the
+ * build if one points at code that doesn't exist.
  */
 export type SymbolRef = `${string}#${string}`;
 
@@ -157,6 +157,8 @@ export interface Flow {
 export interface SymbolNote {
   symbol: SymbolRef;
   status: Status;
+  /** The roadmap feature that wires it in, when it's planned. */
+  plannedIn?: string;
   /** One line: what it does. */
   summary: string;
   /** How it works, one sentence per step. */
@@ -168,4 +170,12 @@ export interface SymbolNote {
   sideEffects?: string[];
   /** Test files that cover it, as paths from the repo root. */
   tests?: string[];
+}
+
+/** Everything hand-written in src/data/, as the explorer and the checker read it. */
+export interface DocsData {
+  components: ArchComponent[];
+  links: ArchLink[];
+  flows: Flow[];
+  notes: SymbolNote[];
 }

@@ -1,19 +1,5 @@
-import type {
-  ArchComponent,
-  ArchLink,
-  Flow,
-  SymbolNote,
-  SymbolRef,
-} from '../../src/data/schema.ts';
+import type { DocsData, Flow, SymbolNote, SymbolRef } from '../../src/data/schema.ts';
 import type { IndexedSymbol, SourceIndex } from '../../src/data/source-index.ts';
-
-/** Everything hand-written in src/data/. */
-export interface DocsData {
-  components: ArchComponent[];
-  links: ArchLink[];
-  flows: Flow[];
-  notes: SymbolNote[];
-}
 
 /** How the checker reads the repo. Tests pass in-memory files instead of the real disk. */
 export interface RepoAccess {
@@ -54,7 +40,8 @@ export function checkDocs(index: SourceIndex, docs: DocsData, repo: RepoAccess):
   };
 
   checkArchitecture(docs, repo, checkRef, problems);
-  checkFlows(index, docs.flows, symbols, repo, checkRef, problems);
+  const componentIds = new Set(docs.components.map((component) => component.id));
+  checkFlows(index, docs.flows, componentIds, symbols, repo, checkRef, problems);
   checkNotes(docs.notes, repo, checkRef, problems);
 
   return { problems, warnings: missingNotes(symbols, docs.notes) };
@@ -103,6 +90,7 @@ function checkArchitecture(
 function checkFlows(
   index: SourceIndex,
   flows: Flow[],
+  componentIds: Set<string>,
   symbols: Map<string, Located>,
   repo: RepoAccess,
   checkRef: (where: string, ref: SymbolRef | undefined) => void,
@@ -130,6 +118,10 @@ function checkFlows(
     for (const app of flow.apps) {
       if (!apps.has(app)) {
         problems.push(`${where}: no app named ${app}`);
+      }
+      // The explorer finds a component's flows by matching these names to component ids.
+      if (!componentIds.has(app)) {
+        problems.push(`${where}: app ${app} has no component in the architecture`);
       }
     }
 
@@ -178,6 +170,9 @@ function checkNotes(
     }
     seen.add(note.symbol);
     checkRef('note', note.symbol);
+    if (note.status === 'planned' && !note.plannedIn) {
+      problems.push(`${where}: planned, but plannedIn doesn't name the feature that adds it`);
+    }
     for (const testFile of note.tests ?? []) {
       if (!repo.exists(testFile)) {
         problems.push(`${where}: test file ${testFile} doesn't exist`);
