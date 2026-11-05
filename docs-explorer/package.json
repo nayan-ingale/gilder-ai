@@ -10,13 +10,17 @@
     "dev": "node scripts/index-source.ts && vite",
     "build": "node scripts/index-source.ts && node scripts/verify-docs.ts && vite build",
     "preview": "vite preview",
-    "typecheck": "tsc -p tsconfig.json && tsc -p tsconfig.node.json",
+    "typecheck": "node scripts/index-source.ts && tsc -p tsconfig.json && tsc -p tsconfig.node.json",
     "lint": "eslint .",
     "test": "vitest run"
   },
   "dependencies": {
+    "@dagrejs/dagre": "3.1.3",
+    "@xyflow/react": "12.12.0",
     "react": "19.3.0",
-    "react-dom": "19.3.0"
+    "react-dom": "19.3.0",
+    "react-router": "8.5.1",
+    "shiki": "4.5.0"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",

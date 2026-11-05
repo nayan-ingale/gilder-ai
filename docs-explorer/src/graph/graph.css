@@ -1,0 +1,152 @@
+/*
+ * React Flow and its overview map, themed with the design tokens from styles.css (styles.css
+ * already loads React Flow's base.css). Also the states every graph box and line can be in:
+ * selected, connected to the selection, dimmed, planned and context. These rules are not in a
+ * Tailwind layer, so they win over the utility classes on the same element.
+ */
+
+.gx-graph .react-flow {
+  --xy-background-color: var(--color-canvas);
+  --xy-background-pattern-color: var(--color-line);
+  --xy-edge-stroke: var(--color-edge-next);
+  --xy-attribution-background-color: transparent;
+  --xy-selection-background-color: var(--color-accent-soft);
+  --xy-selection-border: 1px solid var(--color-accent);
+  --xy-minimap-background-color: var(--color-surface);
+  --xy-minimap-mask-background-color: color-mix(in oklch, var(--color-canvas) 70%, transparent);
+  font-family: var(--font-sans);
+}
+
+/* Hidden until the first view is placed (GraphCanvas), so the graph doesn't visibly jump. */
+.gx-graph:not([data-placed]) .react-flow__viewport {
+  visibility: hidden;
+}
+
+/* Panels along the bottom (zoom buttons, mini-map, credit link) sit above a details sheet
+   that covers the bottom of the graph on narrow screens; GraphCanvas sets the height. */
+.gx-graph .react-flow__panel.bottom {
+  bottom: var(--gx-inset-bottom, 0px);
+}
+
+/* The overview map sits above the credit link, in the bottom-right corner. */
+.gx-graph .react-flow__minimap {
+  margin: 12px 12px 26px;
+  overflow: hidden;
+  border: 1px solid var(--color-line);
+  border-radius: 6px;
+  cursor: grab;
+}
+
+/* The credit link stays, quietly. */
+.gx-graph .react-flow__attribution {
+  margin: 4px 6px;
+  padding: 0;
+}
+
+.gx-graph .react-flow__attribution a {
+  color: var(--color-fg-subtle);
+  transition: color 150ms ease;
+}
+
+.gx-graph .react-flow__attribution a:hover,
+.gx-graph .react-flow__attribution a:focus-visible {
+  color: var(--color-fg-muted);
+}
+
+/* Handles only anchor the lines in React Flow; nobody connects anything here. */
+.gx-graph .react-flow__handle {
+  width: 1px;
+  height: 1px;
+  min-width: 0;
+  min-height: 0;
+  border: 0;
+  opacity: 0;
+  pointer-events: none;
+}
+
+/* ------------------------------------------------------------------------------------------ */
+/* Boxes. The button inside each React Flow node carries these data attributes.               */
+
+.gx-node {
+  /* React Flow turns pointer events off on boxes that can't be selected or dragged in its own
+     terms; ours select through this button instead. */
+  pointer-events: auto;
+  transition:
+    color 150ms ease,
+    border-color 150ms ease,
+    background-color 150ms ease,
+    box-shadow 150ms ease;
+}
+
+.gx-node[data-planned='true'] {
+  border-style: dashed;
+}
+
+.gx-node[data-emphasis='connected'] {
+  border-color: var(--color-line-strong);
+  background-color: var(--color-raised);
+}
+
+.gx-node[data-emphasis='selected'] {
+  border-color: var(--color-accent);
+  background-color: var(--color-raised);
+  box-shadow: 0 0 0 1px var(--color-accent);
+}
+
+/*
+ * Faded boxes: context boxes (they belong to another view and are only here so the lines make
+ * sense) and, while something is selected, the boxes away from it. The frame and fill fade,
+ * but the box isn't made see-through: every text switches to the subtle colour at full
+ * strength, so it still reads at better than 4.5:1 on the canvas while clearly secondary.
+ */
+.gx-node[data-context='true'][data-emphasis='normal'],
+.gx-node[data-emphasis='dimmed'] {
+  border-color: color-mix(in oklch, var(--color-line) 60%, transparent);
+  background-color: var(--color-canvas);
+}
+
+.gx-node[data-context='true'][data-emphasis='normal'] *,
+.gx-node[data-emphasis='dimmed'] * {
+  color: var(--color-fg-subtle);
+}
+
+.gx-node[data-context='true'][data-emphasis='normal']:hover,
+.gx-node[data-emphasis='dimmed']:hover {
+  background-color: var(--color-surface);
+}
+
+/* ------------------------------------------------------------------------------------------ */
+/* Lines. Opacity and colour are set per line; these handle hover and motion.                 */
+
+.gx-edge {
+  transition: opacity 150ms ease;
+}
+
+.gx-edge path {
+  transition:
+    stroke 150ms ease,
+    stroke-width 150ms ease;
+}
+
+/* A wide invisible stroke, so the tooltip shows without pixel-perfect aim. */
+.gx-edge-hit {
+  fill: none;
+  stroke: transparent;
+  stroke-width: 14px;
+  pointer-events: stroke;
+}
+
+.gx-edge-chip {
+  transition:
+    color 150ms ease,
+    border-color 150ms ease;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .gx-node,
+  .gx-edge,
+  .gx-edge path,
+  .gx-edge-chip {
+    transition: none;
+  }
+}
