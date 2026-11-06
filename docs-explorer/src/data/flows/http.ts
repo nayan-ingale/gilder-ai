@@ -194,6 +194,9 @@ const readinessCheck: Flow = {
         { to: 'ping-mongo', kind: 'parallel', label: 'mongo check (auth, chat, agent, billing)' },
         { to: 'ping-redis', kind: 'parallel', label: 'redis check (gateway, auth, agent)' },
       ],
+      // Each check has its own timer and records its own result; they only meet when
+      // Promise.all resolves.
+      join: 'decide',
     },
     {
       id: 'ping-mongo',

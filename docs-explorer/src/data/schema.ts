@@ -135,6 +135,12 @@ export interface FlowStep {
   sideEffects?: string[];
   /** Where the request can go from here. When left out, it goes to the next step in the list. */
   next?: FlowEdge[];
+  /**
+   * For a step whose lines are all `parallel`: the step where every piece of that work is done
+   * and the flow goes on (where the code waits for all of it, such as after Promise.all). The
+   * steps in between run once for each piece.
+   */
+  join?: string;
 }
 
 export interface Flow {

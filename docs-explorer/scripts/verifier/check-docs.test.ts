@@ -130,6 +130,39 @@ function validDocs(): DocsData {
   };
 }
 
+/** start → (first ∥ second) → join, with no code steps, so only the parallel rules apply. */
+function parallelFlow(): Flow {
+  const step = (id: string, next: Flow['steps'][number]['next']): Flow['steps'][number] => ({
+    id,
+    title: id,
+    kind: 'function',
+    status: 'verified',
+    what: '',
+    why: '',
+    next,
+  });
+  return {
+    id: 'fan-out',
+    title: 'Fan out',
+    category: 'lifecycle',
+    apps: ['shared'],
+    summary: '',
+    status: 'verified',
+    steps: [
+      {
+        ...step('start', [
+          { to: 'first', kind: 'parallel' },
+          { to: 'second', kind: 'parallel' },
+        ]),
+        join: 'join',
+      },
+      step('first', [{ to: 'join', kind: 'next' }]),
+      step('second', [{ to: 'join', kind: 'next' }]),
+      step('join', []),
+    ],
+  };
+}
+
 function problemsOf(docs: DocsData): string[] {
   return checkDocs(INDEX, docs, REPO).problems;
 }
@@ -187,6 +220,35 @@ describe('checkDocs', () => {
       "component s3: planned, but plannedIn doesn't name the feature that adds it",
       'link shared → ghost: no component ghost',
     ]);
+  });
+
+  it('accepts parallel work that names a join every piece reaches', () => {
+    const docs = validDocs();
+    docs.flows.push(parallelFlow());
+
+    expect(problemsOf(docs)).toEqual([]);
+  });
+
+  it('rejects parallel work without a join, a stray join, mixed lines and a lost piece', () => {
+    const docs = validDocs();
+    const flow = parallelFlow();
+    const [start, , second, join] = flow.steps;
+    start!.join = undefined;
+    start!.next!.push({ to: 'join', kind: 'next' });
+    second!.next = [];
+    join!.join = 'start';
+    docs.flows.push(flow);
+
+    expect(problemsOf(docs)).toEqual([
+      'flow fan-out, step start: parallel lines must be its only lines, and at least two',
+      "flow fan-out, step start: starts parallel work but doesn't name its join",
+      'flow fan-out, step join: names a join but starts no parallel work',
+    ]);
+
+    start!.join = 'join';
+    expect(problemsOf(docs)).toContain(
+      'flow fan-out, step start: the second piece never reaches its join join',
+    );
   });
 
   it('rejects a flow app that has no component on the map', () => {

@@ -44,6 +44,7 @@ const flow: Flow = {
   id: 'ready',
   title: 'GET /readyz',
   category: 'api',
+  route: { method: 'GET', path: '/readyz' },
   apps: ['gateway'],
   summary: 'Readiness',
   status: 'verified',
@@ -144,6 +145,13 @@ describe('createDocsModel', () => {
     const usages = model.usagesOf('backend/shared/src/health.ts#healthRouter');
     expect(usages.map((u) => [u.flow.id, u.step.id])).toEqual([['ready', 'checks']]);
     expect(model.usagesOf('backend/gateway/src/app.ts#createApp')).toEqual([]);
+  });
+
+  it('finds the documented flow for a route by method and path', () => {
+    expect(model.flowForRoute('GET', '/readyz')?.id).toBe('ready');
+    expect(model.flowForRoute('get', '/readyz')?.id).toBe('ready');
+    expect(model.flowForRoute('POST', '/readyz')).toBeUndefined();
+    expect(model.flowForRoute('GET', '/healthz')).toBeUndefined();
   });
 
   it('finds the flows a component runs or whose steps are its code', () => {

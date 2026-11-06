@@ -1,5 +1,6 @@
 import type { DocsData, Flow, SymbolNote, SymbolRef } from '../../src/data/schema.ts';
 import type { IndexedSymbol, SourceIndex } from '../../src/data/source-index.ts';
+import { createDocsModel, type FlowLine } from '../../src/model/docs-model.ts';
 
 /** How the checker reads the repo. Tests pass in-memory files instead of the real disk. */
 export interface RepoAccess {
@@ -42,6 +43,7 @@ export function checkDocs(index: SourceIndex, docs: DocsData, repo: RepoAccess):
   checkArchitecture(docs, repo, checkRef, problems);
   const componentIds = new Set(docs.components.map((component) => component.id));
   checkFlows(index, docs.flows, componentIds, symbols, repo, checkRef, problems);
+  checkParallelWork(docs.flows, createDocsModel(index, docs).flowLines, problems);
   checkNotes(docs.notes, repo, checkRef, problems);
 
   return { problems, warnings: missingNotes(symbols, docs.notes) };
@@ -154,6 +156,59 @@ function checkFlows(
       }
     }
   }
+}
+
+/**
+ * Parallel work must have a shape the explorer can follow: a step's parallel lines are its only
+ * lines (two or more), and the step names the join that every piece reaches.
+ */
+function checkParallelWork(
+  flows: Flow[],
+  flowLines: (flow: Flow) => FlowLine[],
+  problems: string[],
+): void {
+  for (const flow of flows) {
+    const lines = flowLines(flow);
+    const stepIds = new Set(flow.steps.map((step) => step.id));
+    for (const step of flow.steps) {
+      const where = `flow ${flow.id}, step ${step.id}`;
+      const out = lines.filter((line) => line.from === step.id);
+      const parallel = out.filter((line) => line.kind === 'parallel');
+      if (parallel.length === 0) {
+        if (step.join) problems.push(`${where}: names a join but starts no parallel work`);
+        continue;
+      }
+      if (parallel.length !== out.length || parallel.length < 2) {
+        problems.push(`${where}: parallel lines must be its only lines, and at least two`);
+      }
+      if (!step.join) {
+        problems.push(`${where}: starts parallel work but doesn't name its join`);
+      } else if (!stepIds.has(step.join)) {
+        problems.push(`${where}: join ${step.join} isn't a step of this flow`);
+      } else {
+        for (const piece of parallel) {
+          if (!reaches(lines, piece.to, step.join)) {
+            problems.push(`${where}: the ${piece.to} piece never reaches its join ${step.join}`);
+          }
+        }
+      }
+    }
+  }
+}
+
+function reaches(lines: FlowLine[], from: string, to: string): boolean {
+  const seen = new Set([from]);
+  const queue = [from];
+  for (let current = queue.shift(); current !== undefined; current = queue.shift()) {
+    if (current === to) return true;
+    for (const line of lines) {
+      if (line.from === current && !seen.has(line.to)) {
+        seen.add(line.to);
+        queue.push(line.to);
+      }
+    }
+  }
+  return false;
 }
 
 function checkNotes(

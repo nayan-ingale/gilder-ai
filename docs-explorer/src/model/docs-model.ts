@@ -66,6 +66,8 @@ export interface DocsModel extends DocsData {
   usagesOf(symbolId: string): StepUsage[];
   /** The flows a component takes part in: it runs them, or one of their steps is its code. */
   flowsOf(componentId: string): Flow[];
+  /** The documented flow for an HTTP route the code registers, matched by method and path. */
+  flowForRoute(method: string, path: string): Flow | undefined;
 }
 
 export function createDocsModel(index: SourceIndex, docs: DocsData): DocsModel {
@@ -131,6 +133,10 @@ export function createDocsModel(index: SourceIndex, docs: DocsData): DocsModel {
     stepsBefore: (flow, stepId) => neighbours(flow, stepId, 'to'),
     stepsAfter: (flow, stepId) => neighbours(flow, stepId, 'from'),
     usagesOf,
+    flowForRoute: (method, path) =>
+      docs.flows.find(
+        (flow) => flow.route?.method === method.toUpperCase() && flow.route.path === path,
+      ),
     flowsOf: (componentId) =>
       docs.flows.filter(
         (flow) =>
