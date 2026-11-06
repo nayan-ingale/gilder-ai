@@ -1,9 +1,11 @@
+import { useId } from 'react';
 import { Link, useLocation } from 'react-router';
+import { guides } from '../model/index.ts';
 import { NAV, paths } from '../routes.ts';
 import { preloadSearch } from '../search/lazy-search.ts';
 import { SHORTCUT } from '../search/shortcut.ts';
 import { CloseIcon, SearchIcon } from '../ui/icons.tsx';
-import { sectionOf } from './sections.ts';
+import { docsPageOf, sectionOf } from './sections.ts';
 
 interface SidebarProps {
   /** Called when a link is followed, so the drawer can close. */
@@ -14,14 +16,48 @@ interface SidebarProps {
   onSearch?: () => void;
 }
 
+interface SidebarLinkProps {
+  to: string;
+  label: string;
+  /** "page" when this is exactly the page shown, "true" when the page is inside the section. */
+  current: 'page' | 'true' | undefined;
+  onNavigate?: () => void;
+}
+
+function SidebarLink({ to, label, current, onNavigate }: SidebarLinkProps) {
+  const isActive = current !== undefined;
+  return (
+    <Link
+      to={to}
+      onClick={onNavigate}
+      aria-current={current}
+      className={`relative flex items-center rounded-md px-3 py-1.5 text-sm transition-colors ${
+        isActive
+          ? 'bg-accent-soft font-medium text-fg'
+          : 'text-fg-muted hover:bg-raised hover:text-fg'
+      }`}
+    >
+      {isActive ? (
+        <span
+          aria-hidden="true"
+          className="absolute inset-y-1.5 left-0 w-0.5 rounded-full bg-accent"
+        />
+      ) : null}
+      {label}
+    </Link>
+  );
+}
+
 /**
- * The brand and the list of sections. Used as the fixed sidebar on wide screens and inside the
- * drawer on narrow ones. Plain links, not NavLink: the active item comes from sectionOf, because
- * an error flow lives under /flows/ but belongs to Error Handling.
+ * The brand, the list of sections and, under them, the docs pages. Used as the fixed sidebar on
+ * wide screens and inside the drawer on narrow ones. Plain links, not NavLink: the active item
+ * comes from sectionOf, because an error flow lives under /flows/ but belongs to Error Handling.
  */
 export function Sidebar({ onNavigate, onClose, onSearch }: SidebarProps) {
   const { pathname } = useLocation();
   const active = sectionOf(pathname);
+  const activeDocsPage = active === 'docs' ? docsPageOf(pathname) : undefined;
+  const docsHeadingId = useId();
 
   return (
     <div className="flex h-full flex-col">
@@ -71,32 +107,40 @@ export function Sidebar({ onNavigate, onClose, onSearch }: SidebarProps) {
         <ul className="flex flex-col gap-px">
           {NAV.map((item) => {
             const isActive = item.id === active;
-            // "page" when this is exactly the page shown, "true" when the page is inside the section.
-            const current = isActive ? (pathname === item.to ? 'page' : 'true') : undefined;
             return (
               <li key={item.id}>
-                <Link
+                <SidebarLink
                   to={item.to}
-                  onClick={onNavigate}
-                  aria-current={current}
-                  className={`relative flex items-center rounded-md px-3 py-1.5 text-sm transition-colors ${
-                    isActive
-                      ? 'bg-accent-soft font-medium text-fg'
-                      : 'text-fg-muted hover:bg-raised hover:text-fg'
-                  }`}
-                >
-                  {isActive ? (
-                    <span
-                      aria-hidden="true"
-                      className="absolute inset-y-1.5 left-0 w-0.5 rounded-full bg-accent"
-                    />
-                  ) : null}
-                  {item.label}
-                </Link>
+                  label={item.label}
+                  current={isActive ? (pathname === item.to ? 'page' : 'true') : undefined}
+                  onNavigate={onNavigate}
+                />
               </li>
             );
           })}
         </ul>
+        {guides.docsPages.length > 0 ? (
+          <>
+            <h2
+              id={docsHeadingId}
+              className="mt-4 mb-1 px-3 text-xs font-medium tracking-wide text-fg-subtle uppercase"
+            >
+              Docs
+            </h2>
+            <ul aria-labelledby={docsHeadingId} className="flex flex-col gap-px">
+              {guides.docsPages.map((page) => (
+                <li key={page.id}>
+                  <SidebarLink
+                    to={paths.doc(page.id)}
+                    label={page.title}
+                    current={page.id === activeDocsPage ? 'page' : undefined}
+                    onNavigate={onNavigate}
+                  />
+                </li>
+              ))}
+            </ul>
+          </>
+        ) : null}
       </nav>
     </div>
   );

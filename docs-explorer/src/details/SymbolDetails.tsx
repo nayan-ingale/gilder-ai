@@ -1,9 +1,11 @@
 // The detail view for any function, type or constant, opened from a symbol link. It sits on top
 // of the step or node underneath; the button at the top closes it and names what is underneath.
 // Shows the code comment, the hand-written note, what the code index knows, the flows that run
-// it, and its real source.
+// it, the docs sections about it, and its real source.
 import { useParams } from 'react-router';
 import { SourceCode } from '../code/SourceCode.tsx';
+import type { SymbolRef } from '../data/schema.ts';
+import { DocsBackLinks } from '../guides/DocsBackLinks.tsx';
 import { useSelection } from '../hooks/use-selection.ts';
 import { docs } from '../model/index.ts';
 import { COMPONENT_KIND_LABEL, SYMBOL_KIND_LABEL } from '../model/labels.ts';
@@ -194,6 +196,8 @@ export function SymbolDetails({ symbolId }: SymbolDetailsProps) {
           <FlowUsageList groups={usages} />
         </DetailSection>
       ) : null}
+
+      <DocsBackLinks about={{ symbol: symbol.id as SymbolRef }} />
 
       <DetailSection title="Source">
         <SourceCode filePath={file.path} startLine={symbol.startLine} endLine={symbol.endLine} />

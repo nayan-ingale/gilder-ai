@@ -1,7 +1,7 @@
 import { lazy } from 'react';
 
-// Search (the dialog, the index and MiniSearch) loads the first time it is opened, so the first
-// page load stays the same size. Pointing at or focusing a search button starts the download.
+// Search (the dialog, the index and MiniSearch) is left out of the first page load. It
+// downloads once the page is idle, or sooner when a search button is pointed at or focused.
 
 const load = () => import('./SearchDialog.tsx');
 

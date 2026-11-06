@@ -1,20 +1,27 @@
 // The breadcrumb trail for the top bar, built from the URL alone: the section, then what is
-// open in it (a component, a flow and its step, or a source file), then the open symbol. Names
-// come from the docs, so the trail reads like the page. Pure, so it can be tested without
-// rendering.
+// open in it (a component, a flow and its step, or a source file), then the open symbol. A docs
+// page reads "Docs › <page title>". Names come from the docs, so the trail reads like the page.
+// Pure, so it can be tested without rendering.
 import { fileLabel } from '../code-explorer/code-tree.ts';
 import { splitSymbolId, symbolDisplayName } from '../details/format.ts';
 import { getArchView } from '../model/architecture-views.ts';
 import type { DocsModel } from '../model/docs-model.ts';
-import { docs } from '../model/index.ts';
+import type { GuidesModel } from '../model/guides.ts';
+import { docs, guides } from '../model/index.ts';
 import { NAV, SELECT, paths } from '../routes.ts';
-import { pathParts, sectionOf } from './sections.ts';
+import { docsPageOf, pathParts, sectionOf } from './sections.ts';
 
 export interface Crumb {
   label: string;
-  /** Where the crumb leads. The last crumb is the current page and is not shown as a link. */
-  to: string;
+  /**
+   * Where the crumb leads. The last crumb is the current page and is not shown as a link. A
+   * group with no page of its own (Docs) has none and is shown as text.
+   */
+  to?: string;
 }
+
+/** The sidebar group the docs pages are listed in. */
+const DOCS_CRUMB = 'Docs';
 
 type BreadcrumbModel = Pick<
   DocsModel,
@@ -36,9 +43,19 @@ export function buildBreadcrumbs(
   pathname: string,
   search: string,
   model: BreadcrumbModel = docs,
+  guidesModel: Pick<GuidesModel, 'getPage'> = guides,
 ): Crumb[] {
   const here = `${pathname}${search}`;
-  const section = NAV.find((item) => item.id === sectionOf(pathname, model));
+  const sectionId = sectionOf(pathname, model);
+  if (sectionId === 'docs') {
+    const pageId = docsPageOf(pathname);
+    const page = pageId === undefined ? undefined : guidesModel.getPage(pageId);
+    return [
+      { label: DOCS_CRUMB },
+      page ? { label: page.title, to: paths.doc(page.id) } : { label: NOT_FOUND, to: here },
+    ];
+  }
+  const section = NAV.find((item) => item.id === sectionId);
   if (!section) return [{ label: NOT_FOUND, to: here }];
 
   const params = new URLSearchParams(search);

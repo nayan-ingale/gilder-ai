@@ -22,6 +22,17 @@ describe('paths', () => {
     expect(paths.walkthrough('health-check', [])).toBe('/flows/health-check');
   });
 
+  it('opens a docs page, or one of its sections with ?section=', () => {
+    expect(paths.doc('logging')).toBe('/docs/logging');
+    expect(paths.doc('logging', 'levels')).toBe('/docs/logging?section=levels');
+    expect(paths.doc('a b', 'x/y')).toBe('/docs/a%20b?section=x%2Fy');
+  });
+
+  it('opens Error Handling at one of its docs sections with the same key', () => {
+    expect(paths.errors()).toBe('/errors');
+    expect(paths.errors('shape')).toBe('/errors?section=shape');
+  });
+
   it('gives every sidebar item its own id and address', () => {
     expect(new Set(NAV.map((item) => item.id)).size).toBe(NAV.length);
     expect(new Set(NAV.map((item) => item.to)).size).toBe(NAV.length);

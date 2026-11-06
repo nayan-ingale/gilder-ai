@@ -1,11 +1,18 @@
 // Checks the search entries against the real docs and code index: one entry per thing, every
 // entry opens a real page, and every route in the code leads to the flow written for it.
 import { describe, expect, it } from 'vitest';
-import type { Flow } from '../data/schema.ts';
+import type { DocPage, Flow } from '../data/schema.ts';
 import { sectionOf } from '../layout/sections.ts';
-import { docs } from '../model/index.ts';
+import { createGuidesModel } from '../model/guides.ts';
+import { docs, guides } from '../model/index.ts';
 import { NAV, SELECT, paths } from '../routes.ts';
-import { buildSearchDocuments, routeEntries, type SearchType } from './search-documents.ts';
+import {
+  buildSearchDocuments,
+  docsDocuments,
+  routeEntries,
+  type SearchType,
+} from './search-documents.ts';
+import { createSearchEngine } from './search-engine.ts';
 
 const documents = buildSearchDocuments(docs);
 
@@ -30,6 +37,8 @@ describe('buildSearchDocuments', () => {
     const symbolCount = docs.files.reduce((sum, file) => sum + file.symbols.length, 0);
     const stepCount = docs.flows.reduce((sum, flow) => sum + flow.steps.length, 0);
     expect(ofType('page')).toHaveLength(NAV.length);
+    const sectionCount = guides.pages.reduce((sum, page) => sum + page.sections.length, 0);
+    expect(ofType('doc')).toHaveLength(guides.docsPages.length + sectionCount);
     expect(ofType('flow')).toHaveLength(docs.flows.length);
     expect(ofType('step')).toHaveLength(stepCount);
     expect(ofType('component')).toHaveLength(docs.components.length);
@@ -67,6 +76,21 @@ describe('buildSearchDocuments', () => {
     for (const doc of ofType('file')) {
       const { query } = parse(doc.to);
       expect(docs.getFile(query.get(SELECT.file) ?? ''), doc.id).toBeDefined();
+    }
+    for (const doc of ofType('doc')) {
+      const { pathname, query } = parse(doc.to);
+      const page =
+        pathname === paths.errors()
+          ? guides.pageForSection('errors')
+          : guides.getPage(decodeURIComponent(pathname.replace('/docs/', '')));
+      expect(page, doc.id).toBeDefined();
+      const section = query.get(SELECT.section);
+      if (section !== null) {
+        expect(
+          page?.sections.some((s) => s.id === section),
+          doc.id,
+        ).toBe(true);
+      }
     }
   });
 
@@ -135,5 +159,76 @@ describe('routeEntries', () => {
         file: 'backend/shared/src/health.ts',
       }),
     });
+  });
+});
+
+describe('docsDocuments', () => {
+  const stack: DocPage = {
+    id: 'stack',
+    title: 'Tech stack',
+    summary: 'What the project is built with.',
+    sections: [
+      {
+        id: 'packages',
+        title: 'Packages',
+        status: 'verified',
+        blocks: [{ kind: 'text', text: 'Every package, by `layer`.' }, { kind: 'packages' }],
+      },
+    ],
+  };
+  const errors: DocPage = {
+    id: 'error-handling',
+    title: 'Error handling',
+    summary: 'How errors become responses.',
+    section: 'errors',
+    sections: [
+      {
+        id: 'shape',
+        title: 'The response shape',
+        status: 'verified',
+        blocks: [{ kind: 'list', items: ['A `problem+json` body'] }],
+      },
+    ],
+  };
+  const model = createGuidesModel(
+    {
+      pages: [stack, errors],
+      packageNotes: [{ name: 'pino', layer: 'backend', why: 'Writes JSON logs.' }],
+      plannedTools: [
+        {
+          name: 'Stripe',
+          package: 'stripe',
+          layer: 'payments',
+          why: 'Takes payments.',
+          plannedIn: 'Billing',
+        },
+      ],
+    },
+    { packages: [{ name: 'pino', usedBy: [{ app: 'shared', version: '^10.4.0', dev: false }] }] },
+  );
+  const entries = docsDocuments(model);
+
+  it('has one entry per page under Docs and one per section of every page', () => {
+    expect(entries.map((entry) => [entry.id, entry.to])).toEqual([
+      ['doc:stack', paths.doc('stack')],
+      ['doc:stack/packages', paths.doc('stack', 'packages')],
+      ['doc:error-handling/shape', paths.errors('shape')],
+    ]);
+  });
+
+  it('names a section by its page and searches its words', () => {
+    const shape = entries.find((entry) => entry.id === 'doc:error-handling/shape');
+    expect(shape).toMatchObject({ title: 'The response shape', subtitle: 'Error handling' });
+    expect(shape?.text).toBe('A problem+json body');
+  });
+
+  it('finds the packages section by a package, why it is used, or a planned tool', () => {
+    const engine = createSearchEngine(entries);
+    const found = (query: string) =>
+      engine.search(query).groups.flatMap((group) => group.hits.map((hit) => hit.doc.id));
+    expect(found('pino')).toContain('doc:stack/packages');
+    expect(found('JSON logs')).toContain('doc:stack/packages');
+    expect(found('stripe')).toContain('doc:stack/packages');
+    expect(found('response shape')).toEqual(['doc:error-handling/shape']);
   });
 });

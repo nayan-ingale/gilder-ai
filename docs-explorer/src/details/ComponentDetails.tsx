@@ -1,7 +1,9 @@
 // The detail view for one part of the system (an architecture node): what it is, where its
-// code starts, what it connects to, the files in its folder and the flows it takes part in.
+// code starts, what it connects to, the files in its folder, the flows it takes part in and the
+// docs sections about it.
 // A connection to a part the open view doesn't show links to System Architecture instead.
 import { Link } from 'react-router';
+import { DocsBackLinks } from '../guides/DocsBackLinks.tsx';
 import type { ComponentConnection } from '../model/docs-model.ts';
 import { docs } from '../model/index.ts';
 import { COMPONENT_KIND_LABEL, FLOW_CATEGORY_LABEL, LINK_KIND_LABEL } from '../model/labels.ts';
@@ -151,6 +153,8 @@ export function ComponentDetails({ componentId }: ComponentDetailsProps) {
           </ul>
         </DetailSection>
       ) : null}
+
+      <DocsBackLinks about={{ component: component.id }} />
     </article>
   );
 }

@@ -8,5 +8,6 @@ import { notes } from './notes.ts';
 import type { Flow } from './schema.ts';
 
 export { components, links, notes };
+export { packageNotes, pages, plannedTools } from './pages/index.ts';
 
 export const flows: Flow[] = [...httpFlows, ...errorFlows, ...lifecycleFlows];

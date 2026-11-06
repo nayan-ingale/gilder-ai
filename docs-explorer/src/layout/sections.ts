@@ -1,6 +1,7 @@
 // Which sidebar section a page belongs to. Kept apart from the sidebar so the rule can be
 // tested: a flow page sits under "Error Handling" when the flow is about errors, and under
-// "API Explorer" otherwise, so its address alone doesn't say which.
+// "API Explorer" otherwise, so its address alone doesn't say which. A docs page sits in the
+// Docs group, under its own entry (docsPageOf).
 import { getArchView } from '../model/architecture-views.ts';
 import type { DocsModel } from '../model/docs-model.ts';
 import { docs } from '../model/index.ts';
@@ -36,6 +37,9 @@ export function sectionOf(
     case 'flows':
       if (second === undefined) return 'api';
       return model.getFlow(second)?.category === 'errors' ? 'errors' : 'api';
+    case 'docs':
+      // Like a flow, an unknown page still belongs to its section; the page says it's not found.
+      return second === undefined ? undefined : 'docs';
     case 'code':
     case 'errors':
     case 'agents':
@@ -44,4 +48,10 @@ export function sectionOf(
     default:
       return undefined;
   }
+}
+
+/** The page id in a docs page's path (`/docs/logging` → `logging`); undefined anywhere else. */
+export function docsPageOf(pathname: string): string | undefined {
+  const [first, second, ...rest] = pathParts(pathname);
+  return first === 'docs' && rest.length === 0 ? second : undefined;
 }

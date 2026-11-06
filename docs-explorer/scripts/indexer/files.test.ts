@@ -2,7 +2,13 @@ import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'nod
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
-import { collectSourceFiles, findSecret, isBlockedPath, isSourcePath } from './files.ts';
+import {
+  collectSourceFiles,
+  expandFolders,
+  findSecret,
+  isBlockedPath,
+  isSourcePath,
+} from './files.ts';
 
 // Fake secrets are built from parts, so secret scanners don't flag this test file.
 const FAKE_AWS_KEY = ['AKIA', 'ABCDEFGHIJKLMNOP'].join('');
@@ -74,6 +80,30 @@ describe('findSecret', () => {
 
   it('ignores ordinary code that only mentions secrets', () => {
     expect(findSecret("const REDACTED = ['password', 'apiKey', 'secret'];")).toBeUndefined();
+  });
+});
+
+describe('expandFolders', () => {
+  it('matches one folder name per *, in name order, and keeps only folders that exist', () => {
+    const root = makeRepo({
+      'backend/services/chat/src/app.ts': '',
+      'backend/services/auth/src/app.ts': '',
+      'backend/services/notes/README.md': '',
+      'backend/services/readme.txt': '',
+      'frontend/package.json': '{}',
+    });
+
+    expect(expandFolders(root, 'backend/services/*')).toEqual([
+      'backend/services/auth',
+      'backend/services/chat',
+      'backend/services/notes',
+    ]);
+    expect(expandFolders(root, 'backend/services/*/src')).toEqual([
+      'backend/services/auth/src',
+      'backend/services/chat/src',
+    ]);
+    expect(expandFolders(root, 'frontend')).toEqual(['frontend']);
+    expect(expandFolders(root, 'backend/missing/*')).toEqual([]);
   });
 });
 

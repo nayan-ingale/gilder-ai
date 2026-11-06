@@ -3,6 +3,7 @@ import { useNavigate, useParams } from 'react-router';
 import { StepDetails } from '../details/StepDetails.tsx';
 import { SymbolDetails } from '../details/SymbolDetails.tsx';
 import { FlowGraph } from '../graph/FlowGraph.tsx';
+import { DocsBackLinks } from '../guides/DocsBackLinks.tsx';
 import { useSelection } from '../hooks/use-selection.ts';
 import { symbolName } from '../layout/breadcrumbs.ts';
 import { Workspace } from '../layout/Workspace.tsx';
@@ -15,8 +16,8 @@ import { parseTrail, startTrail, walkPosition } from '../walkthrough/walk.ts';
 import { WalkthroughPanel, type WalkControl } from '../walkthrough/WalkthroughPanel.tsx';
 import { NotFoundPage } from './NotFoundPage.tsx';
 
-// One flow (/flows/:flowId): its steps as a graph, and the details of the selected step, or of
-// a symbol opened from it. With ?walk in the URL it is a walkthrough instead: the panel follows
+// One flow (/flows/:flowId): its steps as a graph, the docs sections about it under its summary,
+// and the details of the selected step, or of a symbol opened from it. With ?walk in the URL it is a walkthrough instead: the panel follows
 // the flow one step at a time and the graph marks the path walked so far.
 
 export function FlowPage() {
@@ -186,6 +187,8 @@ export function FlowPage() {
         title={flow.title}
         summary={flow.summary}
         meta={meta}
+        // Keyed by the flow, so the list starts folded on each flow.
+        related={<DocsBackLinks key={flow.id} about={{ flow: flow.id }} layout="header" />}
         panel={panel}
         panelLabel={panelLabel}
         panelKey={panelKey}

@@ -1,6 +1,6 @@
 import { useMemo } from 'react';
 import { Link, useLocation } from 'react-router';
-import { buildBreadcrumbs } from './breadcrumbs.ts';
+import { buildBreadcrumbs, type Crumb } from './breadcrumbs.ts';
 
 const SEPARATOR = (
   <span aria-hidden="true" className="text-fg-subtle">
@@ -19,7 +19,10 @@ export function Breadcrumbs() {
   const { pathname, search } = useLocation();
   const crumbs = useMemo(() => buildBreadcrumbs(pathname, search), [pathname, search]);
   const firstShownWhenNarrow = Math.max(crumbs.length - 2, 0);
-  const foldedParent = crumbs[firstShownWhenNarrow - 1];
+  // The nearest folded crumb that leads somewhere.
+  const foldedParent = crumbs
+    .slice(0, firstShownWhenNarrow)
+    .findLast((crumb): crumb is Crumb & { to: string } => crumb.to !== undefined);
 
   return (
     <nav aria-label="Breadcrumb" className="min-w-0 flex-1">
@@ -41,7 +44,7 @@ export function Breadcrumbs() {
           const hiddenWhenNarrow = position < firstShownWhenNarrow;
           return (
             <li
-              key={`${crumb.to}|${crumb.label}`}
+              key={`${crumb.to ?? ''}|${crumb.label}`}
               className={`min-w-0 items-center gap-1.5 ${hiddenWhenNarrow ? 'hidden sm:flex' : 'flex'} ${isLast ? '' : 'max-w-48 shrink-0 sm:shrink'}`}
             >
               {/* The first visible crumb follows the "…" crumb, so it always has a separator. */}
@@ -50,6 +53,8 @@ export function Breadcrumbs() {
                 <span aria-current="page" className="truncate font-medium text-fg">
                   {crumb.label}
                 </span>
+              ) : crumb.to === undefined ? (
+                <span className="truncate text-fg-subtle">{crumb.label}</span>
               ) : (
                 <Link to={crumb.to} className={LINK}>
                   {crumb.label}

@@ -5,11 +5,12 @@ import MiniSearch, { type SearchResult } from 'minisearch';
 import type { SearchDocument, SearchType } from './search-documents.ts';
 
 export type GroupId =
-  'jump' | 'best' | 'pages' | 'flows' | 'steps' | 'components' | 'symbols' | 'files';
+  'jump' | 'best' | 'pages' | 'docs' | 'flows' | 'steps' | 'components' | 'symbols' | 'files';
 
 /** The groups results are listed in, in order. */
 export const GROUP_ORDER: readonly GroupId[] = [
   'pages',
+  'docs',
   'flows',
   'steps',
   'components',
@@ -21,6 +22,7 @@ export const GROUP_LABEL: Record<GroupId, string> = {
   jump: 'Jump to',
   best: 'Best match',
   pages: 'Pages',
+  docs: 'Docs',
   flows: 'Flows & routes',
   steps: 'Steps',
   components: 'Components',
@@ -30,6 +32,7 @@ export const GROUP_LABEL: Record<GroupId, string> = {
 
 const GROUP_OF: Record<SearchType, GroupId> = {
   page: 'pages',
+  doc: 'docs',
   flow: 'flows',
   route: 'flows',
   step: 'steps',
@@ -44,6 +47,9 @@ const GROUP_OF: Record<SearchType, GroupId> = {
  */
 const TYPE_BOOST: Record<SearchType, number> = {
   page: 1.15,
+  // Sections hold whole paragraphs, so they match many words; a part or flow with the same
+  // name still comes first.
+  doc: 1,
   flow: 1.15,
   route: 1.15,
   component: 1.15,

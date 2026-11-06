@@ -6,6 +6,8 @@ import type { SearchType } from './search-documents.ts';
 const PATHS: Record<SearchType, string> = {
   // A window with a title bar.
   page: 'M2.5 3.5h11v9h-11zM2.5 6h11',
+  // An open book.
+  doc: 'M8 4.5C6.75 3.5 4.75 3 2.5 3v9.5c2.25 0 4.25.5 5.5 1.5 1.25-1 3.25-1.5 5.5-1.5V3c-2.25 0-4.25.5-5.5 1.5zM8 4.5V14',
   // Two steps joined by a line.
   flow: 'M2.5 2.5h4v4h-4zM9.5 9.5h4v4h-4zM4.5 6.5v5h5',
   // An arrow: a request going in.

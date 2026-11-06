@@ -63,7 +63,7 @@ export function findSecret(content: string): string | undefined {
  */
 export function collectSourceFiles(repoRoot: string, roots = SOURCE_ROOTS): RepoFile[] {
   const files: RepoFile[] = [];
-  for (const root of expandRoots(repoRoot, roots)) {
+  for (const root of roots.flatMap((pattern) => expandFolders(repoRoot, pattern))) {
     const entries = readdirSync(path.join(repoRoot, root), { recursive: true, encoding: 'utf8' });
     for (const entry of entries) {
       const relativePath = `${root}/${entry.split(path.sep).join('/')}`;
@@ -87,20 +87,33 @@ export function collectSourceFiles(repoRoot: string, roots = SOURCE_ROOTS): Repo
   return files.sort((a, b) => a.path.localeCompare(b.path));
 }
 
-/** Expands a root with `*` into one root per matching folder that exists (one per service). */
-function expandRoots(repoRoot: string, roots: readonly string[]): string[] {
-  return roots.flatMap((root) => {
-    const [parent, rest] = root.split('/*/');
-    if (parent === undefined || rest === undefined) {
-      return existsSync(path.join(repoRoot, root)) ? [root] : [];
-    }
-    if (!existsSync(path.join(repoRoot, parent))) {
-      return [];
-    }
-    return readdirSync(path.join(repoRoot, parent), { withFileTypes: true })
-      .filter((entry) => entry.isDirectory())
-      .map((entry) => `${parent}/${entry.name}/${rest}`)
-      .filter((expanded) => existsSync(path.join(repoRoot, expanded)))
-      .sort();
-  });
+/**
+ * The folders a pattern names that exist. A `*` segment matches any one folder name, so
+ * `backend/services/*` gives one folder per service. Matches come in name order, so the output
+ * is the same on every machine.
+ */
+export function expandFolders(repoRoot: string, pattern: string): string[] {
+  let folders = [''];
+  for (const segment of pattern.split('/')) {
+    folders = folders.flatMap((folder) =>
+      segment === '*' ? subfolders(repoRoot, folder) : [joinSegment(folder, segment)],
+    );
+  }
+  return folders.filter((folder) => existsSync(path.join(repoRoot, folder)));
+}
+
+function subfolders(repoRoot: string, folder: string): string[] {
+  const absolutePath = path.join(repoRoot, folder);
+  if (!existsSync(absolutePath)) {
+    return [];
+  }
+  return readdirSync(absolutePath, { withFileTypes: true })
+    .filter((entry) => entry.isDirectory())
+    .map((entry) => entry.name)
+    .sort()
+    .map((name) => joinSegment(folder, name));
+}
+
+function joinSegment(folder: string, segment: string): string {
+  return folder === '' ? segment : `${folder}/${segment}`;
 }

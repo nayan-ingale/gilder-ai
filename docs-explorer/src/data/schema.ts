@@ -23,7 +23,7 @@ export const STATUS_INFO: Record<Status, { label: string; description: string }>
   },
   'not-wired': {
     label: 'Not wired yet',
-    description: 'Built and tested, but no route or flow uses it yet.',
+    description: 'Exists and works on its own, but no route or flow uses it yet.',
   },
   planned: {
     label: 'Planned',
@@ -184,4 +184,94 @@ export interface DocsData {
   links: ArchLink[];
   flows: Flow[];
   notes: SymbolNote[];
+}
+
+// ---------------------------------------------------------------------------------------------
+// Docs pages: short written guides, such as the tech stack, the architecture decisions and how
+// logging works. Each section names what it is about in the explorer, and quotes are checked
+// against their files, so the build fails when a page stops matching the repo.
+
+/** Something a docs section is about. Each one links to where the explorer shows it. */
+export type DocRef =
+  | { component: string }
+  | { flow: string }
+  | { symbol: SymbolRef }
+  /** A file by its path from the repo root. Indexed source files open in the code explorer. */
+  | { file: string };
+
+export type DocBlock =
+  /** A paragraph. `Backticks` show code names in the code font, as in the rest of the docs. */
+  | { kind: 'text'; text: string }
+  | { kind: 'list'; items: string[] }
+  /** Labelled lines, such as a decision's "Why" and "Trade-off". */
+  | { kind: 'fields'; fields: { label: string; text: string }[] }
+  | { kind: 'table'; columns: string[]; rows: string[][] }
+  /**
+   * Exact text from a file in the repo (code or config), shown as code. The checker fails the
+   * build when the text is no longer in the file, so a quote can't go stale.
+   */
+  | { kind: 'quote'; file: string; text: string; caption?: string }
+  /** The tech stack's package table, built from every app's package.json. */
+  | { kind: 'packages' };
+
+export interface DocSection {
+  /** Unique within its page; links to the section use it. */
+  id: string;
+  title: string;
+  status: Status;
+  /** The roadmap feature that adds it, when it is planned. */
+  plannedIn?: string;
+  blocks: DocBlock[];
+  /** The parts, flows, functions and files this section is about, shown as "In the map". */
+  refs?: DocRef[];
+}
+
+export interface DocPage {
+  /** Used in its URL. */
+  id: string;
+  title: string;
+  /** One line, shown under the title and in search. */
+  summary: string;
+  /**
+   * For a page shown at the top of a sidebar section instead of on its own under Docs: the
+   * error-handling page opens the Error Handling section, above its flows.
+   */
+  section?: 'errors';
+  sections: DocSection[];
+}
+
+/**
+ * The Error Handling section lists its flows under this id, after the error-handling page's own
+ * sections, so that page can't use it for a section of its own (the checker makes sure).
+ */
+export const ERROR_FLOWS_SECTION_ID = 'error-flows';
+
+/** Where a package or tool sits in the stack. The tech stack page groups by it. */
+export type StackLayer =
+  'frontend' | 'backend' | 'data' | 'ai' | 'payments' | 'quality' | 'tooling';
+
+/** Why the project uses an npm package. Its versions come from the package.json files. */
+export interface PackageNote {
+  /** The package name as written in package.json, e.g. `pino`. */
+  name: string;
+  layer: StackLayer;
+  /** One line: what it does in this project. */
+  why: string;
+}
+
+/** A tool or service the roadmap adds that the code doesn't use yet. */
+export interface PlannedTool {
+  name: string;
+  /** Its npm package, when it is one. The checker flags it once a package.json lists it. */
+  package?: string;
+  layer: StackLayer;
+  why: string;
+  plannedIn: string;
+}
+
+/** Everything hand-written for the docs pages, as the explorer and the checker read it. */
+export interface GuidesData {
+  pages: DocPage[];
+  packageNotes: PackageNote[];
+  plannedTools: PlannedTool[];
 }

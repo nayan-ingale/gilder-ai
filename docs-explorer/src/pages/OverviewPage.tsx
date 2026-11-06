@@ -1,8 +1,9 @@
 import { Link } from 'react-router';
 import { STATUS_INFO, type Status } from '../data/schema.ts';
+import { RichText } from '../details/RichText.tsx';
 import { architectureView, getArchView, type ArchViewId } from '../model/architecture-views.ts';
-import { docs } from '../model/index.ts';
-import { NAV, type NavItem, type SectionId } from '../routes.ts';
+import { docs, guides } from '../model/index.ts';
+import { NAV, paths, type NavItem, type SectionId } from '../routes.ts';
 import { plural } from '../ui/plural.ts';
 import { StatusBadge } from '../ui/StatusBadge.tsx';
 
@@ -33,8 +34,9 @@ const VIEW_SUMMARY: Record<ArchViewId, string> = {
   data: 'The data stores, and the apps that connect or will connect to them.',
 };
 
-// Every other section needs a line here; a new one without it fails the type check.
-type OtherSection = Exclude<SectionId, ArchViewId | 'overview'>;
+// Every other section needs a line here; a new one without it fails the type check. The docs
+// pages are listed on their own, each with its summary.
+type OtherSection = Exclude<SectionId, ArchViewId | 'overview' | 'docs'>;
 
 const SECTION_SUMMARY: Record<OtherSection, string> = {
   api: 'Requests and app lifecycle events, followed step by step through the code.',
@@ -131,6 +133,31 @@ export function OverviewPage() {
           ))}
         </dl>
       </section>
+
+      {guides.docsPages.length > 0 ? (
+        <section aria-labelledby="overview-docs" className="mt-8">
+          <SectionHeading id="overview-docs">Docs</SectionHeading>
+          <p className="mt-2 text-sm text-fg-subtle">
+            Short written guides to the project. Their quotes and links are checked against the
+            repo, like the rest of the map.
+          </p>
+          <ul className="mt-3 divide-y divide-line rounded-md border border-line">
+            {guides.docsPages.map((page) => (
+              <li key={page.id}>
+                <Link
+                  to={paths.doc(page.id)}
+                  className="flex flex-col gap-0.5 px-4 py-2.5 transition-colors hover:bg-surface sm:flex-row sm:items-baseline sm:gap-4"
+                >
+                  <span className="shrink-0 text-sm font-medium text-fg sm:w-52">{page.title}</span>
+                  <span className="min-w-0 text-sm text-fg-subtle">
+                    <RichText text={page.summary} />
+                  </span>
+                </Link>
+              </li>
+            ))}
+          </ul>
+        </section>
+      ) : null}
 
       <section aria-labelledby="overview-sections" className="mt-8">
         <SectionHeading id="overview-sections">Sections</SectionHeading>

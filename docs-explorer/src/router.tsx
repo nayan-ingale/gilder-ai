@@ -1,6 +1,7 @@
 import { createHashRouter } from 'react-router';
 import { AppShell } from './layout/AppShell.tsx';
 import { FlowListPage } from './pages/FlowListPage.tsx';
+import { GuidePage } from './pages/GuidePage.tsx';
 import { ArchitecturePage, CodePage, FlowPage } from './pages/lazy-pages.ts';
 import { NotFoundPage, RouteErrorPage } from './pages/NotFoundPage.tsx';
 import { OverviewPage } from './pages/OverviewPage.tsx';
@@ -25,6 +26,7 @@ export const router = createHashRouter([
           { path: 'flows/:flowId', element: <FlowPage /> },
           { path: 'code', element: <CodePage /> },
           { path: 'errors', element: <FlowListPage category="errors" /> },
+          { path: 'docs/:pageId', element: <GuidePage /> },
           { path: 'agents', element: <PlaceholderPage kind="agents" /> },
           { path: 'jobs', element: <PlaceholderPage kind="jobs" /> },
           { path: '*', element: <NotFoundPage /> },

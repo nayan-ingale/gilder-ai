@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import type { ArchComponent, DocsData, Flow } from '../data/schema.ts';
+import type { ArchComponent, DocPage, DocsData, Flow } from '../data/schema.ts';
 import type { IndexedSymbol, SourceIndex, SymbolKind } from '../data/source-index.ts';
 import { createDocsModel } from '../model/docs-model.ts';
 import { buildBreadcrumbs } from './breadcrumbs.ts';
@@ -87,6 +87,9 @@ const failure: Flow = {
 const data: DocsData = { components: [gateway], links: [], flows: [ready, failure], notes: [] };
 const model = createDocsModel(index, data);
 
+const logging: DocPage = { id: 'logging', title: 'Logging', summary: '', sections: [] };
+const guidesModel = { getPage: (id: string) => (id === logging.id ? logging : undefined) };
+
 function query(values: Record<string, string>): string {
   return `?${new URLSearchParams(values).toString()}`;
 }
@@ -99,6 +102,10 @@ describe('buildBreadcrumbs', () => {
     ]);
     expect(buildBreadcrumbs('/jobs', '', model)).toEqual([
       { label: 'Background Jobs', to: '/jobs' },
+    ]);
+    // The section of the error-handling docs to scroll to is not a level of its own.
+    expect(buildBreadcrumbs('/errors', '?section=shape', model)).toEqual([
+      { label: 'Error Handling', to: '/errors' },
     ]);
   });
 
@@ -198,6 +205,28 @@ describe('buildBreadcrumbs', () => {
         (crumb) => crumb.label,
       ),
     ).toEqual(['Code Explorer', 'ghost']);
+  });
+
+  it('shows a docs page under Docs, which is a group and not a link', () => {
+    expect(buildBreadcrumbs('/docs/logging', '', model, guidesModel)).toEqual([
+      { label: 'Docs' },
+      { label: 'Logging', to: '/docs/logging' },
+    ]);
+    // A section to scroll to is not a level of its own.
+    expect(buildBreadcrumbs('/docs/logging', '?section=levels', model, guidesModel)).toEqual([
+      { label: 'Docs' },
+      { label: 'Logging', to: '/docs/logging' },
+    ]);
+  });
+
+  it('marks an unknown docs page as not found', () => {
+    expect(buildBreadcrumbs('/docs/nope', '?section=x', model, guidesModel)).toEqual([
+      { label: 'Docs' },
+      { label: 'Page not found', to: '/docs/nope?section=x' },
+    ]);
+    expect(buildBreadcrumbs('/docs', '', model, guidesModel)).toEqual([
+      { label: 'Page not found', to: '/docs' },
+    ]);
   });
 
   it('ignores a selection on pages that have nothing to select', () => {

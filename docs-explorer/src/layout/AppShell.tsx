@@ -7,6 +7,7 @@ import { SHORTCUT } from '../search/shortcut.ts';
 import { useSearchShortcut } from '../search/use-search-shortcut.ts';
 import { MenuIcon, SearchIcon } from '../ui/icons.tsx';
 import { Breadcrumbs } from './Breadcrumbs.tsx';
+import { MAIN_ID } from './main-area.ts';
 import { Sidebar } from './Sidebar.tsx';
 
 // Matches Tailwind's `md` breakpoint: from here up the sidebar is always shown.
@@ -50,6 +51,17 @@ export function AppShell() {
     open: openSearch,
     toggle: () => (search === 'open' ? setSearch('closed') : openSearch()),
   });
+
+  // Search downloads once the page is idle, so a shortcut pressed right after the page opens
+  // finds it ready instead of losing the first keystrokes while it loads.
+  useEffect(() => {
+    if (typeof requestIdleCallback === 'function') {
+      const id = requestIdleCallback(preloadSearch, { timeout: 3000 });
+      return () => cancelIdleCallback(id);
+    }
+    const timer = setTimeout(preloadSearch, 2000);
+    return () => clearTimeout(timer);
+  }, []);
 
   useEffect(() => {
     const drawer = drawerRef.current;
@@ -163,7 +175,7 @@ export function AppShell() {
         </header>
         <main
           ref={mainRef}
-          id="main"
+          id={MAIN_ID}
           tabIndex={-1}
           className="relative flex min-h-0 flex-1 flex-col overflow-x-hidden overflow-y-auto focus-visible:outline-none"
         >

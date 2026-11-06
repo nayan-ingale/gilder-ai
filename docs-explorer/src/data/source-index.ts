@@ -66,6 +66,26 @@ export interface SourceIndex {
   files: IndexedFile[];
 }
 
+/** One app's use of an npm package, as its package.json lists it. */
+export interface PackageUse {
+  /** The app, named as for files (frontend, gateway, auth...); `root` is the repo's own tooling. */
+  app: string;
+  /** The version range as written, e.g. `^5.3.0`. */
+  version: string;
+  /** Listed under devDependencies: used to build or test, not at run time. */
+  dev: boolean;
+}
+
+export interface IndexedPackage {
+  name: string;
+  usedBy: PackageUse[];
+}
+
+/** Every npm package the apps list, in generated/packages.json. The project's own packages are left out. */
+export interface PackageIndex {
+  packages: IndexedPackage[];
+}
+
 /** One file's code, stored separately so the explorer loads it only when it's opened. */
 export interface SourceFileContent {
   path: string;

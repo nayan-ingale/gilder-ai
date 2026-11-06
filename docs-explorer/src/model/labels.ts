@@ -1,4 +1,11 @@
-import type { ComponentKind, EdgeKind, FlowCategory, LinkKind, StepKind } from '../data/schema.ts';
+import type {
+  ComponentKind,
+  EdgeKind,
+  FlowCategory,
+  LinkKind,
+  StackLayer,
+  StepKind,
+} from '../data/schema.ts';
 import type { SymbolKind } from '../data/source-index.ts';
 
 // The words the UI uses for each kind of thing, so the graph, its legend and the detail panel
@@ -52,4 +59,14 @@ export const SYMBOL_KIND_LABEL: Record<SymbolKind, string> = {
   type: 'Type',
   const: 'Constant',
   module: 'Top-level code',
+};
+
+export const STACK_LAYER_LABEL: Record<StackLayer, string> = {
+  frontend: 'Frontend',
+  backend: 'Backend',
+  data: 'Data',
+  ai: 'AI',
+  payments: 'Payments',
+  quality: 'Code quality and tests',
+  tooling: 'Tooling',
 };

@@ -1,8 +1,11 @@
-// What global search can find: one entry per page, flow, flow step, architecture component,
-// function or type, and source file, each with the page it opens. Pure and built from the docs
-// model, so the tests can check every entry against the real data.
+// What global search can find: one entry per page, docs page and docs section, flow, flow step,
+// architecture component, function or type, and source file, each with the page it opens. Pure
+// and built from the docs models, so the tests can check every entry against the real data.
 import { fileName, symbolDisplayName } from '../details/format.ts';
+import { blockWords, pagePath, plainText } from '../guides/guide-links.ts';
 import type { DocsModel } from '../model/docs-model.ts';
+import type { GuidesModel } from '../model/guides.ts';
+import { guides } from '../model/index.ts';
 import {
   COMPONENT_KIND_LABEL,
   FLOW_CATEGORY_LABEL,
@@ -11,7 +14,8 @@ import {
 } from '../model/labels.ts';
 import { NAV, paths, type NavItem } from '../routes.ts';
 
-export type SearchType = 'page' | 'flow' | 'route' | 'step' | 'component' | 'symbol' | 'file';
+export type SearchType =
+  'page' | 'doc' | 'flow' | 'route' | 'step' | 'component' | 'symbol' | 'file';
 
 export interface SearchDocument {
   /** Unique across all entries, e.g. `flow:health-check` or `symbol:<symbol id>`. */
@@ -47,6 +51,11 @@ export type SearchModel = Pick<
   'components' | 'flows' | 'files' | 'getNote' | 'flowForRoute'
 >;
 
+export type SearchGuidesModel = Pick<
+  GuidesModel,
+  'pages' | 'docsPages' | 'packages' | 'getPackageNote' | 'plannedTools'
+>;
+
 const routeKey = (method: string, path: string): string => `${method.toUpperCase()} ${path}`;
 
 /** Every route the code registers, matched to the flow documented for it. */
@@ -74,6 +83,49 @@ function folderOf(filePath: string): string {
 const words = (...parts: (string | undefined)[]): string =>
   parts.filter((part) => part !== undefined && part !== '').join(' ');
 
+/** What the package table lists, as words: every package, why it is used, and the planned tools. */
+function packageWords(model: SearchGuidesModel): string[] {
+  return [
+    ...model.packages.flatMap((entry) => [entry.name, model.getPackageNote(entry.name)?.why]),
+    ...model.plannedTools.flatMap((tool) => [tool.name, tool.package, tool.why]),
+  ].flatMap((text) => (text === undefined ? [] : [plainText(text)]));
+}
+
+/**
+ * One entry per docs page listed under Docs, and one per section of every page. The
+ * error-handling page is found as Error Handling, so only its sections get entries, opening
+ * there.
+ */
+export function docsDocuments(model: SearchGuidesModel): SearchDocument[] {
+  const pageEntries = model.docsPages.map((page): SearchDocument => ({
+    id: `doc:${page.id}`,
+    type: 'doc',
+    title: page.title,
+    subtitle: '',
+    label: 'Docs page',
+    text: words(plainText(page.summary), ...page.sections.map((section) => section.title)),
+    to: pagePath(page),
+  }));
+
+  const sectionEntries = model.pages.flatMap((page) =>
+    page.sections.map((section): SearchDocument => ({
+      id: `doc:${page.id}/${section.id}`,
+      type: 'doc',
+      title: section.title,
+      subtitle: page.title,
+      label: 'Docs section',
+      text: words(
+        ...section.blocks.flatMap((block) =>
+          block.kind === 'packages' ? packageWords(model) : blockWords(block),
+        ),
+      ),
+      to: pagePath(page, section.id),
+    })),
+  );
+
+  return [...pageEntries, ...sectionEntries];
+}
+
 /**
  * Every searchable entry. A route that has a documented flow is found through that flow (its
  * title is the route), so the same route is never listed twice; a route with no flow gets its
@@ -82,6 +134,7 @@ const words = (...parts: (string | undefined)[]): string =>
 export function buildSearchDocuments(
   model: SearchModel,
   nav: readonly NavItem[] = NAV,
+  guidesModel: SearchGuidesModel = guides,
 ): SearchDocument[] {
   const routes = routeEntries(model);
 
@@ -171,5 +224,14 @@ export function buildSearchDocuments(
     path: file.path,
   }));
 
-  return [...pages, ...flows, ...undocumentedRoutes, ...steps, ...components, ...symbols, ...files];
+  return [
+    ...pages,
+    ...docsDocuments(guidesModel),
+    ...flows,
+    ...undocumentedRoutes,
+    ...steps,
+    ...components,
+    ...symbols,
+    ...files,
+  ];
 }

@@ -6,7 +6,10 @@ import type { ArchViewId } from './model/architecture-views.ts';
  * a link opens the same node, the Back button undoes a click, and breadcrumbs come from the URL.
  */
 
-/** Query keys for what is selected. Any of them opens the detail panel. */
+/**
+ * Query keys for what is selected. Any of them but `section` opens the detail panel; `section`
+ * scrolls a docs section into view (hash URLs leave no room for `#section` anchors).
+ */
 export const SELECT = {
   /** An architecture component, e.g. ?node=gateway */
   node: 'node',
@@ -18,6 +21,8 @@ export const SELECT = {
   file: 'file',
   /** The steps visited in a walkthrough, in order; the last one is the current step. */
   walk: 'walk',
+  /** A section of a docs page, e.g. ?section=levels. Scrolled into view and marked briefly. */
+  section: 'section',
 } as const;
 
 export type SelectKey = keyof typeof SELECT;
@@ -44,7 +49,11 @@ export const paths = {
       walk: visited.length > 0 ? visited.join(',') : undefined,
     }),
   code: (selection: { file?: string; symbol?: string } = {}) => withQuery('/code', selection),
-  errors: () => '/errors',
+  /** Error Handling. It opens with the error-handling docs page; `section` is one of its sections. */
+  errors: (section?: string) => withQuery('/errors', { section }),
+  /** A docs page, scrolled to one of its sections when `section` is given. */
+  doc: (pageId: string, section?: string) =>
+    withQuery(`/docs/${encodeURIComponent(pageId)}`, { section }),
   agents: () => '/agents',
   jobs: () => '/jobs',
 };
@@ -60,7 +69,9 @@ export type SectionId =
   | 'integrations'
   | 'data'
   | 'jobs'
-  | 'errors';
+  | 'errors'
+  /** The docs pages, listed in a group of their own under the sections. */
+  | 'docs';
 
 export interface NavItem {
   id: SectionId;
@@ -68,7 +79,7 @@ export interface NavItem {
   to: string;
 }
 
-/** The sidebar, in order. */
+/** The sidebar, in order. The docs pages follow, in a group of their own (Sidebar.tsx). */
 export const NAV: NavItem[] = [
   { id: 'overview', label: 'Project Overview', to: paths.overview() },
   { id: 'system', label: 'System Architecture', to: paths.architecture('system') },

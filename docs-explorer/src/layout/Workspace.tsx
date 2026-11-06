@@ -1,4 +1,5 @@
 import { useEffect, useEffectEvent, useId, useMemo, useRef, useState, type ReactNode } from 'react';
+import { RichText } from '../details/RichText.tsx';
 import { CloseIcon, NarrowIcon, PanelIcon, WidenIcon } from '../ui/icons.tsx';
 import { PanelInsetContext, type PanelInset } from './panel-inset.ts';
 
@@ -12,6 +13,8 @@ interface WorkspaceProps {
   summary?: string;
   /** Small facts under the heading, such as a status badge, a route or the apps. */
   meta?: ReactNode;
+  /** More about what the page shows, under the summary, such as the docs sections about it. */
+  related?: ReactNode;
   /** The main area, usually a graph. It fills the space left beside the panel. */
   children: ReactNode;
   /** Details of the selected item; undefined when nothing is selected. */
@@ -55,7 +58,7 @@ function Summary({ text }: { text: string }) {
         id={id}
         className={`min-w-0 flex-1 text-sm/5 text-fg-muted ${open ? '' : 'line-clamp-2'}`}
       >
-        {text}
+        <RichText text={text} />
       </p>
       {cut || open ? (
         <button
@@ -85,6 +88,7 @@ export function Workspace({
   title,
   summary,
   meta,
+  related,
   children,
   panel,
   panelLabel,
@@ -177,6 +181,7 @@ export function Workspace({
           ) : null}
         </div>
         {summary ? <Summary key={summary} text={summary} /> : null}
+        {related}
       </header>
 
       <div className="relative flex min-h-72 flex-1">

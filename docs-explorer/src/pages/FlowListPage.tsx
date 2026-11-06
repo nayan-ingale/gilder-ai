@@ -1,7 +1,12 @@
 import { Link } from 'react-router';
-import type { Flow, FlowCategory } from '../data/schema.ts';
+import { ERROR_FLOWS_SECTION_ID, type Flow, type FlowCategory } from '../data/schema.ts';
+import { RichText } from '../details/RichText.tsx';
+import { GuideContents } from '../guides/GuideContents.tsx';
+import { GuideSectionFrame } from '../guides/GuideSectionFrame.tsx';
+import { GuideSections } from '../guides/GuideSections.tsx';
+import { useSectionTarget } from '../guides/use-section-target.ts';
 import { FLOW_CATEGORY_LABEL } from '../model/labels.ts';
-import { docs } from '../model/index.ts';
+import { docs, guides } from '../model/index.ts';
 import { paths } from '../routes.ts';
 import { EmptyState } from '../ui/EmptyState.tsx';
 import { plural } from '../ui/plural.ts';
@@ -10,9 +15,14 @@ import { startTrail } from '../walkthrough/walk.ts';
 
 // The list of flows: every one, grouped by category (API Explorer), or only the error flows
 // (Error Handling). A dense list; each row opens the flow's graph, and a link of its own, at the
-// end of the row (under it on phones), starts a walkthrough of it.
+// end of the row (under it on phones), starts a walkthrough of it. Error Handling opens with the
+// sections of the error-handling docs page, under the page's own title, and the flows follow as
+// one more section that `?section=` can scroll to.
 
 const CATEGORY_ORDER: FlowCategory[] = ['api', 'errors', 'lifecycle'];
+
+/** The heading of the error flows, after the docs sections on Error Handling. */
+const ERROR_FLOWS_TITLE = 'Error flows';
 
 function FlowRow({ flow }: { flow: Flow }) {
   const route = flow.route;
@@ -39,7 +49,9 @@ function FlowRow({ flow }: { flow: Flow }) {
               <span className="text-sm text-fg-muted">{flow.title}</span>
             ) : null}
           </div>
-          <p className="mt-1 line-clamp-2 text-sm text-fg-subtle">{flow.summary}</p>
+          <p className="mt-1 line-clamp-2 text-sm text-fg-subtle">
+            <RichText text={flow.summary} />
+          </p>
           <p className="mt-1.5 text-xs text-fg-subtle">
             {plural(flow.steps.length, 'step')}
             {flow.apps.length > 0 ? (
@@ -86,10 +98,15 @@ export function FlowListPage({ category }: { category?: FlowCategory }) {
       : category === 'errors'
         ? 'Error Handling'
         : FLOW_CATEGORY_LABEL[category];
+  const guide = category === 'errors' ? guides.pageForSection('errors') : undefined;
+  const guideSections = guide && guide.sections.length > 0 ? guide : undefined;
+  // Error Handling opens with the error-handling page, so the page's own summary leads it.
   const intro =
-    category === 'errors'
+    guide?.summary ??
+    (category === 'errors'
       ? 'How the backend apps turn errors into responses, followed step by step through the code.'
-      : 'Requests and app lifecycle events, followed step by step through the code. Open one to see its graph.';
+      : 'Requests and app lifecycle events, followed step by step through the code. Open one to see its graph.');
+  const marked = useSectionTarget();
   const groups = (category ? [category] : CATEGORY_ORDER)
     .map((group) => ({
       category: group,
@@ -97,22 +114,56 @@ export function FlowListPage({ category }: { category?: FlowCategory }) {
     }))
     .filter((group) => group.flows.length > 0);
 
+  // One category's flows: a single list, with no heading of its own.
+  const categoryFlows = (gap: string) =>
+    groups.length === 0 ? (
+      <div className={`${gap} rounded-md border border-dashed border-line`}>
+        <EmptyState title="No flows yet">
+          <p>None of the flows in the docs belong here yet.</p>
+        </EmptyState>
+      </div>
+    ) : (
+      <div className={gap}>
+        <FlowList flows={groups[0]?.flows ?? []} />
+      </div>
+    );
+
   return (
     <div className="mx-auto w-full max-w-4xl px-4 py-6 md:px-8 md:py-8">
       <title>{`${title} · GilderAi Docs`}</title>
       <h1 className="text-lg font-semibold text-fg">{title}</h1>
-      <p className="mt-1 text-sm text-fg-subtle">{intro}</p>
+      <p className="mt-1 text-sm text-fg-subtle">
+        <RichText text={intro} />
+      </p>
 
-      {groups.length === 0 ? (
-        <div className="mt-6 rounded-md border border-dashed border-line">
-          <EmptyState title="No flows yet">
-            <p>None of the flows in the docs belong here yet.</p>
-          </EmptyState>
-        </div>
-      ) : category ? (
-        <div className="mt-6">
-          <FlowList flows={groups[0]?.flows ?? []} />
-        </div>
+      {guideSections ? (
+        <>
+          <div className="mt-6">
+            <GuideContents
+              page={guideSections}
+              extra={[
+                {
+                  id: ERROR_FLOWS_SECTION_ID,
+                  title: ERROR_FLOWS_TITLE,
+                  to: paths.errors(ERROR_FLOWS_SECTION_ID),
+                },
+              ]}
+            />
+          </div>
+          <div className="mt-8">
+            <GuideSections page={guideSections} marked={marked} />
+          </div>
+          <GuideSectionFrame
+            id={ERROR_FLOWS_SECTION_ID}
+            title={ERROR_FLOWS_TITLE}
+            marked={marked === ERROR_FLOWS_SECTION_ID}
+            className="mt-8"
+          >
+            {categoryFlows('mt-3')}
+          </GuideSectionFrame>
+        </>
+      ) : groups.length === 0 || category ? (
+        categoryFlows('mt-6')
       ) : (
         groups.map((group) => (
           <section

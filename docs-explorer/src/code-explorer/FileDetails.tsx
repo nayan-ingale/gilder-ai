@@ -1,6 +1,6 @@
 // The detail view for one source file in the code explorer: where it is and which part of the
 // system owns it, the symbols in it by kind, the routes it registers, the flow steps that run
-// its code, and the whole file's real source.
+// its code, the docs sections about it, and the whole file's real source.
 import { Link } from 'react-router';
 import { SourceCode } from '../code/SourceCode.tsx';
 import { CODE, LINK, LIST, LOCATION, TEXT } from '../details/classes.ts';
@@ -11,6 +11,7 @@ import { FlowUsageList } from '../details/FlowUsageList.tsx';
 import { fileName, groupUsagesByFlow } from '../details/format.ts';
 import { NodeLink } from '../details/NodeLink.tsx';
 import { SymbolLink } from '../details/SymbolLink.tsx';
+import { DocsBackLinks } from '../guides/DocsBackLinks.tsx';
 import { sectionOf } from '../layout/sections.ts';
 import { docs } from '../model/index.ts';
 import { COMPONENT_KIND_LABEL } from '../model/labels.ts';
@@ -117,6 +118,8 @@ export function FileDetails({ path }: FileDetailsProps) {
           <FlowUsageList groups={usages} />
         </DetailSection>
       ) : null}
+
+      <DocsBackLinks about={{ file: file.path }} />
 
       <DetailSection title="Source">
         <SourceCode filePath={file.path} startLine={1} endLine={Math.max(file.lineCount, 1)} />
