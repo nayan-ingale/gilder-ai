@@ -93,6 +93,13 @@
   box-shadow: 0 0 0 1px var(--color-accent);
 }
 
+/* Steps already passed in a walkthrough: a bar down the left edge (a shape, not only a colour)
+   and a frame tinted towards the accent. The text keeps its normal colours. */
+.gx-node[data-visited='true'] {
+  border-color: color-mix(in oklch, var(--color-accent) 45%, var(--color-line));
+  box-shadow: inset 3px 0 0 var(--color-accent);
+}
+
 /*
  * Faded boxes: context boxes (they belong to another view and are only here so the lines make
  * sense) and, while something is selected, the boxes away from it. The frame and fill fade,

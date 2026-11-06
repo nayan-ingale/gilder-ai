@@ -1,6 +1,8 @@
 // The breadcrumb trail for the top bar, built from the URL alone: the section, then what is
-// open in it (a component, or a flow and its step), then the open symbol. Names come from the
-// docs, so the trail reads like the page. Pure, so it can be tested without rendering.
+// open in it (a component, a flow and its step, or a source file), then the open symbol. Names
+// come from the docs, so the trail reads like the page. Pure, so it can be tested without
+// rendering.
+import { fileLabel } from '../code-explorer/code-tree.ts';
 import { splitSymbolId, symbolDisplayName } from '../details/format.ts';
 import { getArchView } from '../model/architecture-views.ts';
 import type { DocsModel } from '../model/docs-model.ts';
@@ -14,7 +16,10 @@ export interface Crumb {
   to: string;
 }
 
-type BreadcrumbModel = Pick<DocsModel, 'getComponent' | 'getFlow' | 'getStep' | 'getSymbol'>;
+type BreadcrumbModel = Pick<
+  DocsModel,
+  'getComponent' | 'getFlow' | 'getStep' | 'getSymbol' | 'componentOfFile'
+>;
 
 const NOT_FOUND = 'Page not found';
 
@@ -40,6 +45,7 @@ export function buildBreadcrumbs(
   const node = params.get(SELECT.node) ?? undefined;
   const step = params.get(SELECT.step) ?? undefined;
   const symbol = params.get(SELECT.symbol) ?? undefined;
+  const file = params.get(SELECT.file) ?? undefined;
   const [first, second] = pathParts(pathname);
   const crumbs: Crumb[] = [{ label: section.label, to: section.to }];
 
@@ -61,6 +67,12 @@ export function buildBreadcrumbs(
         to: paths.flow(flow.id, step),
       });
     }
+  } else if (first === 'code') {
+    // A symbol's own file wins over ?file=, which can lag behind after a link in the panel.
+    const filePath =
+      (symbol === undefined ? undefined : model.getSymbol(symbol)?.file.path) ?? file;
+    if (filePath)
+      crumbs.push({ label: fileLabel(filePath, model), to: paths.code({ file: filePath }) });
   } else {
     // Lists and placeholders have nothing to select.
     return crumbs;

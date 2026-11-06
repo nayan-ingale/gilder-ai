@@ -279,6 +279,12 @@ describe('SymbolDetails', () => {
     );
     expect(text(onNode)).toContain(`← Back to ${docs.getComponent('gateway')?.name}`);
     expect(text(onNode)).not.toContain('Close');
+
+    const onFile = render(
+      <SymbolDetails symbolId={healthRouter} />,
+      url('/code', { file: 'backend/shared/src/health.ts', symbol: healthRouter }),
+    );
+    expect(text(onFile)).toContain('← Back to health.ts');
   });
 
   it('selects its part of the system in place when the open view shows it', () => {

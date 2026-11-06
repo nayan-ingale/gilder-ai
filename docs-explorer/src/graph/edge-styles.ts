@@ -64,10 +64,18 @@ export const MARKER_VIEWBOX = { x: -12.5, y: -6, width: 14, height: 12 };
 
 /** How much a box or line stands out, given what is selected. */
 export type NodeEmphasis = 'normal' | 'selected' | 'connected' | 'dimmed';
-export type LineEmphasis = 'normal' | 'highlight' | 'dimmed';
+/** `walked`: on the path a walkthrough has followed so far. */
+export type LineEmphasis = 'normal' | 'highlight' | 'dimmed' | 'walked';
 
 /** Lines away from the selection fade right back (their labels switch to subtle text). */
 export const DIMMED_LINE_OPACITY = 0.15;
+
+/**
+ * The walked path of a walkthrough: the accent colour and a thicker stroke, so it stands out by
+ * width as well as colour. Each line keeps its own dash pattern and ends, so its kind still shows.
+ */
+export const WALKED_STROKE = 'var(--color-accent)';
+export const WALKED_EXTRA_WIDTH = 1;
 
 /** The colour, width and opacity a line is drawn with in each state. */
 export function lineAppearance(
@@ -79,6 +87,9 @@ export function lineAppearance(
   }
   if (emphasis === 'dimmed') {
     return { stroke: line.stroke, width: line.width, opacity: DIMMED_LINE_OPACITY };
+  }
+  if (emphasis === 'walked') {
+    return { stroke: WALKED_STROKE, width: line.width + WALKED_EXTRA_WIDTH, opacity: 1 };
   }
   return { stroke: line.stroke, width: line.width, opacity: line.opacity };
 }
@@ -207,13 +218,23 @@ const STATUS_ORDER: Status[] = [
   'unknown',
 ];
 
-export function flowLegend(kinds: Set<EdgeKind>): LegendSection[] {
+/** The legend sample for the walked path: a main-path line drawn as walked. */
+export const WALKED_LINE: LineStyle = {
+  ...FLOW_LINE_STYLE.next,
+  stroke: WALKED_STROKE,
+  highlightStroke: WALKED_STROKE,
+  width: FLOW_LINE_STYLE.next.width + WALKED_EXTRA_WIDTH,
+};
+
+/** The flow's line kinds, plus the walked path while a walkthrough shows one. */
+export function flowLegend(kinds: Set<EdgeKind>, { walked = false } = {}): LegendSection[] {
   const items = EDGE_KIND_ORDER.filter((kind) => kinds.has(kind)).map((kind): LegendItem => ({
     type: 'line',
     key: kind,
     label: EDGE_KIND_LABEL[kind],
     line: FLOW_LINE_STYLE[kind],
   }));
+  if (walked) items.push({ type: 'line', key: 'walked', label: 'Walked path', line: WALKED_LINE });
   return items.length > 0 ? [{ title: 'Lines', items }] : [];
 }
 

@@ -36,6 +36,7 @@ export function sectionOf(
     case 'flows':
       if (second === undefined) return 'api';
       return model.getFlow(second)?.category === 'errors' ? 'errors' : 'api';
+    case 'code':
     case 'errors':
     case 'agents':
     case 'jobs':

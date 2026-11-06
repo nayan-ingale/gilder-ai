@@ -7,7 +7,8 @@ import type { NodeEmphasis } from './edge-styles.ts';
 /**
  * One step in a flow graph: its number in the list, what kind of step it is (an icon plus the
  * word, never colour alone), its title and how sure the docs are. The box is a button; the
- * selected one is marked aria-current, and selecting it again does nothing.
+ * selected one is marked aria-current, and selecting it again does nothing. Steps already
+ * passed in a walkthrough get a bar down their left edge (graph.css) and say so in their name.
  */
 
 export type StepNodeData = {
@@ -15,15 +16,17 @@ export type StepNodeData = {
   /** Position in the flow's step list, from 1. */
   number: number;
   emphasis: NodeEmphasis;
+  /** Already passed in a walkthrough (the current step is the selected one instead). */
+  visited?: boolean;
   onSelect: (id: string) => void;
 };
 
 export type StepGraphNode = Node<StepNodeData, 'step'>;
 
 export function StepNode({ data }: NodeProps<StepGraphNode>) {
-  const { step, number, emphasis, onSelect } = data;
+  const { step, number, emphasis, visited = false, onSelect } = data;
   const kind = STEP_KIND_LABEL[step.kind];
-  const label = `Step ${number}: ${step.title}, ${kind}, ${STATUS_INFO[step.status].label}`;
+  const label = `Step ${number}: ${step.title}, ${kind}, ${STATUS_INFO[step.status].label}${visited ? ', visited in this walkthrough' : ''}`;
 
   return (
     <>
@@ -33,6 +36,7 @@ export function StepNode({ data }: NodeProps<StepGraphNode>) {
         aria-label={label}
         aria-current={emphasis === 'selected' ? 'true' : undefined}
         data-emphasis={emphasis}
+        data-visited={visited ? 'true' : undefined}
         onClick={() => {
           if (emphasis !== 'selected') onSelect(step.id);
         }}

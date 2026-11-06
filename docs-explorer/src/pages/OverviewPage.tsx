@@ -33,8 +33,12 @@ const VIEW_SUMMARY: Record<ArchViewId, string> = {
   data: 'The data stores, and the apps that connect or will connect to them.',
 };
 
-const SECTION_SUMMARY: Partial<Record<SectionId, string>> = {
+// Every other section needs a line here; a new one without it fails the type check.
+type OtherSection = Exclude<SectionId, ArchViewId | 'overview'>;
+
+const SECTION_SUMMARY: Record<OtherSection, string> = {
   api: 'Requests and app lifecycle events, followed step by step through the code.',
+  code: 'Every indexed file and function, with its real code, what calls it and what it calls.',
   agents: 'No agents in the code yet.',
   jobs: 'No background jobs in the code yet.',
   errors: 'How the backend apps turn errors into responses, step by step.',
@@ -58,7 +62,8 @@ const SECTIONS = NAV.filter((item) => item.id !== 'overview').map((item: NavItem
   const view = getArchView(item.id);
   return {
     item,
-    summary: view ? VIEW_SUMMARY[view.id] : SECTION_SUMMARY[item.id],
+    // Not an architecture view and not the overview, so it is one of the other sections.
+    summary: view ? VIEW_SUMMARY[view.id] : SECTION_SUMMARY[item.id as OtherSection],
     statusCount: view ? viewStatusCount(view.id) : undefined,
   };
 });

@@ -17,6 +17,7 @@ import { FlowUsageList } from './FlowUsageList.tsx';
 import { RichText } from './RichText.tsx';
 import {
   fileLocation,
+  fileName,
   groupUsagesByFlow,
   hasSymbolFacts,
   keyedStrings,
@@ -31,16 +32,17 @@ interface SymbolDetailsProps {
 }
 
 /**
- * What closing the symbol view shows again: the step or node selected under it, by name. Only
- * the selection the page actually uses counts (a step on a flow page, a node on an architecture
- * page). An ID the docs don't know is shown as it is.
+ * What closing the symbol view shows again: the step, node or file selected under it, by name.
+ * Only the selection the page actually uses counts (a step on a flow page, a node on an
+ * architecture page, a file in the code explorer). An ID the docs don't know is shown as it is.
  */
 function underneathName(
   { flowId, viewId }: { flowId?: string; viewId?: string },
-  { step, node }: { step?: string; node?: string },
+  { step, node, file }: { step?: string; node?: string; file?: string },
 ): string | undefined {
   if (flowId !== undefined && step !== undefined) return docs.getStep(flowId, step)?.title ?? step;
   if (viewId !== undefined && node !== undefined) return docs.getComponent(node)?.name ?? node;
+  if (flowId === undefined && viewId === undefined && file !== undefined) return fileName(file);
   return undefined;
 }
 

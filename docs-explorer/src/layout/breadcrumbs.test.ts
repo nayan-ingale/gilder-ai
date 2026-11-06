@@ -153,6 +153,53 @@ describe('buildBreadcrumbs', () => {
     ]);
   });
 
+  it('shows the open file and symbol in the code explorer', () => {
+    expect(buildBreadcrumbs('/code', '', model)).toEqual([{ label: 'Code Explorer', to: '/code' }]);
+
+    // Inside an app's folder, the file is named by its path there.
+    const file = 'backend/gateway/src/index.ts';
+    expect(buildBreadcrumbs('/code', query({ file }), model)).toEqual([
+      { label: 'Code Explorer', to: '/code' },
+      { label: 'src/index.ts', to: `/code${query({ file })}` },
+    ]);
+
+    // Outside any known folder, by its full path.
+    const search = query({
+      file: 'backend/shared/src/health.ts',
+      symbol: 'backend/shared/src/health.ts#healthRouter',
+    });
+    expect(buildBreadcrumbs('/code', search, model)).toEqual([
+      { label: 'Code Explorer', to: '/code' },
+      {
+        label: 'backend/shared/src/health.ts',
+        to: `/code${query({ file: 'backend/shared/src/health.ts' })}`,
+      },
+      { label: 'healthRouter', to: `/code${search}` },
+    ]);
+  });
+
+  it("takes the file from the open symbol when the code explorer's ?file= is missing or stale", () => {
+    const symbol = 'backend/gateway/src/index.ts#(module)';
+    const labels = (search: string) =>
+      buildBreadcrumbs('/code', search, model).map((crumb) => crumb.label);
+    const expected = ['Code Explorer', 'src/index.ts', 'index.ts (top level)'];
+    expect(labels(query({ symbol }))).toEqual(expected);
+    expect(labels(query({ file: 'backend/shared/src/health.ts', symbol }))).toEqual(expected);
+  });
+
+  it('shows a file or symbol the code index does not know as it is', () => {
+    expect(
+      buildBreadcrumbs('/code', query({ file: 'nope.ts', symbol: 'nope.ts#ghost' }), model).map(
+        (crumb) => crumb.label,
+      ),
+    ).toEqual(['Code Explorer', 'nope.ts', 'ghost']);
+    expect(
+      buildBreadcrumbs('/code', query({ symbol: 'nope.ts#ghost' }), model).map(
+        (crumb) => crumb.label,
+      ),
+    ).toEqual(['Code Explorer', 'ghost']);
+  });
+
   it('ignores a selection on pages that have nothing to select', () => {
     expect(buildBreadcrumbs('/flows', '?node=gateway', model)).toEqual([
       { label: 'API Explorer', to: '/flows' },

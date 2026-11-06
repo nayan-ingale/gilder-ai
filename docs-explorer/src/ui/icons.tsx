@@ -26,6 +26,11 @@ export function MenuIcon() {
   return <Icon path="M2.5 4h11M2.5 8h11M2.5 12h11" />;
 }
 
+/** A magnifying glass. */
+export function SearchIcon() {
+  return <Icon path="M7 2.5a4.5 4.5 0 1 1 0 9a4.5 4.5 0 1 1 0-9zM10.25 10.25L13.5 13.5" />;
+}
+
 /** A window with its right-hand column marked: the detail panel. */
 export function PanelIcon() {
   return <Icon path="M2.5 3.5h11v9h-11zM10 3.5v9" />;

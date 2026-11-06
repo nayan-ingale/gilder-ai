@@ -1,6 +1,8 @@
 import { Link, useLocation } from 'react-router';
 import { NAV, paths } from '../routes.ts';
-import { CloseIcon } from '../ui/icons.tsx';
+import { preloadSearch } from '../search/lazy-search.ts';
+import { SHORTCUT } from '../search/shortcut.ts';
+import { CloseIcon, SearchIcon } from '../ui/icons.tsx';
 import { sectionOf } from './sections.ts';
 
 interface SidebarProps {
@@ -8,6 +10,8 @@ interface SidebarProps {
   onNavigate?: () => void;
   /** When given (in the drawer), a close button is shown next to the brand. */
   onClose?: () => void;
+  /** Opens search. The button looks like a search box and shows the keyboard shortcut. */
+  onSearch?: () => void;
 }
 
 /**
@@ -15,7 +19,7 @@ interface SidebarProps {
  * drawer on narrow ones. Plain links, not NavLink: the active item comes from sectionOf, because
  * an error flow lives under /flows/ but belongs to Error Handling.
  */
-export function Sidebar({ onNavigate, onClose }: SidebarProps) {
+export function Sidebar({ onNavigate, onClose, onSearch }: SidebarProps) {
   const { pathname } = useLocation();
   const active = sectionOf(pathname);
 
@@ -41,6 +45,28 @@ export function Sidebar({ onNavigate, onClose }: SidebarProps) {
           </button>
         ) : null}
       </div>
+      {onSearch ? (
+        <div className="shrink-0 px-2 pt-2">
+          <button
+            type="button"
+            onClick={onSearch}
+            onPointerEnter={preloadSearch}
+            onFocus={preloadSearch}
+            aria-haspopup="dialog"
+            aria-keyshortcuts={SHORTCUT.keys}
+            className="flex h-8 w-full items-center gap-2 rounded-md border border-line bg-canvas px-2.5 text-sm text-fg-subtle transition-colors hover:border-line-strong hover:text-fg-muted"
+          >
+            <SearchIcon />
+            <span className="flex-1 text-left">Search…</span>
+            <kbd
+              aria-hidden="true"
+              className="rounded border border-line px-1 font-sans text-[0.6875rem] text-fg-subtle"
+            >
+              {SHORTCUT.hint}
+            </kbd>
+          </button>
+        </div>
+      ) : null}
       <nav aria-label="Sections" className="relative min-h-0 flex-1 overflow-y-auto p-2">
         <ul className="flex flex-col gap-px">
           {NAV.map((item) => {

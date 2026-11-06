@@ -7,16 +7,21 @@ import { GraphCanvas, GraphEdge, type GraphLine } from './GraphCanvas.tsx';
 import { GraphLegend } from './GraphLegend.tsx';
 import { edgeKey, estimateLabelSize, layoutGraph, neighbourhood } from './layout.ts';
 import { StepNode, type StepGraphNode } from './StepNode.tsx';
+import { walkedLines, walkLineKey } from '../walkthrough/walk.ts';
 
 /**
  * One flow, top to bottom: the main path runs down the middle, and conditions, error paths,
  * parallel work and work that finishes later branch off it, each with its own line style and
  * its label on the line. dagre leaves room for the labels, so they never cover a step.
+ * During a walkthrough the steps visited so far are marked, and the lines walked along are
+ * drawn in the accent colour; the current step is the selected one.
  */
 
 interface FlowGraphProps {
   flow: Flow;
   selectedStepId?: string;
+  /** The steps a walkthrough has visited, in order; the last is the current (selected) step. */
+  trail?: string[];
   onSelect: (stepId: string | undefined) => void;
 }
 
@@ -29,7 +34,7 @@ export function FlowGraph(props: FlowGraphProps) {
   return <FlowGraphView key={props.flow.id} {...props} />;
 }
 
-function FlowGraphView({ flow, selectedStepId, onSelect }: FlowGraphProps) {
+function FlowGraphView({ flow, selectedStepId, trail, onSelect }: FlowGraphProps) {
   const stepIds = useMemo(() => new Set(flow.steps.map((step) => step.id)), [flow]);
 
   const lines = useMemo(
@@ -61,26 +66,34 @@ function FlowGraphView({ flow, selectedStepId, onSelect }: FlowGraphProps) {
   const selected =
     selectedStepId !== undefined && stepIds.has(selectedStepId) ? selectedStepId : undefined;
   const lit = useMemo(() => neighbourhood(selected, lines), [selected, lines]);
+  const visited = useMemo(() => new Set(trail), [trail]);
+  const walked = useMemo(() => (trail ? walkedLines(flow, trail) : undefined), [flow, trail]);
 
   const nodes = useMemo(
     (): StepGraphNode[] =>
-      flow.steps.map((step, index) => ({
-        id: step.id,
-        type: 'step',
-        position: layout.positions.get(step.id) ?? { x: 0, y: 0 },
-        ...NODE_SIZE,
-        // The size is fixed, so say so: React Flow then keeps the line anchors when only the
-        // data changes, instead of re-measuring every box (and hiding the lines for a frame).
-        measured: NODE_SIZE,
-        ariaRole: 'group',
-        data: {
-          step,
-          number: index + 1,
-          emphasis: nodeEmphasis(step.id, selected, lit?.nodes),
-          onSelect,
-        },
-      })),
-    [flow, layout, selected, lit, onSelect],
+      flow.steps.map((step, index) => {
+        const emphasis = nodeEmphasis(step.id, selected, lit?.nodes);
+        const wasVisited = visited.has(step.id) && step.id !== selected;
+        return {
+          id: step.id,
+          type: 'step',
+          position: layout.positions.get(step.id) ?? { x: 0, y: 0 },
+          ...NODE_SIZE,
+          // The size is fixed, so say so: React Flow then keeps the line anchors when only the
+          // data changes, instead of re-measuring every box (and hiding the lines for a frame).
+          measured: NODE_SIZE,
+          ariaRole: 'group',
+          data: {
+            step,
+            number: index + 1,
+            // The path walked so far stays readable: its steps never fade.
+            emphasis: wasVisited && emphasis === 'dimmed' ? 'normal' : emphasis,
+            visited: wasVisited,
+            onSelect,
+          },
+        };
+      }),
+    [flow, layout, selected, lit, visited, onSelect],
   );
 
   const edges = useMemo((): GraphLine[] => {
@@ -90,7 +103,8 @@ function FlowGraphView({ flow, selectedStepId, onSelect }: FlowGraphProps) {
       const kind = EDGE_KIND_LABEL[line.kind];
       const from = titles.get(line.from) ?? line.from;
       const to = titles.get(line.to) ?? line.to;
-      const title = `${from} → ${to}: ${kind}${line.label ? `, ${line.label}` : ''}`;
+      const onPath = walked?.has(walkLineKey(line.from, line.to)) ?? false;
+      const title = `${from} → ${to}: ${kind}${line.label ? `, ${line.label}` : ''}${onPath ? ' (walked)' : ''}`;
       return {
         id: line.id,
         type: 'graph',
@@ -101,15 +115,18 @@ function FlowGraphView({ flow, selectedStepId, onSelect }: FlowGraphProps) {
           points: route?.points ?? [],
           labelAt: route?.labelAt ?? { x: 0, y: 0 },
           line: FLOW_LINE_STYLE[line.kind],
-          emphasis: lineEmphasis(line.id, lit?.edges),
+          emphasis: onPath ? 'walked' : lineEmphasis(line.id, lit?.edges),
           chip: line.label,
           title,
         },
       };
     });
-  }, [flow, lines, layout, lit]);
+  }, [flow, lines, layout, lit, walked]);
 
-  const legend = useMemo(() => flowLegend(new Set(lines.map((line) => line.kind))), [lines]);
+  const legend = useMemo(
+    () => flowLegend(new Set(lines.map((line) => line.kind)), { walked: trail !== undefined }),
+    [lines, trail],
+  );
 
   return (
     <GraphCanvas

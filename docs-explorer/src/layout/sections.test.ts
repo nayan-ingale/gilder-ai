@@ -20,6 +20,7 @@ describe('sectionOf', () => {
     expect(sectionOf('/errors', model)).toBe('errors');
     expect(sectionOf('/agents', model)).toBe('agents');
     expect(sectionOf('/jobs', model)).toBe('jobs');
+    expect(sectionOf('/code', model)).toBe('code');
   });
 
   it('maps each architecture view to the section of the same name', () => {

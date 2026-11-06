@@ -6,9 +6,11 @@ import { paths } from '../routes.ts';
 import { EmptyState } from '../ui/EmptyState.tsx';
 import { plural } from '../ui/plural.ts';
 import { StatusBadge } from '../ui/StatusBadge.tsx';
+import { startTrail } from '../walkthrough/walk.ts';
 
 // The list of flows: every one, grouped by category (API Explorer), or only the error flows
-// (Error Handling). A dense list; each row opens the flow's graph.
+// (Error Handling). A dense list; each row opens the flow's graph, and a link of its own, at the
+// end of the row (under it on phones), starts a walkthrough of it.
 
 const CATEGORY_ORDER: FlowCategory[] = ['api', 'errors', 'lifecycle'];
 
@@ -17,10 +19,12 @@ function FlowRow({ flow }: { flow: Flow }) {
   const routeText = route ? `${route.method} ${route.path}` : undefined;
 
   return (
-    <li>
+    // The walkthrough link sits beside the row's link (links can't nest), never on top of it: a
+    // full-height column on wider screens, a strip under the row on phones.
+    <li className="flex flex-col sm:flex-row sm:items-stretch">
       <Link
         to={paths.flow(flow.id)}
-        className="grid grid-cols-[minmax(0,1fr)_auto] items-start gap-x-4 px-4 py-3 transition-colors hover:bg-surface"
+        className="grid min-w-0 flex-1 grid-cols-[minmax(0,1fr)_auto] items-start gap-x-4 px-4 py-3 transition-colors hover:bg-surface"
       >
         <div className="min-w-0">
           <div className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
@@ -48,6 +52,18 @@ function FlowRow({ flow }: { flow: Flow }) {
         </div>
         <StatusBadge status={flow.status} />
       </Link>
+      {flow.steps.length > 0 ? (
+        <Link
+          to={paths.walkthrough(flow.id, startTrail(flow))}
+          aria-label={`Walk through ${flow.title}`}
+          className="flex min-h-8 shrink-0 items-center gap-1.5 border-t border-line px-4 py-1.5 text-xs whitespace-nowrap text-accent transition-colors hover:bg-surface hover:underline sm:border-t-0 sm:border-l"
+        >
+          <svg aria-hidden="true" viewBox="0 0 12 12" className="size-3 shrink-0">
+            <path d="M3.5 2.5v7l6-3.5z" fill="currentColor" />
+          </svg>
+          Walk through
+        </Link>
+      ) : null}
     </li>
   );
 }

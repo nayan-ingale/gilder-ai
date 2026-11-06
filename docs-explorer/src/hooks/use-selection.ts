@@ -8,6 +8,10 @@ export interface Selection {
   node?: string;
   step?: string;
   symbol?: string;
+  /** A source file open in the code explorer. */
+  file?: string;
+  /** The raw walkthrough trail (comma-separated step ids); see src/routes.ts. */
+  walk?: string;
   /** The `?query` for the current page with these changes; undefined removes a key. */
   searchWith(changes: SelectionChange): string;
   /** Changes the selection with a normal navigation, so Back undoes it. */
@@ -52,6 +56,8 @@ export function useSelection(): Selection {
       node: params.get(SELECT.node) ?? undefined,
       step: params.get(SELECT.step) ?? undefined,
       symbol: params.get(SELECT.symbol) ?? undefined,
+      file: params.get(SELECT.file) ?? undefined,
+      walk: params.get(SELECT.walk) ?? undefined,
       searchWith,
       select,
     }),

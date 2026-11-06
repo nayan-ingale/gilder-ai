@@ -2,8 +2,10 @@ import { describe, expect, it } from 'vitest';
 import type { ArchComponent, ArchLink, Status } from '../data/schema.ts';
 import {
   FLOW_LINE_STYLE,
+  WALKED_STROKE,
   architectureLegend,
   flowLegend,
+  lineAppearance,
   linkLineStyle,
   navigationHint,
 } from './edge-styles.ts';
@@ -33,6 +35,15 @@ describe('line styles', () => {
     expect(new Set(looks).size).toBe(looks.length);
   });
 
+  it('draws a walked line in the accent colour, thicker, keeping its own dash', () => {
+    for (const line of Object.values(FLOW_LINE_STYLE)) {
+      const walked = lineAppearance(line, 'walked');
+      expect(walked.stroke).toBe(WALKED_STROKE);
+      expect(walked.width).toBeGreaterThan(lineAppearance(line, 'highlight').width);
+      expect(walked.opacity).toBe(1);
+    }
+  });
+
   it('dashes and fades planned links', () => {
     const planned = linkLineStyle('http', 'planned');
     expect(planned.dash).toBeDefined();
@@ -59,6 +70,17 @@ describe('legends', () => {
     const [section] = flowLegend(new Set(['next', 'error']));
     expect(section?.items.map((item) => item.label)).toEqual(['Next step', 'Error path']);
     expect(flowLegend(new Set())).toEqual([]);
+  });
+
+  it('adds the walked path only while a walkthrough shows one', () => {
+    const [walking] = flowLegend(new Set(['next', 'branch']), { walked: true });
+    expect(walking?.items.map((item) => item.label)).toEqual([
+      'Next step',
+      'Condition',
+      'Walked path',
+    ]);
+    const [browsing] = flowLegend(new Set(['next', 'branch']), { walked: false });
+    expect(browsing?.items.map((item) => item.label)).not.toContain('Walked path');
   });
 
   it('explains a dashed status even when it is the only one in view', () => {

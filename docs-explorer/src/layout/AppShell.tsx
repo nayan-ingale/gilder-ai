@@ -1,6 +1,11 @@
 import { Suspense, useEffect, useRef, useState } from 'react';
 import { Outlet, useLocation } from 'react-router';
-import { MenuIcon } from '../ui/icons.tsx';
+import { createSearchDialog, preloadSearch } from '../search/lazy-search.ts';
+import { SearchErrorBoundary } from '../search/SearchErrorBoundary.tsx';
+import { SearchLoadError } from '../search/SearchLoadError.tsx';
+import { SHORTCUT } from '../search/shortcut.ts';
+import { useSearchShortcut } from '../search/use-search-shortcut.ts';
+import { MenuIcon, SearchIcon } from '../ui/icons.tsx';
 import { Breadcrumbs } from './Breadcrumbs.tsx';
 import { Sidebar } from './Sidebar.tsx';
 
@@ -10,7 +15,8 @@ const SIDEBAR_SHOWN = '(min-width: 48rem)';
 /**
  * The frame around every page: the sidebar, a top bar with breadcrumbs, and the page itself.
  * Below `md` the sidebar moves into a drawer (a modal <dialog>, so focus stays inside it and
- * Escape closes it) opened from the top bar.
+ * Escape closes it) opened from the top bar. Search opens from the sidebar, the top bar on
+ * phones, ⌘K / Ctrl+K or "/"; its code loads the first time it opens.
  */
 export function AppShell() {
   const location = useLocation();
@@ -22,6 +28,28 @@ export function AppShell() {
   const [drawerOpenAt, setDrawerOpenAt] = useState<string | null>(null);
   const drawerOpen = drawerOpenAt === location.key;
   const closeDrawer = () => setDrawerOpenAt(null);
+
+  // 'unloaded' until search is first opened; after that its dialog stays mounted.
+  const [search, setSearch] = useState<'unloaded' | 'open' | 'closed'>('unloaded');
+  // Each try at loading search has its own lazy dialog (React.lazy keeps a failed load) and a
+  // new key, which resets the error boundary around it.
+  const [searchLoad, setSearchLoad] = useState(() => ({
+    attempt: 0,
+    Dialog: createSearchDialog(),
+  }));
+  const newSearchLoad = () =>
+    setSearchLoad(({ attempt }) => ({ attempt: attempt + 1, Dialog: createSearchDialog() }));
+  const openSearch = () => {
+    // The drawer closes first, right away, so focus is back on the page before search opens
+    // and search can return it there.
+    if (drawerRef.current?.open) drawerRef.current.close();
+    setDrawerOpenAt(null);
+    setSearch('open');
+  };
+  useSearchShortcut({
+    open: openSearch,
+    toggle: () => (search === 'open' ? setSearch('closed') : openSearch()),
+  });
 
   useEffect(() => {
     const drawer = drawerRef.current;
@@ -65,7 +93,7 @@ export function AppShell() {
       </button>
 
       <div className="hidden w-60 shrink-0 border-r border-line bg-surface md:block">
-        <Sidebar />
+        <Sidebar onSearch={openSearch} />
       </div>
 
       <dialog
@@ -83,8 +111,29 @@ export function AppShell() {
         }}
         className="m-0 h-dvh max-h-none w-72 max-w-[85vw] border-0 border-r border-line bg-surface p-0 text-fg-muted backdrop:bg-canvas/70"
       >
-        <Sidebar onNavigate={closeDrawer} onClose={closeDrawer} />
+        <Sidebar onNavigate={closeDrawer} onClose={closeDrawer} onSearch={openSearch} />
       </dialog>
+
+      {search === 'unloaded' ? null : (
+        <SearchErrorBoundary
+          key={searchLoad.attempt}
+          fallback={
+            <SearchLoadError
+              open={search === 'open'}
+              onRetry={newSearchLoad}
+              onClose={() => {
+                // Closed without trying again: the next open starts a fresh try.
+                setSearch('unloaded');
+                newSearchLoad();
+              }}
+            />
+          }
+        >
+          <Suspense fallback={null}>
+            <searchLoad.Dialog open={search === 'open'} onClose={() => setSearch('closed')} />
+          </Suspense>
+        </SearchErrorBoundary>
+      )}
 
       <div className="flex min-w-0 flex-1 flex-col">
         <header className="flex h-12 shrink-0 items-center gap-2 border-b border-line px-3 md:px-4">
@@ -99,6 +148,18 @@ export function AppShell() {
             <MenuIcon />
           </button>
           <Breadcrumbs />
+          <button
+            type="button"
+            onClick={openSearch}
+            onPointerEnter={preloadSearch}
+            onFocus={preloadSearch}
+            aria-label="Search"
+            aria-haspopup="dialog"
+            aria-keyshortcuts={SHORTCUT.keys}
+            className="-mr-1 inline-flex size-8 shrink-0 items-center justify-center rounded-md text-fg-subtle transition-colors hover:bg-hover hover:text-fg md:hidden"
+          >
+            <SearchIcon />
+          </button>
         </header>
         <main
           ref={mainRef}

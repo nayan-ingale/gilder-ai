@@ -14,6 +14,10 @@ export const SELECT = {
   step: 'step',
   /** A function or other symbol, e.g. ?symbol=backend/shared/src/health.ts%23healthRouter */
   symbol: 'symbol',
+  /** A source file in the code explorer, e.g. ?file=backend/shared/src/health.ts */
+  file: 'file',
+  /** The steps visited in a walkthrough, in order; the last one is the current step. */
+  walk: 'walk',
 } as const;
 
 export type SelectKey = keyof typeof SELECT;
@@ -33,6 +37,13 @@ export const paths = {
   flows: () => '/flows',
   flow: (flowId: string, step?: string) =>
     withQuery(`/flows/${encodeURIComponent(flowId)}`, { step }),
+  /** A flow in walkthrough mode, at the last of the visited steps. */
+  walkthrough: (flowId: string, visited: string[]) =>
+    withQuery(`/flows/${encodeURIComponent(flowId)}`, {
+      step: visited.at(-1),
+      walk: visited.length > 0 ? visited.join(',') : undefined,
+    }),
+  code: (selection: { file?: string; symbol?: string } = {}) => withQuery('/code', selection),
   errors: () => '/errors',
   agents: () => '/agents',
   jobs: () => '/jobs',
@@ -44,6 +55,7 @@ export type SectionId =
   | 'frontend'
   | 'backend'
   | 'api'
+  | 'code'
   | 'agents'
   | 'integrations'
   | 'data'
@@ -63,6 +75,7 @@ export const NAV: NavItem[] = [
   { id: 'frontend', label: 'Frontend Architecture', to: paths.architecture('frontend') },
   { id: 'backend', label: 'Backend Architecture', to: paths.architecture('backend') },
   { id: 'api', label: 'API Explorer', to: paths.flows() },
+  { id: 'code', label: 'Code Explorer', to: paths.code() },
   { id: 'agents', label: 'Agent Explorer', to: paths.agents() },
   { id: 'integrations', label: 'Services & Integrations', to: paths.architecture('integrations') },
   { id: 'data', label: 'Database & Data Flow', to: paths.architecture('data') },

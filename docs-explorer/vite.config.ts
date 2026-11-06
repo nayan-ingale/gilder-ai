@@ -8,4 +8,20 @@ export default defineConfig({
   plugins: [react(), tailwindcss()],
   server: { port: 3100, strictPort: true },
   preview: { port: 3100, strictPort: true },
+  build: {
+    rolldownOptions: {
+      output: {
+        // React and the router change far less often than the explorer itself, so they get a
+        // chunk of their own that browsers keep cached between deploys.
+        codeSplitting: {
+          groups: [
+            {
+              name: 'react',
+              test: /[\\/]node_modules[\\/](react|react-dom|react-router|scheduler)[\\/]/,
+            },
+          ],
+        },
+      },
+    },
+  },
 });
