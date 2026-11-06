@@ -179,7 +179,7 @@ const errorHandling: Flow = {
       status: 'verified',
       symbol: 'backend/shared/src/errors.ts#errorHandler',
       highlight: "logger.error({ err }, 'request failed');",
-      what: "When the status is 500 or more, errorHandler logs 'request failed' at error level with the original error, including its stack. The line also carries the request ID. For 4xx errors errorHandler logs nothing itself. In both cases pino-http logs the finished request: at warn for 4xx and at error for 5xx.",
+      what: "When the status is 500 or more, errorHandler logs 'request failed' at error level with the original error, including its stack. The line also carries the request ID. For 4xx errors errorHandler logs nothing itself. In both cases pino-http logs the finished request: at warn for 4xx and at error for 5xx. The exception is a request whose URL is exactly /healthz or /readyz: pino-http skips it whatever its method or status, so a broken-JSON POST /healthz gets a 400 with no request line.",
       why: 'The client gets no details for a 500, so the log is where a developer finds out what went wrong. The request ID links the log line to the response.',
       sideEffects: ["Writes a 'request failed' line at error level."],
       next: [{ to: 'to-problem', kind: 'next' }],

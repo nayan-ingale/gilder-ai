@@ -191,7 +191,7 @@ const gracefulShutdown: Flow = {
   category: 'lifecycle',
   apps: APPS,
   summary:
-    "How a running backend app stops without cutting off requests. startService in backend/shared sets this up the same way for all five apps; only the onShutdown cleanup differs. On SIGTERM or SIGINT the app stops taking new connections, lets in-flight requests finish (for up to 10 seconds), runs onShutdown to close its data stores, logs 'shut down cleanly' and exits with code 0. If onShutdown fails, it exits with code 1. A second signal of the same kind ends the process at once, and under `pnpm dev` one Ctrl+C can deliver SIGINT twice. The startService test in backend/shared/src/service.test.ts covers close() and onShutdown, but not the signal handlers.",
+    "How a running backend app stops without cutting off requests. startService in backend/shared sets this up the same way for all five apps; only the onShutdown cleanup differs. On SIGTERM or SIGINT the app stops taking new connections, lets in-flight requests finish (for up to 10 seconds), runs onShutdown to close its data stores, logs 'shut down cleanly' and exits with code 0. If onShutdown fails, it exits with code 1. A second signal of the same kind ends the process at once. Under `pnpm dev` one Ctrl+C delivers SIGINT twice, so the app logs 'shutting down' and is then killed before its cleanup finishes; one SIGTERM, or a run without --watch, shuts down cleanly. The startService test in backend/shared/src/service.test.ts covers close() and onShutdown, but not the signal handlers.",
   status: 'verified',
   steps: [
     {
@@ -199,8 +199,8 @@ const gracefulShutdown: Flow = {
       title: 'SIGTERM or SIGINT arrives',
       kind: 'trigger',
       status: 'verified',
-      what: "Something outside the app asks it to stop. `kill <pid>` sends SIGTERM, and Ctrl+C in the terminal sends SIGINT. Under `pnpm dev` each app runs under `node --watch` (see the dev script in its package.json), so there are two Node processes: the watch parent and the app. The terminal sends SIGINT to every process in the foreground process group, and the watch parent also catches SIGINT and forwards it to the app with child.kill(signal). So one Ctrl+C can reach the app twice (see 'A second signal').",
-      why: 'These are the usual ways to ask a process to stop. Both get the same clean shutdown. It is reliable with a single `kill` (one SIGTERM), or when node runs the app without --watch, so that one Ctrl+C is one SIGINT.',
+      what: "Something outside the app asks it to stop. `kill <pid>` sends SIGTERM, and Ctrl+C in the terminal sends SIGINT. Under `pnpm dev` each app runs under `node --watch` (see the dev script in its package.json), so there are two Node processes: the watch parent and the app. The terminal sends SIGINT to every process in the foreground process group, and the watch parent also catches SIGINT and forwards it to the app with child.kill(signal). So one Ctrl+C reaches the app twice (see 'A second signal').",
+      why: 'These are the usual ways to ask a process to stop. Both get the same clean shutdown when the app receives one signal: a single `kill` (one SIGTERM), or Ctrl+C when node runs the app without --watch.',
     },
     {
       id: 'handler',
@@ -209,7 +209,7 @@ const gracefulShutdown: Flow = {
       status: 'verified',
       symbol: 'backend/shared/src/service.ts#startService',
       highlight: 'process.once(signal, () => {',
-      what: "When the app started listening, startService registered one handler for SIGTERM and one for SIGINT. It skips this when handleSignals is false, but no app sets that; only the test does. Because a handler exists, Node does not end the process at once, which is its default for these signals. The handler logs 'shutting down' with the signal name, then calls close(). process.once means each handler runs for the first signal of its kind only, so the second SIGINT that one Ctrl+C can bring under `pnpm dev` is not caught by it.",
+      what: "When the app started listening, startService registered one handler for SIGTERM and one for SIGINT. It skips this when handleSignals is false, but no app sets that; only the test does. Because a handler exists, Node does not end the process at once, which is its default for these signals. The handler logs 'shutting down' with the signal name, then calls close(). process.once means each handler runs for the first signal of its kind only, so the second SIGINT that one Ctrl+C brings under `pnpm dev` is not caught by it.",
       why: 'Without a handler, the process would end in the middle of any request it was serving.',
       next: [
         { to: 'close', kind: 'next' },
@@ -227,8 +227,8 @@ const gracefulShutdown: Flow = {
       status: 'verified',
       symbol: 'backend/shared/src/service.ts#startService',
       highlight: "for (const signal of ['SIGTERM', 'SIGINT'] as const) {",
-      what: "process.once removes each handler when it runs, and once a signal has no listener left Node stops watching it, so the default action is back. A later signal of the same kind then kills the process at once. onShutdown never runs, so MongoDB and Redis are not closed cleanly. The process has no exit code of its own here: a shell reports a process killed by SIGTERM as status 143 (128 + 15) and by SIGINT as 130 (128 + 2), and under node --watch the watch parent exits with code 0 (it passes on the app's exit code and falls back to 0 when there is none). Under `pnpm dev` this is a race: one Ctrl+C reaches the app from the terminal and again from the watch parent. If the second SIGINT lands after the handler has run, the app dies without cleanup; if it lands before, it does no harm. A signal of the other kind still has its own handler: SIGTERM then SIGINT logs 'shutting down' twice, but close() returns the same promise, so the work runs once and the app exits with code 0.",
-      why: 'In practice, a second Ctrl+C stops a shutdown that is taking too long.',
+      what: "process.once removes each handler when it runs, and once a signal has no listener left Node stops watching it, so the default action is back. A later signal of the same kind then kills the process at once. onShutdown never finishes, so MongoDB and Redis are not closed cleanly and 'shut down cleanly' is not logged. The process has no exit code of its own here: a shell reports a process killed by SIGTERM as status 143 (128 + 15) and by SIGINT as 130 (128 + 2), and under node --watch the watch parent exits with code 0 (it passes on the app's exit code and falls back to 0 when there is none). Under `pnpm dev` this happens on every Ctrl+C: the app gets SIGINT from the terminal, and the watch parent passes on a second one. The first runs the handler, so the app logs 'shutting down'; the second then kills it before its cleanup finishes. One SIGTERM, or a run without --watch, shuts down cleanly. A signal of the other kind still has its own handler: SIGTERM then SIGINT logs 'shutting down' twice, but close() returns the same promise, so the work runs once and the app exits with code 0.",
+      why: 'Without --watch, a second Ctrl+C stops a shutdown that is taking too long.',
       next: [],
     },
     {

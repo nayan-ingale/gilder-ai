@@ -300,7 +300,7 @@ const unknownRoute: Flow = {
   category: 'errors',
   apps: APPS,
   summary:
-    'A request that no route matches goes through the shared middleware and the health router, reaches notFoundHandler, and errorHandler turns it into a 404 problem+json reply. The request logger writes it at warn. No app has its own routes yet, so today every request except GET/HEAD/OPTIONS on /healthz and /readyz ends here, unless its JSON body is rejected first.',
+    'A request that no route matches goes through the shared middleware and the health router, reaches notFoundHandler, and errorHandler turns it into a 404 problem+json reply. The request logger writes it at warn, unless its URL is exactly /healthz or /readyz: pino-http skips those whatever the method or status, so POST /healthz gets a 404 with no request line. No app has its own routes yet, so today every request except GET/HEAD/OPTIONS on /healthz and /readyz ends here, unless its JSON body is rejected first.',
   status: 'verified',
   steps: [
     {
@@ -308,19 +308,20 @@ const unknownRoute: Flow = {
       title: 'A request for a path no app handles',
       kind: 'trigger',
       status: 'verified',
-      what: 'Any request whose method and path match no route, for example GET /nothing-here, the path the tests use. No app registers its own routes yet, so in all five apps every request except GET/HEAD/OPTIONS on /healthz and /readyz ends here, unless its JSON body is rejected first. HEAD on those two paths is served by the GET routes, and OPTIONS gets an automatic 200 reply with an Allow header from the router. A JSON body that fails to parse or is too big goes straight to errorHandler as a 400 or 413, before routing.',
+      what: 'Any request whose method and path match no route, for example GET /nothing-here, the path the tests use. No app registers its own routes yet, so in all five apps every request except GET/HEAD/OPTIONS on /healthz and /readyz ends here, unless its JSON body is rejected first. HEAD on those two paths is served by the GET routes, and OPTIONS gets an automatic 200 reply with an Allow header from the router. A JSON body that fails to parse or is too big goes straight to errorHandler as a 400 or 413, before routing. A JSON body with an unsupported charset or Content-Encoding also goes straight there, and the caller gets a 500.',
       why: "Callers reach unknown paths through typos, old links or routes that are not built yet. They should get a clear, structured error instead of Express's default HTML page.",
       input: 'Any method and path with no route, maybe with a body.',
     },
     requestIdStep,
     {
       id: 'request-logger',
-      title: 'Request logger (will log this one)',
+      title: 'Request logger',
       kind: 'middleware',
       status: 'verified',
       symbol: 'backend/shared/src/service.ts#createService',
-      highlight: 'pinoHttp({',
-      what: 'pino-http gives the request req.id (copied from the X-Request-Id header) and req.log, then waits for the response to finish. The path is not /healthz or /readyz, so this request will be logged.',
+      highlight:
+        "autoLogging: { ignore: (req) => req.url === '/healthz' || req.url === '/readyz' },",
+      what: 'pino-http gives the request req.id (copied from the X-Request-Id header) and req.log. It skips any request whose URL is exactly /healthz or /readyz, whatever its method or status, so POST /healthz gets this same 404 with no request line. For every other request it waits for the response to finish, then logs it.',
       why: 'One line per request, written once the response is done, records the status and how long it took.',
     },
     securityHeadersStep,
@@ -331,7 +332,7 @@ const unknownRoute: Flow = {
       status: 'verified',
       symbol: 'backend/shared/src/service.ts#createService',
       highlight: 'app.use(express.json({ limit: bodyLimit }));',
-      what: 'express.json only reads a body when there is one and its Content-Type is JSON; anything else passes straight on. The limit is 64kb, because no app sets bodyLimit. If a JSON body is broken or too big, the parser fails here, before routing, so the caller gets 400 or 413 from errorHandler instead of 404.',
+      what: 'express.json only reads a body when there is one and its Content-Type is JSON; anything else passes straight on. The limit is 64kb, because no app sets bodyLimit. If a JSON body is broken or too big, the parser fails here, before routing, so the caller gets 400 or 413 from errorHandler instead of 404. A JSON body with an unsupported charset (for example charset=latin1) or an unknown Content-Encoding fails here too: body-parser marks it as 415, but toAppError does not map it, so the caller gets a 500 internal_error, logged at error.',
       why: 'It runs before every route so handlers get req.body ready to use.',
     },
     {
@@ -415,9 +416,11 @@ const unknownRoute: Flow = {
       status: 'verified',
       symbol: 'backend/shared/src/service.ts#createService',
       highlight: "return res.statusCode >= 400 ? 'warn' : 'info';",
-      what: 'When the response finishes, pino-http writes one "request completed" line with the request, the response and the response time. customLogLevel picks the level: there is no error object and the status is 404, which is 400 or more, so the level is warn. The line includes req.id, the same ID as X-Request-Id. The logger replaces secrets such as the Authorization and Cookie headers with [REDACTED].',
+      what: 'When the response finishes, pino-http writes one "request completed" line with the request, the response and the response time. customLogLevel picks the level: there is no error object and the status is 404, which is 400 or more, so the level is warn. The line includes req.id, the same ID as X-Request-Id. The logger replaces secrets such as the Authorization and Cookie headers with [REDACTED]. There is no line when the URL is exactly /healthz or /readyz, for example POST /healthz.',
       why: "A 404 is the caller's mistake, not a server failure, so it is a warning and not an error. Many 404s in the logs can still point to a broken link or a missing route.",
-      sideEffects: ['Writes one warn log line: "request completed".'],
+      sideEffects: [
+        'Writes one warn log line: "request completed" (none when the URL is exactly /healthz or /readyz).',
+      ],
     },
   ],
 };
