@@ -35,7 +35,7 @@ export const loggingPage: DocPage = {
       blocks: [
         {
           kind: 'text',
-          text: 'The level comes from the `LOG_LEVEL` setting: `fatal`, `error`, `warn`, `info`, `debug`, `trace` or `silent`, and `info` when it is not set. Lines below that level are skipped. The app, service, mongo and internal-token tests use `silent`; `logger.test.ts` keeps the default `info` and captures the lines to check them. Today the code writes these lines:',
+          text: 'The level comes from the `LOG_LEVEL` setting: `fatal`, `error`, `warn`, `info`, `debug`, `trace` or `silent`, and `info` when it is not set. Lines below that level are skipped. The app, service, mongo, internal-token and rate-limit tests use `silent`; `logger.test.ts`, and the request-logging and double-SIGINT tests in `service.test.ts`, keep the default `info` and capture the lines to check them. Today the code writes these lines:',
         },
         {
           kind: 'table',
@@ -43,12 +43,12 @@ export const loggingPage: DocPage = {
           rows: [
             [
               'error',
-              "Requests that ended with a 5xx, 'request failed', 'redis error', 'shutdown failed'",
+              "Requests that ended with a 5xx, 'request failed', 'redis error', 'shutdown failed', 'shutdown timed out'",
             ],
             ['warn', "Requests that ended with a 4xx, 'readiness check failed'"],
             [
               'info',
-              "Other requests, 'listening', 'mongodb connected', 'shutting down', 'shut down cleanly'",
+              "Other requests, 'listening', 'mongodb connected', 'shutting down', 'already shutting down', 'shut down cleanly'",
             ],
           ],
         },
@@ -146,7 +146,7 @@ export const loggingPage: DocPage = {
       blocks: [
         {
           kind: 'text',
-          text: 'The same context can hold the user. `setContextUserId` records the user ID, and from then on the mixin adds `userId` next to `requestId`. Only `requireInternalToken` calls it, after checking the token from the gateway, and no app uses that middleware yet. So today no log line carries a user. It is planned to be wired in Sign-in and sessions.',
+          text: 'The same context can hold the user. `setContextUserId` records the user ID, and from then on the mixin adds `userId` next to `requestId`. Only `requireInternalToken` calls it, after checking the token from the gateway, and only when the token names a user: a request with no session, such as a sign-in, gets a token without one. No app uses that middleware yet, so today no log line carries a user. It is planned to be wired in Sign-in and sessions.',
         },
         {
           kind: 'quote',
@@ -167,16 +167,17 @@ export const loggingPage: DocPage = {
       blocks: [
         {
           kind: 'text',
-          text: "`createService` adds pino-http right after the request ID. When a response finishes, it writes one line with the request (`req`: ID, method, URL and headers, with secrets hidden), the response (`res`: status and headers), `responseTime` in milliseconds and the message 'request completed' ('request errored' for a 5xx). pino-http 11 also writes 'request aborted' when the client disconnects before the response ends. The level follows the status: error for 5xx, warn for 4xx, info otherwise. pino-http takes its `req.id` from the `X-Request-Id` response header, so it matches `requestId`. pino-http skips any request whose URL is exactly `/healthz` or `/readyz`, whatever its method or status (so `POST /healthz` gets a 404 with no request line); every other request gets one line. This keeps health checks from flooding the logs.",
+          text: "`createService` adds pino-http right after the request ID. When a response finishes, it writes one line with the request (`req`: ID, method, URL and headers, with secrets hidden), the response (`res`: status and headers), `responseTime` in milliseconds and the message 'request completed' ('request errored' for a 5xx). pino-http 11 also writes 'request aborted' when the client disconnects before the response ends. The level follows the status: error for 5xx, warn for 4xx, info otherwise. pino-http takes its `req.id` from the `X-Request-Id` response header, so it matches `requestId`. pino-http skips only health probes: a GET or HEAD on `/healthz` or `/readyz`, with or without a query string (`isHealthProbe`). Every other request gets one line, including any other method on those paths: `POST /healthz` gets a 404 and a warn line. This keeps health checks from flooding the logs, while calls that use those paths by mistake still show.",
         },
         {
           kind: 'quote',
           file: 'backend/shared/src/service.ts',
-          text: "autoLogging: { ignore: (req) => req.url === '/healthz' || req.url === '/readyz' },",
+          text: 'autoLogging: { ignore: isHealthProbe },',
         },
       ],
       refs: [
         { symbol: 'backend/shared/src/service.ts#createService' },
+        { symbol: 'backend/shared/src/health.ts#isHealthProbe' },
         { flow: 'unknown-route' },
         { flow: 'health-check' },
       ],

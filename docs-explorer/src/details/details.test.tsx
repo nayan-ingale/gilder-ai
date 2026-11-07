@@ -234,7 +234,7 @@ describe('StepDetails', () => {
       ]);
       expect(stepNav(renderStep('error-handling', 'to-app-error'))).toEqual([
         { button: true, text: '← Previous step Has the response already started?' },
-        { button: false, text: 'Next step → Splits into 4 steps: see Comes after' },
+        { button: false, text: 'Next step → Splits into 5 steps: see Comes after' },
       ]);
       expect(stepNav(renderStep('error-handling', 'error-handler'))).toEqual([
         { button: false, text: '← Previous step 3 steps lead here: see Comes before' },

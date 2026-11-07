@@ -13,7 +13,7 @@ const errorHandling: Flow = {
   category: 'errors',
   apps: APPS,
   summary:
-    'How an error in a backend app becomes a JSON error response in the problem+json format (RFC 9457). createService adds errorHandler last, so it receives every error passed on by the middleware before it. errorHandler turns the error into an AppError: it keeps AppErrors as they are, maps two JSON body-parser errors to 413 and 400, and turns everything else into a generic 500. It logs server errors, then sends a body built by toProblem. Today no app has routes of its own, so in a running app errors come only from the JSON body parser and the 404 handler. Errors thrown by routes are reached only by the tests in backend/shared/src/service.test.ts.',
+    'How an error in a backend app becomes a JSON error response in the problem+json format (RFC 9457). createService adds errorHandler last, so it receives every error passed on by the middleware before it. errorHandler turns the error into an AppError: it keeps AppErrors as they are, maps four JSON body-parser errors to 413, 400 and 415, and turns everything else into a generic 500. It logs server errors, then sends a body built by toProblem. Today no app has routes of its own, so in a running app errors come only from the JSON body parser and the 404 handler. Errors thrown by routes are reached only by the tests in backend/shared/src/service.test.ts.',
   status: 'partial',
   steps: [
     {
@@ -32,7 +32,7 @@ const errorHandling: Flow = {
       status: 'verified',
       symbol: 'backend/shared/src/service.ts#createService',
       highlight: 'app.use(express.json({ limit: bodyLimit }));',
-      what: 'express.json reads the body of every request sent as application/json, on any path, before routing. If the body is not valid JSON, is over the limit (64kb unless an app sets bodyLimit, and none does), or cannot be decoded, it calls next(err) with an error that has a `type` field. Express then skips the routes and the 404 handler and goes straight to the error handler. So broken JSON sent to a path that does not exist gets a 400, not a 404.',
+      what: 'express.json reads the body of every request sent as application/json, on any path, before routing. createService adds it only when parseJson is true, the default, and no app turns it off. If the body is not valid JSON, is over the limit (64kb unless an app sets bodyLimit, and none does), or uses a charset or Content-Encoding the parser does not support, it calls next(err) with an error that has a `type` field. A body that fails to decompress, such as invalid gzip, gives an error without one, which becomes a 500. Express then skips the routes and the 404 handler and goes straight to the error handler. So broken JSON sent to a path that does not exist gets a 400, not a 404.',
       why: 'Bad bodies are rejected before any route code sees them, and the size limit stops very large bodies.',
       next: [
         { to: 'routes', kind: 'next', label: 'the body is fine, or there is none' },
@@ -46,7 +46,7 @@ const errorHandling: Flow = {
       status: 'not-wired',
       symbol: 'backend/shared/src/service.ts#createService',
       highlight: 'routes?.(app);',
-      what: "An app's own routes run here. A route can throw, return a rejected promise (Express 5 passes it on like a throw), or call next(err), and all three reach the error handler. Today no app passes routes, so nothing in a running app takes this path. The tests add routes that do: /forbidden throws an AppError, /crash throws a plain Error, and /async-crash throws after an await. validate() and requireInternalToken() also raise AppErrors this way, but no app uses them yet.",
+      what: "An app's own routes run here. A route can throw, return a rejected promise (Express 5 passes it on like a throw), or call next(err), and all three reach the error handler. Today no app passes routes, so nothing in a running app takes this path. The tests add routes that do: /forbidden throws an AppError, /crash throws a plain Error, and /async-crash throws after an await. validate(), requireInternalToken(), requireUser() and rateLimit() also raise AppErrors this way, but no app uses them yet.",
       why: 'Route code can simply throw. It does not have to build error responses itself.',
       next: [
         { to: 'not-found', kind: 'next', label: 'no route answered' },
@@ -115,13 +115,18 @@ const errorHandling: Flow = {
       status: 'verified',
       symbol: 'backend/shared/src/errors.ts#toAppError',
       highlight: 'if (err instanceof AppError) {',
-      what: "toAppError turns any thrown value into an AppError. It checks, in order: is it already an AppError; is it a body-parser error with type 'entity.too.large'; is it one with type 'entity.parse.failed'. Anything else becomes a 500.",
+      what: "toAppError turns any thrown value into an AppError. It checks, in order: is it already an AppError; is it a body-parser error with type 'entity.too.large', 'entity.parse.failed', 'charset.unsupported' or 'encoding.unsupported'. Anything else becomes a 500.",
       why: 'The rest of errorHandler only has to deal with one kind of error.',
       output: 'An AppError with a code and a status.',
       next: [
         { to: 'keep', kind: 'branch', label: 'already an AppError' },
         { to: 'too-large', kind: 'branch', label: "type 'entity.too.large'" },
         { to: 'bad-json', kind: 'branch', label: "type 'entity.parse.failed'" },
+        {
+          to: 'unsupported',
+          kind: 'branch',
+          label: "type 'charset.unsupported' or 'encoding.unsupported'",
+        },
         { to: 'internal', kind: 'branch', label: 'anything else' },
       ],
     },
@@ -162,13 +167,25 @@ const errorHandling: Flow = {
       next: [{ to: 'to-problem', kind: 'next' }],
     },
     {
+      id: 'unsupported',
+      title: 'Unreadable body: 415',
+      kind: 'function',
+      status: 'verified',
+      symbol: 'backend/shared/src/errors.ts#toAppError',
+      highlight:
+        "return new AppError('unsupported_media_type', 'The request body uses an unsupported charset');",
+      what: "A JSON body in a charset the parser cannot read (for example charset=latin1) becomes AppError('unsupported_media_type') with the detail 'The request body uses an unsupported charset'. A body with a Content-Encoding the parser does not know (for example compress) gets the detail 'The request body uses an unsupported Content-Encoding'. Both are status 415. The messages are fixed, so the client's header values are never echoed back. Two tests in service.test.ts send such bodies and check the code and the detail. Any app answers the same today.",
+      why: 'The client sent a body the server cannot read. The caller has to fix it, so it is a 4xx, not a server failure.',
+      next: [{ to: 'to-problem', kind: 'next' }],
+    },
+    {
       id: 'internal',
       title: 'Anything else: 500 internal_error',
       kind: 'function',
       status: 'verified',
       symbol: 'backend/shared/src/errors.ts#toAppError',
       highlight: "return new AppError('internal_error', undefined, { cause: err });",
-      what: "Every other value becomes AppError('internal_error') with status 500, and the original error is kept as its cause. In the tests, /crash and /async-crash reach this. In a running app today it is reached by body-parser errors that this code does not map: a JSON body with an unsupported charset (for example charset=latin1) or an unknown Content-Encoding. body-parser marks those as 415, but toAppError checks only two types, so the client gets a 500.",
+      what: "Every other value becomes AppError('internal_error') with status 500, and the original error is kept as its cause. In the tests, /crash and /async-crash reach this. In a running app today it is reached by a body-parser failure that toAppError does not map, such as a body sent with Content-Encoding: gzip that is not valid gzip.",
       why: 'An unknown error can hold internal details (the test error contains a password), so it is never described to the client.',
       next: [{ to: 'log-500', kind: 'next' }],
     },
@@ -179,7 +196,7 @@ const errorHandling: Flow = {
       status: 'verified',
       symbol: 'backend/shared/src/errors.ts#errorHandler',
       highlight: "logger.error({ err }, 'request failed');",
-      what: "When the status is 500 or more, errorHandler logs 'request failed' at error level with the original error, including its stack. The line also carries the request ID. For 4xx errors errorHandler logs nothing itself. In both cases pino-http logs the finished request: at warn for 4xx and at error for 5xx. The exception is a request whose URL is exactly /healthz or /readyz: pino-http skips it whatever its method or status, so a broken-JSON POST /healthz gets a 400 with no request line.",
+      what: "When the status is 500 or more, errorHandler logs 'request failed' at error level with the original error, including its stack. The line also carries the request ID. For 4xx errors, such as a 415 for an unreadable body, errorHandler logs nothing itself. In both cases pino-http logs the finished request: at warn for 4xx and at error for 5xx. It skips only health probes (GET or HEAD on /healthz and /readyz), so a broken-JSON POST /healthz gets a 400 and a warn line.",
       why: 'The client gets no details for a 500, so the log is where a developer finds out what went wrong. The request ID links the log line to the response.',
       sideEffects: ["Writes a 'request failed' line at error level."],
       next: [{ to: 'to-problem', kind: 'next' }],

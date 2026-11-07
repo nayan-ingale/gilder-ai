@@ -278,6 +278,7 @@ describe('the error handling flow', () => {
       'keep',
       'too-large',
       'bad-json',
+      'unsupported',
       'internal',
     ]);
   });

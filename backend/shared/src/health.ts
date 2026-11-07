@@ -1,3 +1,4 @@
+import type { IncomingMessage } from 'node:http';
 import { Router } from 'express';
 import type { Logger } from './logger.ts';
 
@@ -5,6 +6,22 @@ import type { Logger } from './logger.ts';
 export type ReadinessCheck = () => Promise<void>;
 
 const CHECK_TIMEOUT_MS = 2_000;
+
+/** The paths healthRouter serves. */
+const HEALTH_PATHS = new Set(['/healthz', '/readyz']);
+
+/**
+ * True for a health probe: a GET or HEAD on /healthz or /readyz, with or without a query string
+ * (the router serves those too). Probes come every few seconds, so the request logger skips them.
+ * Anything else on those paths, such as POST /healthz, is a mistake worth seeing, so it is logged.
+ */
+export function isHealthProbe(req: IncomingMessage): boolean {
+  if (req.method !== 'GET' && req.method !== 'HEAD') {
+    return false;
+  }
+  const path = req.url?.split('?', 1)[0];
+  return path !== undefined && HEALTH_PATHS.has(path);
+}
 
 /**
  * /healthz: the process is up (used to restart a stuck app).

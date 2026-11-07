@@ -60,14 +60,13 @@ const healthCheck: Flow = {
     requestIdStep,
     {
       id: 'request-logger',
-      title: 'Request logger (skipped for this path)',
+      title: 'Request logger (skipped for health probes)',
       kind: 'middleware',
       status: 'verified',
       symbol: 'backend/shared/src/service.ts#createService',
-      highlight:
-        "autoLogging: { ignore: (req) => req.url === '/healthz' || req.url === '/readyz' },",
-      what: 'pino-http gives the request req.id (copied from the X-Request-Id header set one step earlier) and req.log. It normally writes one "request completed" line when the response finishes, but the ignore rule matches when req.url is exactly /healthz or /readyz, so no line is written here. The match is exact: /healthz?x=1 would still be logged.',
-      why: 'Health checks can be called very often. Logging every one would bury the real traffic in the logs.',
+      highlight: 'autoLogging: { ignore: isHealthProbe },',
+      what: 'pino-http gives the request req.id (copied from the X-Request-Id header set one step earlier) and req.log. It normally writes one "request completed" line when the response finishes, but its ignore rule, isHealthProbe, matches a GET or HEAD on /healthz or /readyz, with or without a query string, so no line is written here. Any other method on these paths, such as POST /healthz, is logged like any other request.',
+      why: 'Health checks can be called very often. Logging every one would bury the real traffic in the logs. Anything else on these paths is a mistake worth seeing, so it is still logged.',
     },
     securityHeadersStep,
     {
@@ -137,13 +136,12 @@ const readinessCheck: Flow = {
     requestIdStep,
     {
       id: 'request-logger',
-      title: 'Request logger (skipped for this path)',
+      title: 'Request logger (skipped for health probes)',
       kind: 'middleware',
       status: 'verified',
       symbol: 'backend/shared/src/service.ts#createService',
-      highlight:
-        "autoLogging: { ignore: (req) => req.url === '/healthz' || req.url === '/readyz' },",
-      what: 'pino-http gives the request req.id (copied from the X-Request-Id header) and req.log. The ignore rule matches when req.url is exactly /readyz, so no "request completed" line is written for this request, whatever the status.',
+      highlight: 'autoLogging: { ignore: isHealthProbe },',
+      what: 'pino-http gives the request req.id (copied from the X-Request-Id header) and req.log. Its ignore rule, isHealthProbe, matches a GET or HEAD on /healthz or /readyz, with or without a query string, so no "request completed" line is written for this request, whatever the status. Any other method on /readyz, such as DELETE, is logged like any other request.',
       why: 'Readiness checks can be called very often. Logging every one would bury the real traffic in the logs. A failed check is still logged, by the handler itself.',
     },
     securityHeadersStep,
@@ -249,7 +247,7 @@ const readinessCheck: Flow = {
       status: 'verified',
       symbol: 'backend/shared/src/health.ts#healthRouter',
       highlight: "logger.warn({ err: error, check: name }, 'readiness check failed');",
-      what: 'The check name is recorded as failed, and the error is logged at warn with the check name. The log line also carries the request ID from the request context. The request logger skips /readyz, so these warn lines are the only trace of a failed readiness check in the logs.',
+      what: 'The check name is recorded as failed, and the error is logged at warn with the check name. The log line also carries the request ID from the request context. The request logger skips GET and HEAD /readyz, so these warn lines are the only trace of a failed readiness check in the logs.',
       why: 'The error details go to the logs, where developers can read them, and not to the caller. An error message can hold internal details such as host addresses.',
       sideEffects: ['Writes a warn log line: "readiness check failed".'],
       next: [{ to: 'decide', kind: 'next' }],
@@ -300,7 +298,7 @@ const unknownRoute: Flow = {
   category: 'errors',
   apps: APPS,
   summary:
-    'A request that no route matches goes through the shared middleware and the health router, reaches notFoundHandler, and errorHandler turns it into a 404 problem+json reply. The request logger writes it at warn, unless its URL is exactly /healthz or /readyz: pino-http skips those whatever the method or status, so POST /healthz gets a 404 with no request line. No app has its own routes yet, so today every request except GET/HEAD/OPTIONS on /healthz and /readyz ends here, unless its JSON body is rejected first.',
+    'A request that no route matches goes through the shared middleware and the health router, reaches notFoundHandler, and errorHandler turns it into a 404 problem+json reply. The request logger writes it at warn. pino-http skips only health probes (GET or HEAD on /healthz and /readyz), so POST /healthz gets a 404 and a warn line too. No app has its own routes yet, so today every request except GET/HEAD/OPTIONS on /healthz and /readyz ends here, unless its JSON body is rejected first.',
   status: 'verified',
   steps: [
     {
@@ -308,7 +306,7 @@ const unknownRoute: Flow = {
       title: 'A request for a path no app handles',
       kind: 'trigger',
       status: 'verified',
-      what: 'Any request whose method and path match no route, for example GET /nothing-here, the path the tests use. No app registers its own routes yet, so in all five apps every request except GET/HEAD/OPTIONS on /healthz and /readyz ends here, unless its JSON body is rejected first. HEAD on those two paths is served by the GET routes, and OPTIONS gets an automatic 200 reply with an Allow header from the router. A JSON body that fails to parse or is too big goes straight to errorHandler as a 400 or 413, before routing. A JSON body with an unsupported charset or Content-Encoding also goes straight there, and the caller gets a 500.',
+      what: 'Any request whose method and path match no route, for example GET /nothing-here, the path the tests use. No app registers its own routes yet, so in all five apps every request except GET/HEAD/OPTIONS on /healthz and /readyz ends here, unless its JSON body is rejected first. HEAD on those two paths is served by the GET routes, and OPTIONS gets an automatic 200 reply with an Allow header from the router. A JSON body that fails to parse, is too big, or uses an unsupported charset or Content-Encoding goes straight to errorHandler as a 400, 413 or 415, before routing.',
       why: "Callers reach unknown paths through typos, old links or routes that are not built yet. They should get a clear, structured error instead of Express's default HTML page.",
       input: 'Any method and path with no route, maybe with a body.',
     },
@@ -319,9 +317,8 @@ const unknownRoute: Flow = {
       kind: 'middleware',
       status: 'verified',
       symbol: 'backend/shared/src/service.ts#createService',
-      highlight:
-        "autoLogging: { ignore: (req) => req.url === '/healthz' || req.url === '/readyz' },",
-      what: 'pino-http gives the request req.id (copied from the X-Request-Id header) and req.log. It skips any request whose URL is exactly /healthz or /readyz, whatever its method or status, so POST /healthz gets this same 404 with no request line. For every other request it waits for the response to finish, then logs it.',
+      highlight: 'autoLogging: { ignore: isHealthProbe },',
+      what: 'pino-http gives the request req.id (copied from the X-Request-Id header) and req.log. It skips only health probes: a GET or HEAD on /healthz or /readyz, with or without a query string (isHealthProbe). For every other request, including POST /healthz, which gets this same 404, it waits for the response to finish, then logs it.',
       why: 'One line per request, written once the response is done, records the status and how long it took.',
     },
     securityHeadersStep,
@@ -332,7 +329,7 @@ const unknownRoute: Flow = {
       status: 'verified',
       symbol: 'backend/shared/src/service.ts#createService',
       highlight: 'app.use(express.json({ limit: bodyLimit }));',
-      what: 'express.json only reads a body when there is one and its Content-Type is JSON; anything else passes straight on. The limit is 64kb, because no app sets bodyLimit. If a JSON body is broken or too big, the parser fails here, before routing, so the caller gets 400 or 413 from errorHandler instead of 404. A JSON body with an unsupported charset (for example charset=latin1) or an unknown Content-Encoding fails here too: body-parser marks it as 415, but toAppError does not map it, so the caller gets a 500 internal_error, logged at error.',
+      what: 'express.json only reads a body when there is one and its Content-Type is JSON; anything else passes straight on. createService adds it only when parseJson is true, the default, and no app turns it off. The limit is 64kb, because no app sets bodyLimit. If a JSON body is broken or too big, the parser fails here, before routing, so the caller gets 400 or 413 from errorHandler instead of 404. A JSON body with an unsupported charset (for example charset=latin1) or an unknown Content-Encoding fails here too: toAppError turns it into a 415 unsupported_media_type, with a fixed message that never repeats the header. Like any 4xx, errorHandler does not log it, and pino-http logs the request at warn.',
       why: 'It runs before every route so handlers get req.body ready to use.',
     },
     {
@@ -342,7 +339,7 @@ const unknownRoute: Flow = {
       status: 'verified',
       symbol: 'backend/shared/src/service.ts#createService',
       highlight: 'app.use(healthRouter(name, readinessChecks, logger));',
-      what: 'The health router only has GET /healthz and GET /readyz. It also answers HEAD (through the GET routes) and OPTIONS on those two paths. Any other request falls through to the next middleware.',
+      what: 'The health router only has GET /healthz and GET /readyz. It also answers HEAD (through the GET routes) and OPTIONS on those two paths. Any other request falls through to the next middleware. With the internalAuth option, createService would put requireInternalToken next, and a request without a valid internal token would get 401 there, before routing, so an unknown path would get 401 and not 404 (a JSON body the parser rejects is answered before that, since the body parser comes first). No app passes internalAuth yet, so the request goes straight on to the routes.',
       why: 'The health routes are shared by every app, so they come before the app routes.',
     },
     {
@@ -383,7 +380,7 @@ const unknownRoute: Flow = {
       status: 'verified',
       symbol: 'backend/shared/src/errors.ts#toAppError',
       highlight: 'if (err instanceof AppError) {',
-      what: 'The error is already an AppError, so it comes back unchanged: code not_found, status 404. Other errors would be mapped: broken JSON becomes 400 bad_request, a body over the limit becomes 413 payload_too_large, and anything else becomes 500 internal_error.',
+      what: 'The error is already an AppError, so it comes back unchanged: code not_found, status 404. Other errors would be mapped: broken JSON becomes 400 bad_request, a body over the limit becomes 413 payload_too_large, a body in an unsupported charset or Content-Encoding becomes 415 unsupported_media_type, and anything else becomes 500 internal_error.',
       why: 'Only an AppError may describe itself to the client. Any other error is hidden behind a generic 500.',
     },
     {
@@ -416,11 +413,9 @@ const unknownRoute: Flow = {
       status: 'verified',
       symbol: 'backend/shared/src/service.ts#createService',
       highlight: "return res.statusCode >= 400 ? 'warn' : 'info';",
-      what: 'When the response finishes, pino-http writes one "request completed" line with the request, the response and the response time. customLogLevel picks the level: there is no error object and the status is 404, which is 400 or more, so the level is warn. The line includes req.id, the same ID as X-Request-Id. The logger replaces secrets such as the Authorization and Cookie headers with [REDACTED]. There is no line when the URL is exactly /healthz or /readyz, for example POST /healthz.',
+      what: 'When the response finishes, pino-http writes one "request completed" line with the request, the response and the response time. customLogLevel picks the level: there is no error object and the status is 404, which is 400 or more, so the level is warn. The line includes req.id, the same ID as X-Request-Id. The logger replaces secrets such as the Authorization and Cookie headers with [REDACTED]. POST /healthz is logged here too: only GET and HEAD health probes are skipped.',
       why: "A 404 is the caller's mistake, not a server failure, so it is a warning and not an error. Many 404s in the logs can still point to a broken link or a missing route.",
-      sideEffects: [
-        'Writes one warn log line: "request completed" (none when the URL is exactly /healthz or /readyz).',
-      ],
+      sideEffects: ['Writes one warn log line: "request completed".'],
     },
   ],
 };

@@ -16,6 +16,7 @@ describe('groupSymbolsByKind', () => {
     const groups = groupSymbolsByKind(healthFile().symbols);
     expect(groups.map((group) => group.kind)).toEqual(['function', 'const', 'type']);
     expect(groups[0]?.symbols.map((symbol) => symbol.name)).toEqual([
+      'isHealthProbe',
       'healthRouter',
       'withTimeout',
     ]);

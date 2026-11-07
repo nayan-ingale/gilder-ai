@@ -15,6 +15,10 @@ import { AppError } from './errors.ts';
  * Service-to-service authentication. The gateway signs a short-lived token for every request it
  * forwards; services accept a request only with a valid token addressed to them. A plain user-ID
  * header would not be enough: anything that can reach a service could claim to be any user.
+ *
+ * The token says two separate things. That it is valid proves the request came through the
+ * gateway. Its subject, when present, is the signed-in user. Requests with no session, such as a
+ * sign-in, still get a token, just without a user, so no service route is open to direct calls.
  */
 export const INTERNAL_TOKEN_HEADER = 'x-internal-token';
 
@@ -24,7 +28,8 @@ const ALGORITHM = 'EdDSA';
 export type InternalKey = Awaited<ReturnType<typeof importPKCS8>>;
 
 export interface InternalTokenClaims {
-  userId: string;
+  /** The signed-in user. Left out for a request with no session, such as a sign-in. */
+  userId?: string;
   requestId?: string;
 }
 
@@ -51,14 +56,16 @@ export function signInternalToken(
   claims: InternalTokenClaims,
   ttlSeconds = 60,
 ): Promise<string> {
-  return new SignJWT(claims.requestId ? { rid: claims.requestId } : {})
+  const token = new SignJWT(claims.requestId ? { rid: claims.requestId } : {})
     .setProtectedHeader({ alg: ALGORITHM })
     .setIssuer(ISSUER)
     .setAudience(audience)
-    .setSubject(claims.userId)
     .setIssuedAt()
-    .setExpirationTime(`${ttlSeconds}s`)
-    .sign(privateKey);
+    .setExpirationTime(`${ttlSeconds}s`);
+  if (claims.userId) {
+    token.setSubject(claims.userId);
+  }
+  return token.sign(privateKey);
 }
 
 /** Throws if the token is missing, forged, expired, or addressed to another service. */
@@ -74,15 +81,21 @@ export async function verifyInternalToken(
     algorithms: [ALGORITHM],
     ...(currentDate ? { currentDate } : {}),
   });
-  if (!payload.sub) {
-    throw new Error('internal token has no subject');
+  const claims: InternalTokenClaims = {};
+  if (typeof payload.sub === 'string' && payload.sub !== '') {
+    claims.userId = payload.sub;
   }
-  return typeof payload.rid === 'string'
-    ? { userId: payload.sub, requestId: payload.rid }
-    : { userId: payload.sub };
+  if (typeof payload.rid === 'string') {
+    claims.requestId = payload.rid;
+  }
+  return claims;
 }
 
-/** Express middleware for services: rejects requests without a valid internal token (401). */
+/**
+ * Express middleware for services: rejects requests without a valid internal token (401), so
+ * only the gateway can call them. When the token names a user, it becomes `res.locals.userId`.
+ * It does not require one: routes that act for a user add requireUser() as well.
+ */
 export function requireInternalToken(publicKey: InternalKey, audience: string): RequestHandler {
   return async (req, res, next) => {
     const token = req.get(INTERNAL_TOKEN_HEADER);
@@ -95,8 +108,24 @@ export function requireInternalToken(publicKey: InternalKey, audience: string): 
     } catch (error) {
       throw new AppError('unauthorized', 'Invalid internal token', { cause: error });
     }
-    res.locals.userId = claims.userId;
-    setContextUserId(claims.userId);
+    if (claims.userId) {
+      res.locals.userId = claims.userId;
+      setContextUserId(claims.userId);
+    }
+    next();
+  };
+}
+
+/**
+ * For routes that act for a user, after requireInternalToken: answers 401 unless the internal
+ * token named a signed-in user.
+ */
+export function requireUser(): RequestHandler {
+  return (_req, res, next) => {
+    if (!res.locals.userId) {
+      next(new AppError('unauthorized', 'This route needs a signed-in user'));
+      return;
+    }
     next();
   };
 }

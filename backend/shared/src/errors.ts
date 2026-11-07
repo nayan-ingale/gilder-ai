@@ -10,6 +10,7 @@ export const ERROR_CODES = {
   not_found: { status: 404, title: 'Not found' },
   conflict: { status: 409, title: 'Conflict' },
   payload_too_large: { status: 413, title: 'Payload too large' },
+  unsupported_media_type: { status: 415, title: 'Unsupported media type' },
   rate_limited: { status: 429, title: 'Too many requests' },
   internal_error: { status: 500, title: 'Internal error' },
   service_unavailable: { status: 503, title: 'Service unavailable' },
@@ -100,6 +101,17 @@ function toAppError(err: unknown): AppError {
     }
     if (err.type === 'entity.parse.failed') {
       return new AppError('bad_request', 'The request body is not valid JSON');
+    }
+    // The client sent a body the parser can't read: the caller has to fix it, so these are 415s,
+    // not server failures. The messages are fixed, so the client's header values are never echoed.
+    if (err.type === 'charset.unsupported') {
+      return new AppError('unsupported_media_type', 'The request body uses an unsupported charset');
+    }
+    if (err.type === 'encoding.unsupported') {
+      return new AppError(
+        'unsupported_media_type',
+        'The request body uses an unsupported Content-Encoding',
+      );
     }
   }
   return new AppError('internal_error', undefined, { cause: err });

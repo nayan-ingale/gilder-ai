@@ -62,6 +62,7 @@ export const errorHandlingPage: DocPage = {
             ['`not_found`', '404', 'Not found'],
             ['`conflict`', '409', 'Conflict'],
             ['`payload_too_large`', '413', 'Payload too large'],
+            ['`unsupported_media_type`', '415', 'Unsupported media type'],
             ['`rate_limited`', '429', 'Too many requests'],
             ['`internal_error`', '500', 'Internal error'],
             ['`service_unavailable`', '503', 'Service unavailable'],
@@ -69,7 +70,7 @@ export const errorHandlingPage: DocPage = {
         },
         {
           kind: 'text',
-          text: 'A running app only produces `not_found`, `bad_request`, `payload_too_large` and `internal_error` today. `validation_failed` and `unauthorized` come from `validate` and `requireInternalToken`, which no app uses yet, and the other codes are ready for later features.',
+          text: 'A running app only produces `not_found`, `bad_request`, `payload_too_large`, `unsupported_media_type` and `internal_error` today. `validation_failed` comes from `validate`, `unauthorized` from `requireInternalToken` and `requireUser`, and `rate_limited` from `rateLimit`; no app uses those yet. The other codes are ready for later features.',
         },
       ],
       refs: [
@@ -88,7 +89,8 @@ export const errorHandlingPage: DocPage = {
             'An `AppError` is kept as it is.',
             'A JSON body over the size limit (64kb unless an app changes it) becomes `payload_too_large` (413).',
             "A body that is not valid JSON becomes `bad_request` (400), with the detail 'The request body is not valid JSON'.",
-            'Anything else becomes `internal_error` (500), keeping the original error as its `cause`. That includes one JSON parser failure: a JSON body with an unsupported charset (such as `charset=latin1`) or an unknown `Content-Encoding`. body-parser marks it as 415, but `toAppError` checks only two types, so the client gets a 500, logged at error.',
+            "A JSON body in a charset the parser cannot read (such as `charset=latin1`) or with an unknown `Content-Encoding` becomes `unsupported_media_type` (415), with the detail 'The request body uses an unsupported charset' or 'The request body uses an unsupported Content-Encoding'. The messages are fixed, so the client's header values are never echoed back.",
+            'Anything else becomes `internal_error` (500), keeping the original error as its `cause`. In a running app that includes a body-parser failure the handler does not map, such as a body sent with `Content-Encoding: gzip` that is not valid gzip.',
             'If the response has already started, an error body can no longer be sent, so the handler passes the error on to Express, which closes the connection. No app streams responses yet, so this does not happen today.',
           ],
         },
@@ -199,7 +201,7 @@ export const errorHandlingPage: DocPage = {
           items: [
             "For a status of 500 or more, `errorHandler` logs 'request failed' at error level, with the original error and its stack.",
             'For a 4xx error, the handler logs nothing itself.',
-            "In both cases the request logger (pino-http) then writes its line for the finished request: at warn for a 4xx, and at error with the message 'request errored' for a 5xx. It skips any request whose URL is exactly `/healthz` or `/readyz`, whatever its method or status, so `POST /healthz` gets a 404 with no request line.",
+            "In both cases the request logger (pino-http) then writes its line for the finished request: at warn for a 4xx (a 415 for an unreadable body included), and at error with the message 'request errored' for a 5xx. It skips only health probes, a GET or HEAD on `/healthz` or `/readyz`, so `POST /healthz` gets a 404 and a warn line.",
             'All these lines carry the request ID, the same one the client sees in the body.',
           ],
         },
@@ -222,7 +224,7 @@ export const errorHandlingPage: DocPage = {
       blocks: [
         {
           kind: 'text',
-          text: "Errors before an app is listening are not HTTP errors. A missing or invalid setting makes `loadEnv` throw an `EnvError` that lists every problem, naming each variable but never its value. If MongoDB does not answer within 5 seconds, or the port is taken, the app stops too. In each case nothing catches the error, so Node prints it and exits with code 1. A Redis outage does not stop an app: the client logs 'redis error', and `/readyz` reports Redis as failed.",
+          text: "Errors before an app is listening are not HTTP errors. A missing or invalid setting makes `loadEnv` throw an `EnvError` that lists every problem, naming each variable but never its value. Auth also stops when its settings break a rule between them, such as `AUTH_DEV_LOGIN=true` in production. If MongoDB does not answer within 5 seconds, or the port is taken, the app stops too. In each case nothing catches the error, so Node prints it and exits with code 1. A Redis outage does not stop an app: the client logs 'redis error', and `/readyz` reports Redis as failed.",
         },
       ],
       refs: [

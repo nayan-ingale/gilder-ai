@@ -1,13 +1,50 @@
+import { Agent, get } from 'node:http';
+import { Writable } from 'node:stream';
 import request from 'supertest';
-import { describe, expect, it } from 'vitest';
+import { beforeAll, describe, expect, it, vi } from 'vitest';
 import { z } from 'zod';
 import { AppError } from './errors.ts';
+import {
+  generateInternalKeyPair,
+  importInternalPrivateKey,
+  importInternalPublicKey,
+  INTERNAL_TOKEN_HEADER,
+  type InternalKey,
+  signInternalToken,
+} from './internalToken.ts';
 import { createLogger } from './logger.ts';
 import { createService, startService } from './service.ts';
 import { validate } from './validate.ts';
 
 const logger = createLogger({ service: 'test', level: 'silent' });
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+
+interface LogLine {
+  msg?: string;
+  req?: { method: string; url: string };
+}
+
+/** A logger whose lines the test can read. */
+function captureLogs() {
+  const lines: LogLine[] = [];
+  const destination = new Writable({
+    write(chunk, _encoding, callback) {
+      lines.push(JSON.parse(String(chunk)) as LogLine);
+      callback();
+    },
+  });
+  return { lines, logger: createLogger({ service: 'test', destination }) };
+}
+
+/** A GET over a keep-alive connection; resolves with the status once the body has arrived. */
+function getStatus(port: number, path: string, agent: Agent): Promise<number | undefined> {
+  return new Promise((resolve, reject) => {
+    get({ port, path, agent }, (response) => {
+      response.resume();
+      response.on('end', () => resolve(response.statusCode));
+    }).on('error', reject);
+  });
+}
 
 function buildApp(readinessChecks = {}, bodyLimit?: string) {
   return createService({
@@ -95,6 +132,25 @@ describe('request IDs', () => {
   });
 });
 
+describe('request logging', () => {
+  it('skips GET and HEAD health probes, but logs anything else on those paths', async () => {
+    const logs = captureLogs();
+    const app = createService({ name: 'test', logger: logs.logger });
+
+    await request(app).get('/healthz');
+    await request(app).head('/readyz');
+    await request(app).get('/healthz?probe=1');
+    await request(app).post('/healthz');
+    await request(app).delete('/readyz');
+    await request(app).get('/nothing-here');
+
+    const logged = logs.lines
+      .filter((line) => line.msg === 'request completed')
+      .map((line) => `${line.req?.method} ${line.req?.url}`);
+    expect(logged).toEqual(['POST /healthz', 'DELETE /readyz', 'GET /nothing-here']);
+  });
+});
+
 describe('errors', () => {
   it('answers unknown routes with a 404 problem+json carrying the request ID', async () => {
     const response = await request(buildApp()).get('/nothing-here');
@@ -149,6 +205,33 @@ describe('errors', () => {
     expect(response.status).toBe(413);
     expect(response.body.code).toBe('payload_too_large');
   });
+
+  it('rejects a JSON body in a charset other than UTF with 415', async () => {
+    const response = await request(buildApp())
+      .post('/echo')
+      .set('content-type', 'application/json; charset=latin1')
+      .send('{"name": "x"}');
+
+    expect(response.status).toBe(415);
+    expect(response.body).toMatchObject({
+      code: 'unsupported_media_type',
+      detail: 'The request body uses an unsupported charset',
+    });
+  });
+
+  it('rejects a body with an unknown Content-Encoding with 415', async () => {
+    const response = await request(buildApp())
+      .post('/echo')
+      .set('content-type', 'application/json')
+      .set('content-encoding', 'compress')
+      .send('{"name": "x"}');
+
+    expect(response.status).toBe(415);
+    expect(response.body).toMatchObject({
+      code: 'unsupported_media_type',
+      detail: 'The request body uses an unsupported Content-Encoding',
+    });
+  });
 });
 
 describe('validate()', () => {
@@ -175,6 +258,97 @@ describe('validate()', () => {
   });
 });
 
+describe('internalAuth', () => {
+  let privateKey: InternalKey;
+  let publicKey: InternalKey;
+
+  beforeAll(async () => {
+    const pair = await generateInternalKeyPair();
+    privateKey = await importInternalPrivateKey(pair.privateKey);
+    publicKey = await importInternalPublicKey(pair.publicKey);
+  });
+
+  function buildLockedApp() {
+    return createService({
+      name: 'chat',
+      logger,
+      internalAuth: { publicKey, audience: 'chat' },
+      routes: (app) => {
+        app.get('/chats', (_req, res) => {
+          res.json({ userId: res.locals.userId });
+        });
+      },
+    });
+  }
+
+  it('keeps the health checks open', async () => {
+    const app = buildLockedApp();
+
+    expect((await request(app).get('/healthz')).status).toBe(200);
+    expect((await request(app).get('/readyz')).status).toBe(200);
+  });
+
+  it('answers 401 to a direct call on any other path, whether it exists or not', async () => {
+    for (const path of ['/chats', '/nothing-here', '/internal/users/1']) {
+      const response = await request(buildLockedApp()).get(path);
+
+      expect(response.status).toBe(401);
+      expect(response.body.code).toBe('unauthorized');
+    }
+  });
+
+  it('serves a call with a valid token, and answers 404 for a path that does not exist', async () => {
+    const token = await signInternalToken(privateKey, 'chat', { userId: 'user-1' });
+    const app = buildLockedApp();
+
+    const known = await request(app).get('/chats').set(INTERNAL_TOKEN_HEADER, token);
+    const unknown = await request(app).get('/nothing-here').set(INTERNAL_TOKEN_HEADER, token);
+
+    expect(known.status).toBe(200);
+    expect(known.body).toEqual({ userId: 'user-1' });
+    expect(unknown.status).toBe(404);
+  });
+
+  it('rejects a token addressed to another service', async () => {
+    const token = await signInternalToken(privateKey, 'billing', { userId: 'user-1' });
+    const response = await request(buildLockedApp())
+      .get('/chats')
+      .set(INTERNAL_TOKEN_HEADER, token);
+
+    expect(response.status).toBe(401);
+  });
+});
+
+describe('parseJson: false', () => {
+  it('leaves the body unread, byte for byte, even when it is not valid JSON', async () => {
+    const app = createService({
+      name: 'gateway',
+      logger,
+      parseJson: false,
+      routes: (routes) => {
+        routes.post('/raw', async (req, res) => {
+          let body = '';
+          for await (const chunk of req) {
+            body += String(chunk);
+          }
+          res.json({ parsed: req.body !== undefined, body });
+        });
+      },
+    });
+
+    // Spacing and key order that a parse-and-reserialize would lose, then broken JSON.
+    for (const sent of ['{ "b": 1,   "a": [2, 3] }', '{"broken": ']) {
+      const response = await request(app)
+        .post('/raw')
+        .set('content-type', 'application/json')
+        .send(sent);
+
+      expect(response.status).toBe(200);
+      expect(response.body).toEqual({ parsed: false, body: sent });
+    }
+  });
+});
+
 describe('startService', () => {
   it('serves requests, then shuts down and runs the cleanup hook', async () => {
     let cleanedUp = false;
@@ -193,5 +367,82 @@ describe('startService', () => {
     await running.close();
     expect(cleanedUp).toBe(true);
     await expect(fetch(`http://localhost:${running.port}/healthz`)).rejects.toThrow();
+  });
+
+  it('closes a keep-alive connection as soon as its last request finishes', async () => {
+    let arrived!: () => void;
+    const requestArrived = new Promise<void>((resolve) => {
+      arrived = resolve;
+    });
+    const app = createService({
+      name: 'test',
+      logger,
+      routes: (routes) => {
+        routes.get('/slow', (_req, res) => {
+          arrived();
+          setTimeout(() => res.json({ done: true }), 200);
+        });
+      },
+    });
+    const running = await startService(app, { port: 0, logger, handleSignals: false });
+    const agent = new Agent({ keepAlive: true });
+
+    try {
+      const slow = getStatus(running.port, '/slow', agent);
+      await requestArrived;
+      const started = Date.now();
+      const [status] = await Promise.all([slow, running.close()]);
+
+      expect(status).toBe(200);
+      // Left open, the idle connection would hold the shutdown up for about 6 seconds. It takes
+      // about 0.2 here; the margin is for a busy machine.
+      expect(Date.now() - started).toBeLessThan(3_000);
+    } finally {
+      agent.destroy();
+    }
+  });
+
+  it('shuts down once when one Ctrl+C delivers SIGINT twice', async () => {
+    const before = { SIGINT: process.listeners('SIGINT'), SIGTERM: process.listeners('SIGTERM') };
+    const exit = vi.spyOn(process, 'exit').mockImplementation(() => undefined as never);
+    const logs = captureLogs();
+    let cleanups = 0;
+
+    try {
+      await startService(createService({ name: 'test', logger }), {
+        port: 0,
+        logger: logs.logger,
+        onShutdown: async () => {
+          cleanups += 1;
+        },
+      });
+
+      // Under `node --watch` the terminal and the watcher each pass the Ctrl+C on to the app.
+      process.emit('SIGINT', 'SIGINT');
+      process.emit('SIGINT', 'SIGINT');
+      await vi.waitFor(() => expect(exit).toHaveBeenCalled(), { timeout: 4_000 });
+
+      expect(exit).toHaveBeenCalledTimes(1);
+      expect(exit).toHaveBeenCalledWith(0);
+      expect(cleanups).toBe(1);
+      expect(logs.lines.map((line) => line.msg)).toEqual([
+        'listening',
+        'shutting down',
+        'already shutting down',
+        'shut down cleanly',
+      ]);
+      // Still listening, so a real second SIGINT never falls back to Node's default: killing the
+      // process.
+      expect(process.listenerCount('SIGINT')).toBe(before.SIGINT.length + 1);
+    } finally {
+      exit.mockRestore();
+      for (const signal of ['SIGINT', 'SIGTERM'] as const) {
+        for (const listener of process.listeners(signal)) {
+          if (!before[signal].includes(listener)) {
+            process.off(signal, listener);
+          }
+        }
+      }
+    }
   });
 });
