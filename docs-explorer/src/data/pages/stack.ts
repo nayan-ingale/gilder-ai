@@ -20,7 +20,7 @@ export const stackPage: DocPage = {
           items: [
             'Browser → Next.js server (port 3000): the browser only ever talks to the frontend app.',
             'Next.js server → gateway (port 8000): the Next.js server will forward every `/api/*` call to the gateway, so backend addresses and secrets never reach the browser. Planned in Sign-in page and app shell.',
-            "Gateway → services: the gateway will check sessions and rate limits, then call auth (8001), chat (8002), agent (8003) or billing (8004) with a short-lived signed token. The gateway's part is planned in Sign-in and sessions; each service's routes come with its own feature.",
+            "Gateway → services: the gateway will check sessions and rate limits, then call auth (8001), chat (8002), agent (8003) or billing (8004) with a short-lived signed token. The shared library already has the sessions, rate limits and token checks for this, but no app uses them yet. The gateway's part is planned in Sign-in and sessions; each service's routes come with its own feature.",
             'Services → data stores: auth, chat, agent and billing connect to MongoDB at startup, and the gateway, auth and agent open a Redis client. Qdrant runs in Docker, but nothing connects to it yet. AWS S3 will hold files.',
             'Every backend app is built from the shared library, `@gilder/shared`, so they all start, log and fail in the same way.',
           ],
@@ -133,7 +133,17 @@ export const packageNotes: PackageNote[] = [
   {
     name: 'jose',
     layer: 'backend',
-    why: 'Signs and checks the short-lived internal tokens between the gateway and services. Built and tested, but no app uses it yet.',
+    why: 'Signs and checks the short-lived internal tokens between the gateway and services, and makes the private key that `pnpm setup:keys` writes when the gateway has none. No app signs or checks a token yet.',
+  },
+  {
+    name: 'firebase-admin',
+    layer: 'backend',
+    why: 'For the auth service to check Google sign-in tokens. Installed, but no code calls it yet.',
+  },
+  {
+    name: 'cookie',
+    layer: 'backend',
+    why: 'Installed in the shared library, for the gateway and auth to read the session cookie from a request. No code calls it yet.',
   },
   {
     name: 'pino',
@@ -143,7 +153,7 @@ export const packageNotes: PackageNote[] = [
   {
     name: 'pino-http',
     layer: 'backend',
-    why: 'Writes one log line for each finished request. It skips any request whose URL is exactly `/healthz` or `/readyz`, whatever its method or status.',
+    why: 'Writes one log line for each finished request. It skips only health probes: a GET or HEAD on `/healthz` or `/readyz`.',
   },
   {
     name: 'pino-pretty',
@@ -160,7 +170,7 @@ export const packageNotes: PackageNote[] = [
   {
     name: 'ioredis',
     layer: 'data',
-    why: 'The Redis client. `createRedis` makes one for the gateway, auth and agent, and `pingRedis` checks it for `/readyz`.',
+    why: 'The Redis client. `createRedis` makes one for the gateway, auth and agent, and `pingRedis` checks it for `/readyz`. The shared sessions and rate limits use it too, but no app calls them yet; their tests run against a real Redis.',
   },
 
   // Quality
@@ -182,7 +192,7 @@ export const packageNotes: PackageNote[] = [
   {
     name: 'mongodb-memory-server',
     layer: 'quality',
-    why: "Starts a real MongoDB replica set in memory for the shared library's tests, so they need no Docker.",
+    why: "Starts a real MongoDB replica set in memory for the shared library's MongoDB tests, so those need no Docker. Its Redis tests use the Redis container, or the CI service.",
   },
   {
     name: 'eslint',
@@ -242,15 +252,6 @@ export const plannedTools: PlannedTool[] = [
     layer: 'frontend',
     why: 'Client state and data fetching for chats, messages, the account and usage.',
     plannedIn: 'Chats',
-  },
-
-  // Backend
-  {
-    name: 'Firebase Admin',
-    package: 'firebase-admin',
-    layer: 'backend',
-    why: 'Lets the auth service check Google sign-in tokens.',
-    plannedIn: 'Sign-in and sessions',
   },
 
   // AI

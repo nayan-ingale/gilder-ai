@@ -20,6 +20,7 @@
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "setup:env": "for dir in backend/gateway backend/services/*; do [ -f \"$dir/.env\" ] || cp \"$dir/.env.example\" \"$dir/.env\"; done; [ -f frontend/.env.local ] || cp frontend/.env.example frontend/.env.local; echo 'env files ready (existing ones were kept)'",
+    "setup:keys": "node backend/shared/scripts/setup-keys.ts",
     "infra:up": "docker compose -f backend/docker-compose.yml up -d --wait",
     "infra:down": "docker compose -f backend/docker-compose.yml down",
     "infra:ps": "docker compose -f backend/docker-compose.yml ps",

@@ -30,7 +30,7 @@ export const decisionsPage: DocPage = {
         },
         {
           kind: 'text',
-          text: "Built today: the five apps, each answering only its health checks. Not built yet: the gateway's routes, session checks and forwarding (Sign-in and sessions). Until then, each service can be reached directly on its own port.",
+          text: "Built today: the five apps, each answering only its health checks. The shared library already has the pieces the gateway will use: sessions, rate limits and internal tokens. Not built yet: the gateway's routes, session checks and forwarding (Sign-in and sessions). Until then, no service turns on the internal-token check, so each one can be reached directly on its own port.",
         },
         {
           kind: 'quote',
@@ -58,11 +58,11 @@ export const decisionsPage: DocPage = {
           fields: [
             {
               label: 'Decision',
-              text: 'What the backend apps have in common lives in one library, `@gilder/shared`: settings, logging, errors, request IDs, health checks, database connections, startup and shutdown.',
+              text: 'What the backend apps have in common lives in one library, `@gilder/shared`: settings, logging, errors, request IDs, health checks, database connections, startup and shutdown, and the internal tokens, sessions and rate limits that no app uses yet.',
             },
             {
               label: 'Why',
-              text: "All five apps start, log, check health and fail in the same way, and a fix in one place reaches every app. Each app's own code stays small: today it is just `env.ts`, `app.ts` and `index.ts`.",
+              text: "All five apps start, log, check health and fail in the same way, and a fix in one place reaches every app. Each app's own code stays small: today it is just `env.ts`, `app.ts` and `index.ts`, plus `env-schema.ts` in auth for its settings rules.",
             },
             {
               label: 'Trade-off',
@@ -95,7 +95,7 @@ export const decisionsPage: DocPage = {
           fields: [
             {
               label: 'Decision',
-              text: 'For each request it forwards, the gateway will sign a token (a JWT) that names the user and the target service and expires after 60 seconds. A service will accept a request only with a valid token addressed to it.',
+              text: 'For each request it forwards, the gateway will sign a token (a JWT) addressed to the target service that expires after 60 seconds. A valid token proves the request came through the gateway; its subject, when present, is the signed-in user. Requests with no session, such as a sign-in, get a token without a user. A service will accept a request only with a valid token addressed to it, and routes that act for a user also need the token to name one.',
             },
             {
               label: 'Why',
@@ -103,13 +103,13 @@ export const decisionsPage: DocPage = {
             },
             {
               label: 'Trade-off',
-              text: 'Each forwarded call costs one signature and one check, and a key pair has to be managed: the private key only on the gateway, the public key on every service.',
+              text: 'Each forwarded call costs one signature and one check, and a key pair has to be managed: the private key only on the gateway, the public key on every service. `pnpm setup:keys` writes both into the `.env` files without printing them, and `--rotate` makes a new pair.',
             },
           ],
         },
         {
           kind: 'text',
-          text: '`signInternalToken`, `verifyInternalToken` and `requireInternalToken` are built and tested, but no app calls them yet, and no app reads a key from its settings. The gateway is planned to start signing tokens in Sign-in and sessions.',
+          text: "`signInternalToken`, `verifyInternalToken`, `requireInternalToken` and `requireUser` are built and tested, and `createService` can put the token check in front of every route except `/healthz` and `/readyz` with its `internalAuth` option. No app uses any of them yet. Auth's settings require `INTERNAL_PUBLIC_KEY`, written by `pnpm setup:keys`, but nothing uses the key yet. The gateway is planned to start signing tokens in Sign-in and sessions.",
         },
         {
           kind: 'quote',
@@ -122,6 +122,8 @@ export const decisionsPage: DocPage = {
         { symbol: 'backend/shared/src/internalToken.ts#signInternalToken' },
         { symbol: 'backend/shared/src/internalToken.ts#verifyInternalToken' },
         { symbol: 'backend/shared/src/internalToken.ts#requireInternalToken' },
+        { symbol: 'backend/shared/src/internalToken.ts#requireUser' },
+        { file: 'backend/shared/scripts/setup-keys.ts' },
         { component: 'gateway' },
       ],
     },
@@ -225,7 +227,7 @@ export const decisionsPage: DocPage = {
         },
         {
           kind: 'text',
-          text: 'The policy is set in Docker Compose. The TTL rule has nothing to apply to yet: no app reads or writes keys, and no memory limit (`--maxmemory`) is set, so the policy does not come into play today. Sessions come with Sign-in and sessions.',
+          text: 'The policy is set in Docker Compose. The shared code sets a TTL on every key it writes: a session (`sess:` and the SHA-256 of its ID) lasts 7 days, renewed on each lookup, and a rate-limit counter (`rl:<scope>:<id>`) gets its expiry in the same MULTI as its count. No app calls that code yet, and no memory limit (`--maxmemory`) is set, so the policy does not come into play today. Sessions come with Sign-in and sessions.',
         },
         {
           kind: 'quote',
@@ -234,7 +236,13 @@ export const decisionsPage: DocPage = {
           caption: 'The redis service in Docker Compose',
         },
       ],
-      refs: [{ component: 'redis' }, { file: 'backend/docker-compose.yml' }],
+      refs: [
+        { component: 'redis' },
+        { file: 'backend/docker-compose.yml' },
+        { symbol: 'backend/shared/src/sessions.ts#createSession' },
+        { symbol: 'backend/shared/src/sessions.ts#resolveSession' },
+        { symbol: 'backend/shared/src/rateLimit.ts#hitRateLimit' },
+      ],
     },
     {
       id: 'request-ids',

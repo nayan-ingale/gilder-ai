@@ -7,6 +7,8 @@ packages:
 
 # pnpm 11 runs a dependency's install script only when it is allowed here.
 allowBuilds:
+  '@firebase/util': false # would write a Firebase web config into the package at install time; not used
   mongodb-memory-server: false # downloads the MongoDB test binary on the first test run instead
+  protobufjs: false # only prints a version warning
   sharp: false # Next.js image optimizer; uses prebuilt binaries, no build needed
   unrs-resolver: false # ESLint import resolver; uses prebuilt binaries

@@ -98,6 +98,10 @@ export const deploymentPage: DocPage = {
         },
         {
           kind: 'text',
+          text: "`pnpm setup:keys` then writes the key pair for internal tokens into those files: the gateway's private key as `INTERNAL_PRIVATE_KEY`, and the matching public key as `INTERNAL_PUBLIC_KEY` for each service. Key values are never printed. Run again, it keeps the gateway's key and only fixes a service whose public key is missing or does not match; `pnpm setup:keys --rotate` makes a new pair for all of them. It stops if an env file is missing, so `pnpm setup:env` comes first. Auth refuses to start without its public key; the other apps do not read their key yet.",
+        },
+        {
+          kind: 'text',
           text: "Each backend app loads its `.env` with Node's `--env-file-if-exists` flag, then checks every variable with `loadEnv` before anything else runs. A missing or invalid value stops the app with a list of every problem.",
         },
         {
@@ -109,6 +113,7 @@ export const deploymentPage: DocPage = {
       refs: [
         { file: 'package.json' },
         { file: '.gitignore' },
+        { file: 'backend/shared/scripts/setup-keys.ts' },
         { symbol: 'backend/shared/src/env.ts#loadEnv' },
         { flow: 'app-startup' },
       ],
@@ -123,6 +128,7 @@ export const deploymentPage: DocPage = {
           items: [
             '`pnpm install` installs every app in the workspace.',
             '`pnpm setup:env` creates the env files.',
+            '`pnpm setup:keys` writes the internal-token keys into them.',
             '`pnpm infra:up` starts MongoDB, Redis and Qdrant.',
             '`pnpm dev` starts the frontend and the five backend apps together.',
           ],
@@ -146,7 +152,7 @@ export const deploymentPage: DocPage = {
       blocks: [
         {
           kind: 'text',
-          text: "Every backend app answers `GET /healthz` (the process is up) and `GET /readyz` (its data stores answer, or 503 if one does not). On SIGTERM or SIGINT it stops taking new connections, waits up to 10 seconds for requests in progress, closes its database connections and exits. Under `pnpm dev`, though, one Ctrl+C reaches each backend app twice: from the terminal, and again from `node --watch`, which passes it on. The handler runs only once (`process.once`), so the app logs 'shutting down' and the second SIGINT then kills it before its cleanup finishes. One SIGTERM, or a run without `--watch`, shuts down cleanly. Nothing calls the health endpoints automatically yet: the Docker health checks cover only the data stores.",
+          text: "Every backend app answers `GET /healthz` (the process is up) and `GET /readyz` (its data stores answer, or 503 if one does not). On SIGTERM or SIGINT it stops taking new connections, waits up to 10 seconds for requests in progress, closes its database connections and exits; if the cleanup hangs, it exits with code 1 after 15 seconds. Under `pnpm dev` one Ctrl+C reaches each backend app twice: from the terminal, and again from `node --watch`, which passes it on. The app logs the second as 'already shutting down' and finishes its cleanup. Nothing calls the health endpoints automatically yet: the Docker health checks cover only the data stores.",
         },
       ],
       refs: [
@@ -164,7 +170,7 @@ export const deploymentPage: DocPage = {
       blocks: [
         {
           kind: 'text',
-          text: 'GitHub Actions runs one job on every push to `main` and on every pull request. A newer run for the same branch or pull request cancels the one still running, the job can only read the repo, and it stops after 15 minutes. It sets up pnpm (the version in `packageManager`) and Node (the version in `.nvmrc`), then runs these steps in order. The first one that fails stops the job.',
+          text: 'GitHub Actions runs one job on every push to `main` and on every pull request. A newer run for the same branch or pull request cancels the one still running, the job can only read the repo, and it stops after 15 minutes. It starts a Redis 7 service, then sets up pnpm (the version in `packageManager`) and Node (the version in `.nvmrc`), then runs these steps in order. The first one that fails stops the job.',
         },
         {
           kind: 'quote',
@@ -173,10 +179,21 @@ export const deploymentPage: DocPage = {
         },
         {
           kind: 'text',
-          text: "The tests need no Docker: the shared library's MongoDB tests start an in-memory replica set. `pnpm build` also builds the docs explorer, whose build checks these docs against the code, so CI fails when a doc points at code, a quote or a route that no longer exists.",
+          text: "Tests that need Redis use a real one: in CI the Redis service on port 6380, and locally the container from `pnpm infra:up` on the same port. They use database 15, away from the development data in database 0, and each test gets its own random key prefix, so tests running at the same time never see each other's keys. The shared library's MongoDB tests need no Docker: they start an in-memory replica set. `pnpm build` also builds the docs explorer, whose build checks these docs against the code, so CI fails when a doc points at code, a quote or a route that no longer exists.",
+        },
+        {
+          kind: 'quote',
+          file: '.github/workflows/ci.yml',
+          text: '    services:\n      redis:\n        image: redis:7-alpine\n        ports:\n          - 6380:6379',
+          caption: 'The Redis service the tests use in CI',
         },
       ],
-      refs: [{ file: '.github/workflows/ci.yml' }, { file: '.nvmrc' }, { file: 'package.json' }],
+      refs: [
+        { file: '.github/workflows/ci.yml' },
+        { file: '.nvmrc' },
+        { file: 'package.json' },
+        { symbol: 'backend/shared/src/test-redis.ts#createTestRedis' },
+      ],
     },
     {
       id: 'production',
