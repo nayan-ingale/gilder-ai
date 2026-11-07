@@ -10,10 +10,13 @@ const ENV_TEST = 'backend/shared/src/env.test.ts';
 const INTERNAL_TOKEN_TEST = 'backend/shared/src/internalToken.test.ts';
 const LOGGER_TEST = 'backend/shared/src/logger.test.ts';
 const MONGO_TEST = 'backend/shared/src/mongo.test.ts';
+const RATE_LIMIT_TEST = 'backend/shared/src/rateLimit.test.ts';
 const SERVICE_TEST = 'backend/shared/src/service.test.ts';
+const SESSIONS_TEST = 'backend/shared/src/sessions.test.ts';
 
 const GATEWAY_TEST = 'backend/gateway/src/app.test.ts';
 const AUTH_TEST = 'backend/services/auth/src/app.test.ts';
+const AUTH_ENV_SCHEMA_TEST = 'backend/services/auth/src/env-schema.test.ts';
 const CHAT_TEST = 'backend/services/chat/src/app.test.ts';
 const AGENT_TEST = 'backend/services/agent/src/app.test.ts';
 const BILLING_TEST = 'backend/services/billing/src/app.test.ts';
@@ -126,7 +129,7 @@ export const notes: SymbolNote[] = [
     symbol: 'backend/shared/src/env.ts#baseEnvSchema',
     status: 'verified',
     summary: 'The Zod schema for the variables every app reads: NODE_ENV and LOG_LEVEL.',
-    why: 'Every app needs these two, so they are defined once. Each app extends this schema with its own variables in its src/env.ts.',
+    why: 'Every app needs these two, so they are defined once. Each app extends this schema with its own variables: in its src/env.ts, or for auth in src/env-schema.ts.',
     returns:
       'A Zod object schema. NODE_ENV is development, test or production (default development). LOG_LEVEL is a pino level from fatal to trace, or silent (default info).',
     tests: [ENV_TEST],
@@ -185,8 +188,8 @@ export const notes: SymbolNote[] = [
     symbol: 'backend/shared/src/errors.ts#ERROR_CODES',
     status: 'verified',
     summary: 'Every error code the API can return, with its HTTP status and title.',
-    why: 'Clients can check a stable code (like not_found) instead of parsing messages. AppError and toProblem look up the status and title here, so each is set in one place. Today the running apps only raise not_found, bad_request, payload_too_large and internal_error; no app raises the others yet.',
-    returns: 'An object of 11 codes, from bad_request (400) to service_unavailable (503).',
+    why: 'Clients can check a stable code (like not_found) instead of parsing messages. AppError and toProblem look up the status and title here, so each is set in one place. The running apps raise only not_found, bad_request, payload_too_large, unsupported_media_type and internal_error. validation_failed, unauthorized and rate_limited come from validate, requireInternalToken, requireUser and rateLimit, which no app uses yet; no code outside the tests raises the other four.',
+    returns: 'An object of 12 codes, from bad_request (400) to service_unavailable (503).',
     tests: [SERVICE_TEST],
   },
   {
@@ -194,7 +197,7 @@ export const notes: SymbolNote[] = [
     status: 'verified',
     summary: 'An error that is safe to describe to the client, with an error code and HTTP status.',
     why: 'Code can throw an AppError anywhere and the error handler turns it into the right response. Any error that is not an AppError becomes a generic 500, so internal details never reach the client by accident.',
-    tests: [SERVICE_TEST, INTERNAL_TOKEN_TEST],
+    tests: [SERVICE_TEST, INTERNAL_TOKEN_TEST, RATE_LIMIT_TEST],
   },
   {
     symbol: 'backend/shared/src/errors.ts#AppError.constructor',
@@ -207,7 +210,7 @@ export const notes: SymbolNote[] = [
       '`fieldErrors` holds per-field problems, which validate() fills in.',
     ],
     why: 'It takes a code, not a status, so a code can never be paired with the wrong status.',
-    tests: [SERVICE_TEST, INTERNAL_TOKEN_TEST],
+    tests: [SERVICE_TEST, INTERNAL_TOKEN_TEST, RATE_LIMIT_TEST],
   },
   {
     symbol: 'backend/shared/src/errors.ts#toProblem',
@@ -220,7 +223,7 @@ export const notes: SymbolNote[] = [
     ],
     why: 'Every app answers errors in one standard shape. Server-side failures never describe themselves to the client; their details stay in the logs.',
     returns: 'A ProblemDetails object.',
-    tests: [SERVICE_TEST, INTERNAL_TOKEN_TEST, ...APP_TESTS],
+    tests: [SERVICE_TEST, INTERNAL_TOKEN_TEST, RATE_LIMIT_TEST, ...APP_TESTS],
   },
   {
     symbol: 'backend/shared/src/errors.ts#notFoundHandler',
@@ -250,7 +253,7 @@ export const notes: SymbolNote[] = [
       'Writes a "request failed" error log line for 5xx errors.',
       'Sends the error response.',
     ],
-    tests: [SERVICE_TEST, INTERNAL_TOKEN_TEST, ...APP_TESTS],
+    tests: [SERVICE_TEST, INTERNAL_TOKEN_TEST, RATE_LIMIT_TEST, ...APP_TESTS],
   },
   {
     symbol: 'backend/shared/src/errors.ts#toAppError',
@@ -261,9 +264,11 @@ export const notes: SymbolNote[] = [
       'An error from the JSON body parser is recognised by its `type` field.',
       'entity.too.large becomes payload_too_large (413).',
       'entity.parse.failed becomes bad_request (400), "The request body is not valid JSON".',
+      'charset.unsupported (a charset the parser cannot read, such as latin1) becomes unsupported_media_type (415), "The request body uses an unsupported charset".',
+      'encoding.unsupported (a Content-Encoding the parser cannot decode, such as compress) becomes unsupported_media_type (415), "The request body uses an unsupported Content-Encoding".',
       'Anything else becomes internal_error (500), with the original kept as `cause`.',
     ],
-    why: 'The error handler can then treat every error the same way. Unknown errors become a 500, whose message is never shown to the client.',
+    why: 'The error handler can then treat every error the same way. A body the parser cannot read is for the client to fix, so it gets a 4xx, not a server failure. The 415 messages are fixed, so the charset or Content-Encoding the client sent is never echoed back. Unknown errors become a 500, whose message is never shown to the client.',
     returns: 'An AppError.',
     tests: [SERVICE_TEST],
   },
@@ -277,6 +282,28 @@ export const notes: SymbolNote[] = [
     summary: 'How long each readiness check may take before it counts as failed.',
     why: 'A dependency that hangs should not make /readyz hang too. Checks run at the same time, so /readyz answers within about this long. No test waits for it to run out.',
     returns: '2,000 milliseconds (2 seconds).',
+  },
+  {
+    symbol: 'backend/shared/src/health.ts#HEALTH_PATHS',
+    status: 'verified',
+    summary: 'The two paths healthRouter serves: /healthz and /readyz.',
+    why: 'isHealthProbe looks a request path up in it to decide whether the request logger skips the request. healthRouter writes its two paths out itself and does not read the set, so the two have to be kept in step by hand.',
+    returns: "A Set of the strings '/healthz' and '/readyz'.",
+    tests: [SERVICE_TEST],
+  },
+  {
+    symbol: 'backend/shared/src/health.ts#isHealthProbe',
+    status: 'verified',
+    summary: 'Says whether a request is a health probe, so the request logger can skip it.',
+    how: [
+      'It returns false for any method other than GET or HEAD.',
+      'It drops the query string from the URL, because the router serves /healthz?probe=1 too.',
+      'It returns true when the path that is left is in HEALTH_PATHS.',
+    ],
+    why: 'Probes are meant to come every few seconds, and logging each one would bury the real requests. Anything else on those paths, such as POST /healthz, is a mistake worth seeing, so it is still logged. createService passes it to pino-http as `autoLogging.ignore` in every app. It is passed, not called, so the generated index lists no callers.',
+    returns:
+      'true for a GET or HEAD of /healthz or /readyz, with or without a query string; false otherwise.',
+    tests: [SERVICE_TEST],
   },
   {
     symbol: 'backend/shared/src/health.ts#healthRouter',
@@ -346,49 +373,51 @@ export const notes: SymbolNote[] = [
     symbol: 'backend/shared/src/internalToken.ts#importInternalPublicKey',
     status: 'not-wired',
     summary: 'Turns a public key in PEM text into a key object that can verify internal tokens.',
-    why: 'Services only need the public key: it can check a token but cannot make one. It always imports the key for EdDSA. No app imports a key yet.',
+    why: 'Services only need the public key: it can check a token but cannot make one. It always imports the key for EdDSA. No app imports a key yet: auth requires INTERNAL_PUBLIC_KEY at startup but does not import it.',
     returns: 'A promise of the key object (InternalKey).',
     tests: [INTERNAL_TOKEN_TEST],
   },
   {
     symbol: 'backend/shared/src/internalToken.ts#generateInternalKeyPair',
-    status: 'not-wired',
+    status: 'verified',
     summary: 'Creates a new EdDSA key pair and returns both keys as PEM text.',
     how: [
       'It generates the pair with jose, marked extractable so it can be exported.',
       'It exports the private key as PKCS8 PEM and the public key as SPKI PEM.',
     ],
-    why: 'Its comment says it is for .env files and tests. The private key signs tokens and the public key checks them. Only the tests call it today.',
+    why: 'Its comment says it is for .env files and tests. The private key signs tokens and the public key checks them. The `pnpm setup:keys` script (backend/shared/scripts/setup-keys.ts) calls it when the gateway has no signing key yet, or with --rotate; the tests call it too.',
     returns: 'A promise of { privateKey, publicKey }, both PEM strings.',
     tests: [INTERNAL_TOKEN_TEST],
   },
   {
     symbol: 'backend/shared/src/internalToken.ts#signInternalToken',
     status: 'not-wired',
-    summary: 'Signs a short-lived token that says which user a forwarded request is for.',
+    summary:
+      'Signs a short-lived token that proves a forwarded request came through the gateway, and names its user when there is one.',
     how: [
-      'The subject (`sub`) is the user ID.',
+      'The subject (`sub`) is the user ID, set only when a user ID is given. A token for a request with no session, such as a sign-in, has no `sub`.',
       'The request ID, when given, goes in a `rid` claim.',
       'The issuer is gilder-gateway and the audience is the service the token is for.',
       'It expires after `ttlSeconds` (60 by default) and is signed with EdDSA.',
     ],
-    why: 'Services never trust a plain user-ID header, because anything that can reach a service could claim to be any user. So services accept only a signed token addressed to them. The audience stops a token for one service being used against another, and the short life limits the harm if one leaks. No app signs tokens yet.',
+    why: 'Services never trust a plain user-ID header, because anything that can reach a service could claim to be any user. So services accept only a signed token addressed to them. A token without a user still proves the request came through the gateway, so no service route has to be open to direct calls. The audience stops a token for one service being used against another, and the short life limits the harm if one leaks. No app signs tokens yet.',
     returns: 'A promise of the signed token, a JWT string.',
     tests: [INTERNAL_TOKEN_TEST],
   },
   {
     symbol: 'backend/shared/src/internalToken.ts#verifyInternalToken',
     status: 'not-wired',
-    summary: 'Checks an internal token and reads the user (and request ID) from it.',
+    summary: 'Checks an internal token and reads the user and request ID from it, when present.',
     how: [
       'jose checks the signature, the issuer, the audience and the expiry, and accepts only EdDSA.',
       '`currentDate` lets tests pretend time has passed.',
-      'It throws if the token has no subject.',
-      'It returns the user ID, plus the request ID when the `rid` claim is a string.',
+      'It returns `userId` only when `sub` is a non-empty string, and `requestId` only when the `rid` claim is a string.',
+      'A valid token with no subject is accepted; the result just has no `userId`.',
     ],
-    why: 'A service must reject a token that is missing, forged, expired or addressed to another service. Only requireInternalToken calls it, and no app uses that yet.',
-    returns: 'A promise of { userId, requestId? }. It rejects when any check fails.',
-    tests: [INTERNAL_TOKEN_TEST],
+    why: 'A service must reject a token that is missing, forged, expired or addressed to another service. Whether a route needs a user is a separate check, requireUser. Only requireInternalToken calls it, and no app uses that yet.',
+    returns:
+      'A promise of { userId?, requestId? }, an empty object for a valid token with neither. It rejects when any check fails.',
+    tests: [INTERNAL_TOKEN_TEST, SERVICE_TEST],
   },
   {
     symbol: 'backend/shared/src/internalToken.ts#requireInternalToken',
@@ -396,17 +425,32 @@ export const notes: SymbolNote[] = [
     summary: 'Middleware for services: lets a request through only with a valid internal token.',
     how: [
       'It reads the x-internal-token header.',
-      "A missing header throws AppError('unauthorized').",
-      "A token that fails verifyInternalToken throws AppError('unauthorized'), keeping the original error as `cause`.",
-      'On success it stores the user ID in `res.locals.userId` and in the request context, then calls next().',
+      "A missing header throws AppError('unauthorized', 'Missing internal token').",
+      "A token that fails verifyInternalToken throws AppError('unauthorized', 'Invalid internal token'), keeping the original error as `cause`.",
+      'When the token names a user, it stores the user ID in `res.locals.userId` and in the request context.',
+      'A valid token with no user passes too, with no user set. It does not require one: routes that act for a user add requireUser() after it.',
       'Express 5 passes errors thrown in async middleware to the error handler, which answers 401.',
     ],
-    why: 'It is how a service will know which user a request is for, and that it really came through the gateway. A direct call without a valid token gets 401. No app adds it to a route yet.',
+    why: 'It is how a service will know that a request really came through the gateway, and which user it is for. A direct call without a valid token gets 401. With the `internalAuth` option, createService puts it in front of every route except /healthz and /readyz; no app passes that option yet.',
     returns: 'An async Express middleware function.',
     sideEffects: [
-      'Sets res.locals.userId.',
-      'Adds the user ID to the request context, so later log lines carry it.',
+      'Sets res.locals.userId when the token names a user.',
+      'Adds that user ID to the request context, so later log lines carry it.',
     ],
+    tests: [INTERNAL_TOKEN_TEST, SERVICE_TEST],
+  },
+  {
+    symbol: 'backend/shared/src/internalToken.ts#requireUser',
+    status: 'not-wired',
+    summary:
+      'Middleware for routes that act for a user: answers 401 unless the internal token named one.',
+    how: [
+      'It runs after requireInternalToken, which sets `res.locals.userId` only when the token has a user.',
+      "Without `res.locals.userId`, it passes AppError('unauthorized', 'This route needs a signed-in user') to the error handler, which answers 401.",
+      'Otherwise it calls next().',
+    ],
+    why: 'A valid internal token only proves that a request came through the gateway; requests with no session, such as a sign-in, carry one too. Routes that must know the user add this check on top. No app uses it yet.',
+    returns: 'An Express middleware function.',
     tests: [INTERNAL_TOKEN_TEST],
   },
 
@@ -484,20 +528,58 @@ export const notes: SymbolNote[] = [
   },
 
   // -------------------------------------------------------------------------------------------
+  // backend/shared/src/rateLimit.ts
+
+  {
+    symbol: 'backend/shared/src/rateLimit.ts#hitRateLimit',
+    status: 'not-wired',
+    summary: 'Counts one request for a caller in Redis and says whether it is within the limit.',
+    how: [
+      'The Redis key is rl:<scope>:<id>, so each scope and each caller has its own count.',
+      'One MULTI transaction increments the count, starts the expiry with EXPIRE ... NX (only if none is running) and reads the time left with TTL.',
+      'It throws if the transaction is aborted or any of its three commands fails.',
+      'The request is allowed while the count is at most `limit`.',
+      'The window lasts `windowSeconds` (60 by default) from the first request. Later requests do not extend it, and the count starts over when the key expires.',
+    ],
+    why: 'Counting in Redis means every copy of an app shares the same counts. The count and its expiry are set in one transaction, so a counter is never left behind without an expiry. EXPIRE with NX needs Redis 7 or later; backend/docker-compose.yml and CI run redis:7-alpine. Only rateLimit calls it, and no app uses that yet.',
+    returns:
+      'A promise of { allowed, remaining, retryAfterSeconds }. `remaining` never goes below 0. `retryAfterSeconds` is the time left in the window, or `windowSeconds` when TTL gives no positive value.',
+    sideEffects: ['Increments a counter in Redis, and sets its expiry when the window starts.'],
+    tests: [RATE_LIMIT_TEST],
+  },
+  {
+    symbol: 'backend/shared/src/rateLimit.ts#rateLimit',
+    status: 'not-wired',
+    summary: 'Middleware that answers 429 once a caller has used up its limit.',
+    how: [
+      '`keyOf` picks what is counted, such as the IP address or the signed-in user.',
+      'When `keyOf` returns undefined, the request is not counted and goes on.',
+      'Otherwise it counts the request with hitRateLimit.',
+      "Over the limit, it sets the Retry-After header to the seconds left in the window and throws AppError('rate_limited'), whose message says when to try again.",
+      'Express 5 passes errors thrown in async middleware to the error handler, which answers 429.',
+      'If the Redis call fails, that error reaches the error handler too, which answers 500: the request is refused, not let through.',
+    ],
+    why: 'It puts a limit in front of routes in one line, with the counts shared through Redis. Retry-After tells a well-behaved client how long to wait. No app adds it to a route yet.',
+    returns: 'An async Express middleware function.',
+    sideEffects: ['Counts the request in Redis.', 'Sets the Retry-After header on a 429.'],
+    tests: [RATE_LIMIT_TEST],
+  },
+
+  // -------------------------------------------------------------------------------------------
   // backend/shared/src/redis.ts
 
   {
     symbol: 'backend/shared/src/redis.ts#createRedis',
     status: 'verified',
-    summary: "Creates a Redis client whose connection errors go to the app's logger.",
+    summary: "Creates a Redis client whose errors go to the app's logger.",
     how: [
       'It creates an ioredis client for the URL, which starts connecting straight away.',
-      'It sets maxRetriesPerRequest to 2 (the ioredis default is 20). In ioredis this counter belongs to the client, not to each command.',
-      'While Redis is down, commands wait in the offline queue. ioredis fails the whole queue with MaxRetriesPerRequestError only on every 3rd failed connection attempt (retryAttempts % (maxRetriesPerRequest + 1) === 0).',
-      'Reconnect delays grow to at most 5 seconds, so a queued command can wait about 15 seconds before it fails.',
-      'It listens for `error` events and logs them.',
+      'It listens for `error` events and logs each one as "redis error", a pino log line like every other (JSON, or pretty-printed in development).',
+      'It sets maxRetriesPerRequest to 2 (the ioredis default is 20). In ioredis this counter belongs to the whole client, not to each command.',
+      'While Redis is down, commands wait in a queue. ioredis rejects the whole queue with MaxRetriesPerRequestError on every third failed reconnect (maxRetriesPerRequest + 1).',
+      'Reconnect delays grow to at most 5 seconds, so a queued command waits at most about 15 seconds. With the default of 20 it would be about 100 seconds.',
     ],
-    why: 'Without a listener, ioredis would only print "[ioredis] Unhandled error event" to stderr with console.error; it does not throw. The listener sends these errors to the structured pino logger at level error instead, like every other log line. The client keeps reconnecting meanwhile, and /readyz reports Redis as failed. The gateway, auth and agent use it.',
+    why: 'Without an `error` listener, ioredis would not crash: it would print "[ioredis] Unhandled error event" and the stack with console.error, outside the structured logs. With the listener these errors go to the pino logger at level error instead. A request that needs Redis gets an error after about 15 seconds at most, instead of hanging for minutes. The client keeps reconnecting meanwhile, and /readyz reports Redis as failed. The gateway, auth and agent use it.',
     returns: 'The ioredis client.',
     sideEffects: [
       'Opens a connection to Redis.',
@@ -558,18 +640,19 @@ export const notes: SymbolNote[] = [
     how: [
       'It turns off the X-Powered-By header.',
       'requestId() gives the request its ID.',
-      'pino-http logs each request with that ID, except /healthz and /readyz.',
+      'pino-http logs each request with that ID. isHealthProbe makes it skip GET and HEAD probes of /healthz and /readyz; anything else on those paths is logged.',
       'The log level follows the result: error for failures and 5xx, warn for 4xx, info otherwise.',
       'helmet() sets security headers.',
-      'express.json() parses JSON bodies up to `bodyLimit` (64kb by default).',
+      'When `parseJson` is true (the default), express.json() parses JSON bodies up to `bodyLimit` (64kb by default). When it is false, bodies are left unread, byte for byte.',
       'healthRouter() adds /healthz and /readyz.',
+      'When the `internalAuth` option is given, requireInternalToken() comes next. Every route except /healthz and /readyz then needs a valid internal token addressed to this service, so a direct call gets 401 on any path, even an unknown one, unless its JSON body is rejected first: the body parser runs before the token check.',
       "The app's own `routes` come next.",
       'notFoundHandler() and errorHandler() come last, to catch whatever is left.',
     ],
-    why: 'Middleware order matters: the request ID must exist before anything logs, and the error handler must come last. Writing the order once means all five apps get it right.',
+    why: 'Middleware order matters: the request ID must exist before anything logs, health probes must not need a token, and the error handler must come last. The token check runs before the routes, so a call without a token cannot learn from a 404 which paths exist. Writing the order once means all five apps get it right. Per its comment, the gateway is meant to turn `parseJson` off so it can forward bodies to the services untouched. No app turns it off or passes `internalAuth` yet.',
     returns: 'The Express app, not listening yet.',
     sideEffects: [
-      'For each request once the app listens: sets security headers and X-Request-Id, and writes a request log line (not for health checks).',
+      'For each request once the app listens: sets security headers and X-Request-Id, and writes a request log line (not for GET or HEAD health probes).',
     ],
     tests: [SERVICE_TEST, ...APP_TESTS],
   },
@@ -581,21 +664,157 @@ export const notes: SymbolNote[] = [
       'It calls app.listen and rejects if the port cannot be opened.',
       'Once listening, it logs the port and resolves with { port, close }.',
       'close() stops new connections, closes idle ones and lets in-flight requests finish.',
+      'While shutting down, it closes each keep-alive connection as soon as its last response is sent, instead of leaving it idle for about 6 seconds.',
       'After `shutdownTimeoutMs` (10 seconds by default) it force-closes any connection still open.',
       'Then it runs `onShutdown` (where apps close their databases) and logs "shut down cleanly".',
       'Calling close() again returns the same promise.',
-      'Unless `handleSignals` is false, SIGTERM or SIGINT runs close(), then exits with code 0, or logs "shutdown failed" and exits with code 1.',
+      'Unless `handleSignals` is false, the first SIGTERM or SIGINT runs close(), then exits with code 0, or logs "shutdown failed" and exits with code 1. Later signals are logged as "already shutting down" and ignored.',
+      'If a shutdown started by a signal is still running `CLEANUP_GRACE_MS` (5 seconds) after the force-close, it logs "shutdown timed out" and exits with code 1.',
     ],
     why: 'Stopping abruptly would cut requests off halfway. This lets running requests finish, with a time limit so one stuck connection cannot block shutdown forever. Tests turn signals off and call close() themselves.',
     returns:
       'A promise of { port, close }. `port` is the real port, which matters when port 0 asks the system for a free one.',
     sideEffects: [
       'Opens a listening port.',
-      'Logs "listening" once open, "shutting down" when a signal arrives and "shut down cleanly" after close() finishes.',
-      'Adds one-time SIGTERM and SIGINT listeners to the process.',
+      'Logs "listening" once open, "shutting down" on the first signal, "already shutting down" on any later one and "shut down cleanly" after close() finishes.',
+      'Adds one SIGTERM and SIGINT listener to the process, which stays registered.',
       'Exits the process after a shutdown started by a signal.',
     ],
     tests: [SERVICE_TEST],
+  },
+  {
+    symbol: 'backend/shared/src/service.ts#CLEANUP_GRACE_MS',
+    status: 'verified',
+    summary:
+      'How long a shutdown started by a signal may keep cleaning up after open connections are cut.',
+    why: 'On the first SIGTERM or SIGINT, startService sets a backstop timer for `shutdownTimeoutMs` plus this long (15 seconds with the default timeout). If close() has not finished by then, for example because onShutdown hangs on a database, it logs "shutdown timed out" and exits with code 1. So a stuck cleanup cannot keep the process alive forever. Every app starts with signals handled, so every app has the backstop. No test waits for it to run out.',
+    returns: '5,000 milliseconds (5 seconds).',
+  },
+
+  // -------------------------------------------------------------------------------------------
+  // backend/shared/src/sessions.ts
+
+  {
+    symbol: 'backend/shared/src/sessions.ts#SESSION_COOKIE',
+    status: 'not-wired',
+    summary: 'The name of the cookie that carries the session ID.',
+    why: 'The app that sets the cookie and the app that reads it must agree on the name, so it is defined once. The logger redacts the Cookie and Set-Cookie headers, so the session ID never reaches the logs. Nothing reads it yet, not even the tests.',
+    returns: "The string 'gilder_sid'.",
+  },
+  {
+    symbol: 'backend/shared/src/sessions.ts#SESSION_TTL_SECONDS',
+    status: 'not-wired',
+    summary: 'How long a session lasts after it was last used.',
+    why: 'createSession sets this expiry and resolveSession restarts it on every lookup, so a session in use stays alive and an unused one ends by itself. backend/docker-compose.yml runs Redis with noeviction, so Redis never drops a session to free memory; its comment says every key has an expiry instead. No app creates sessions yet.',
+    returns: '604,800 seconds (7 days).',
+    tests: [SESSIONS_TEST],
+  },
+  {
+    symbol: 'backend/shared/src/sessions.ts#SESSION_ID_BYTES',
+    status: 'not-wired',
+    summary: 'How many random bytes make up a session ID.',
+    why: 'Per its comment, 32 random bytes give too many possibilities to guess. As base64url they make a 43-character ID of letters, digits, hyphens and underscores. Only createSession reads it.',
+    returns: 'The number 32.',
+    tests: [SESSIONS_TEST],
+  },
+  {
+    symbol: 'backend/shared/src/sessions.ts#SESSION_ID_FORMAT',
+    status: 'not-wired',
+    summary: 'The shape every real session ID has: 43 base64url characters.',
+    why: 'The session ID comes from a cookie, which the caller controls. resolveSession and deleteSession check it against this pattern first and stop when it does not match, so a malformed value never reaches Redis.',
+    returns: 'A regular expression for exactly 43 letters, digits, underscores or hyphens.',
+    tests: [SESSIONS_TEST],
+  },
+  {
+    symbol: 'backend/shared/src/sessions.ts#sessionKey',
+    status: 'not-wired',
+    summary:
+      'The Redis key a session is stored under: sess: followed by the SHA-256 hash of its ID.',
+    why: 'Redis never holds the session ID itself, so someone who reads a Redis dump sees no IDs they could put in a cookie. The same ID always gives the same key, so a lookup is a single read. createSession, resolveSession and deleteSession all use it.',
+    returns: 'A string like sess:<64 hex characters>.',
+    tests: [SESSIONS_TEST],
+  },
+  {
+    symbol: 'backend/shared/src/sessions.ts#createSession',
+    status: 'not-wired',
+    summary: 'Starts a session for a user and returns its ID, the value for the session cookie.',
+    how: [
+      'It makes a new ID from 32 random bytes, as base64url.',
+      'It stores { userId } as JSON under sessionKey(ID), with SET ... EX so it expires after 7 days.',
+      'It returns the ID; only its hash is in Redis.',
+    ],
+    why: 'Sessions live in Redis, so any copy of any app can read them. Per the file comment, auth creates and deletes sessions and the gateway looks them up on every request; no app does either yet. Each call makes a new session, so one user can be signed in on several devices at once.',
+    returns: 'A promise of the session ID, a 43-character string.',
+    sideEffects: ['Writes one key to Redis, with a 7-day expiry.'],
+    tests: [SESSIONS_TEST],
+  },
+  {
+    symbol: 'backend/shared/src/sessions.ts#resolveSession',
+    status: 'not-wired',
+    summary: 'Finds the session for an ID from a cookie and restarts its 7 days.',
+    how: [
+      'It returns undefined straight away when the ID does not match SESSION_ID_FORMAT.',
+      'GETEX reads the session and sets its expiry back to 7 days in one round trip.',
+      'A missing or expired key gives undefined.',
+      'Otherwise parseSession checks the stored value.',
+    ],
+    why: 'The cookie is input from the caller, so nothing about it is assumed: a malformed ID, an unknown or expired session and a damaged stored value all mean "no session". Restarting the expiry on each lookup means a session ends 7 days after it was last used, not 7 days after it was made. No app calls it yet.',
+    returns: 'A promise of { userId }, or undefined when there is no valid session.',
+    sideEffects: ["Resets the session's expiry in Redis to 7 days."],
+    tests: [SESSIONS_TEST],
+  },
+  {
+    symbol: 'backend/shared/src/sessions.ts#deleteSession',
+    status: 'not-wired',
+    summary: 'Ends one session (logout).',
+    how: [
+      'An ID that does not match SESSION_ID_FORMAT is ignored.',
+      'Otherwise it deletes the key from sessionKey(ID).',
+      'An unknown or already deleted session is not an error: it resolves either way.',
+    ],
+    why: 'Only that session ends, so the user stays signed in on their other devices. Logging out twice, or after the session expired, does no harm. No app calls it yet.',
+    returns: 'A promise that resolves once done.',
+    sideEffects: ['Deletes the session key from Redis.'],
+    tests: [SESSIONS_TEST],
+  },
+  {
+    symbol: 'backend/shared/src/sessions.ts#parseSession',
+    status: 'not-wired',
+    summary: 'Reads a stored session value, accepting only JSON with a non-empty string userId.',
+    how: [
+      'It parses the value as JSON; text that is not JSON gives undefined.',
+      'It requires an object whose `userId` is a non-empty string.',
+      'It returns a new { userId } with only that field, dropping anything else.',
+    ],
+    why: 'A value in Redis could be damaged or written by something else. Treating anything unexpected as no session means a bad value never produces a session without a user. Only resolveSession calls it.',
+    returns: '{ userId }, or undefined.',
+    tests: [SESSIONS_TEST],
+  },
+
+  // -------------------------------------------------------------------------------------------
+  // backend/shared/src/test-redis.ts
+
+  {
+    symbol: 'backend/shared/src/test-redis.ts#TEST_REDIS_URL',
+    status: 'verified',
+    summary: 'Where the tests find Redis.',
+    why: 'For tests only. The tests use a real Redis: the local container from `pnpm infra:up` on port 6380, and in CI a Redis service on the same port. Database 15 keeps test keys away from the development data in database 0. The TEST_REDIS_URL environment variable overrides it.',
+    returns: "process.env.TEST_REDIS_URL when set, otherwise 'redis://localhost:6380/15'.",
+  },
+  {
+    symbol: 'backend/shared/src/test-redis.ts#createTestRedis',
+    status: 'verified',
+    summary: 'Gives one test its own Redis client, whose keys no other test can see.',
+    how: [
+      'It makes a random prefix, test:<uuid>:, and ioredis adds it to every key the client writes.',
+      'It connects before returning and never retries, so a test fails straight away when Redis is not running, with a message saying to run `pnpm infra:up`.',
+      "`keys()` lists this test's keys with SCAN, without the prefix. SCAN takes a pattern, which ioredis does not prefix, so the pattern names the prefix itself.",
+      "`cleanup()` deletes this test's keys and closes the connection.",
+    ],
+    why: "For tests only: sessions.test.ts and rateLimit.test.ts make one before each test and clean it up after. Tests running at the same time, even in other packages, never see each other's keys, and cleanup deletes only this test's keys.",
+    returns: 'A promise of { redis, keys, cleanup }.',
+    sideEffects: ['Opens a connection to the test Redis.'],
+    tests: [SESSIONS_TEST, RATE_LIMIT_TEST],
   },
 
   // -------------------------------------------------------------------------------------------
@@ -667,15 +886,54 @@ export const notes: SymbolNote[] = [
     status: 'verified',
     summary: "The auth service's environment variables, checked at startup.",
     how: [
-      'It extends baseEnvSchema with PORT (default 8001), MONGODB_URI and REDIS_URL (both required, not empty).',
-      'loadEnv checks process.env against it when the file is first imported.',
+      'It is one line, `loadEnv(authEnvSchema)`: the settings and the rules between them live in env-schema.ts.',
+      'loadEnv checks process.env against that schema when the file is first imported.',
     ],
-    why: 'The service refuses to start if MONGODB_URI or REDIS_URL is missing or if any value is invalid, and lists every problem at once, before it connects to anything. PORT, NODE_ENV and LOG_LEVEL have defaults, so leaving them out does not stop it. Node fills process.env from the .env file, through the --env-file-if-exists flag in the package scripts. index.ts reads it for the log level, pretty logs, the MongoDB and Redis URLs and the port.',
-    returns: 'An object with NODE_ENV, LOG_LEVEL, PORT (a number), MONGODB_URI and REDIS_URL.',
+    why: 'The service refuses to start if a setting is missing or invalid, before it connects to anything. It needs MONGODB_URI, REDIS_URL and INTERNAL_PUBLIC_KEY. AUTH_DEV_LOGIN (default false) and the three Firebase settings for Google sign-in are optional, except that production needs AUTH_DEV_LOGIN off and all three Firebase settings. PORT, NODE_ENV and LOG_LEVEL have defaults. Node fills process.env from the .env file, through the --env-file-if-exists flag in the package scripts. index.ts reads it for the log level, pretty logs, the MongoDB and Redis URLs and the port; nothing reads INTERNAL_PUBLIC_KEY, AUTH_DEV_LOGIN or the Firebase settings yet.',
+    returns:
+      'An object with NODE_ENV, LOG_LEVEL, PORT (a number), MONGODB_URI, REDIS_URL, INTERNAL_PUBLIC_KEY, AUTH_DEV_LOGIN (a boolean), and FIREBASE_PROJECT_ID, FIREBASE_CLIENT_EMAIL and FIREBASE_PRIVATE_KEY (each a string or undefined).',
     sideEffects: [
       'Reads process.env.',
       'Throws an EnvError on import if anything is invalid, which stops the app.',
     ],
+  },
+  {
+    symbol: 'backend/services/auth/src/env-schema.ts#authEnvSchema',
+    status: 'verified',
+    summary: "The auth service's settings and the rules between them, as a Zod schema.",
+    how: [
+      'It extends baseEnvSchema with PORT (default 8001), MONGODB_URI and REDIS_URL (both required, not empty).',
+      "INTERNAL_PUBLIC_KEY, the gateway's public key for checking internal tokens, is required and must start with -----BEGIN PUBLIC KEY-----. Both of its messages say to run `pnpm setup:keys`, and neither repeats the value.",
+      'AUTH_DEV_LOGIN, sign-in with just an email for local development and tests, is a true or false flag (default false). Zod\'s stringbool also takes 1/0, yes/no, on/off, y/n and enabled/disabled, in any case; any other value, including an empty one, fails with "must be true or false".',
+      'FIREBASE_PROJECT_ID, FIREBASE_CLIENT_EMAIL and FIREBASE_PRIVATE_KEY, a service account of a Firebase project for Google sign-in, may be left out; empty counts as unset.',
+      'In production, AUTH_DEV_LOGIN must be false, because it lets anyone sign in as anyone.',
+      'In production, all three Firebase settings are required. Elsewhere they may all be left out, but setting only some of them is an error for each one missing.',
+      'The rules between settings are skipped when a setting is missing or unreadable (unset, a PORT that is not a number, or a bad AUTH_DEV_LOGIN), so a missing MONGODB_URI is reported alone and the production rules only on the next start. A setting that is present but fails a check, such as an empty MONGODB_URI or a key without the PEM header, is reported together with them.',
+    ],
+    why: 'The rules stop the service from starting in a state that is unsafe (dev sign-in in production) or half set up (part of a service account). The schema lives apart from env.ts, which loads it at startup, so tests can check the rules without a real environment.',
+    returns: 'A Zod object schema, with a superRefine for the production and Firebase rules.',
+    tests: [AUTH_ENV_SCHEMA_TEST],
+  },
+  {
+    symbol: 'backend/services/auth/src/env-schema.ts#optionalSetting',
+    status: 'verified',
+    summary: 'A Zod schema for a setting that may be left out, where empty counts as unset.',
+    how: [
+      'It trims the value.',
+      'An empty result becomes undefined, the same as a variable that is not set.',
+    ],
+    why: 'A fresh copy of .env.example has the Firebase settings present but empty. Without this, FIREBASE_PROJECT_ID= would count as set and trip the all-or-none rule. The three Firebase settings use it.',
+    returns: 'A Zod schema whose parsed value is the trimmed string, or undefined.',
+    tests: [AUTH_ENV_SCHEMA_TEST],
+  },
+  {
+    symbol: 'backend/services/auth/src/env-schema.ts#FIREBASE_SETTINGS',
+    status: 'verified',
+    summary: 'The names of the three Firebase settings that Google sign-in needs.',
+    why: 'The production and all-or-none rules in authEnvSchema go through this list to find the missing ones, so each missing setting gets its own message. `as const` keeps the exact names, so they can be used to read the parsed settings.',
+    returns:
+      'A read-only array: FIREBASE_PROJECT_ID, FIREBASE_CLIENT_EMAIL and FIREBASE_PRIVATE_KEY.',
+    tests: [AUTH_ENV_SCHEMA_TEST],
   },
   {
     symbol: 'backend/services/chat/src/app.ts#createApp',
