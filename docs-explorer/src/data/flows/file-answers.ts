@@ -514,8 +514,8 @@ const e2eRun: Flow = {
       title: 'Build, start and wait for every app',
       kind: 'function',
       status: 'verified',
-      what: 'The frontend is built (next build) and started (next start); the gateway and the four services start with node --env-file=.env src/index.ts, each writing a log file. The job polls /healthz on ports 8000 to 8004 and /login on port 3000, up to a minute each, and prints the logs if one never answers.',
-      why: 'The tests run against a production build, the way people would use it.',
+      what: 'The frontend is built (next build) and started the way the Docker image runs it: the standalone server (node .next/standalone/frontend/server.js) with the static files and public folder copied next to it. The gateway and the four services start with node --env-file=.env src/index.ts, each writing a log file to one logs folder. The job polls /healthz on ports 8000 to 8004 and /login on port 3000, up to a minute each, and prints the logs if one never answers.',
+      why: 'The tests run against the same production server that is deployed (next start does not serve standalone output).',
     },
     {
       id: 'playwright',
