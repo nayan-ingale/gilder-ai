@@ -16,6 +16,10 @@ import { env } from './env.ts';
 import { createLlm } from './llm/llm.ts';
 import { buildProviders } from './llm/providers.ts';
 import { createS3FileStore } from './files/file-store.ts';
+import { startFileCleanup } from './rag/cleanup.ts';
+import { createGeminiEmbedder, mockEmbedder } from './rag/embeddings.ts';
+import { indexPdf } from './rag/indexer.ts';
+import { createMemoryVectorStore, createQdrantStore } from './rag/vector-store.ts';
 import { createMemory } from './memory.ts';
 import { createTavilySearch, mockWebSearch } from './search/web-search.ts';
 import { billingService, chatService } from './services.ts';
@@ -88,6 +92,14 @@ if (!fileStore) {
   );
 }
 
+// PDF questions: Gemini embeddings and Qdrant in live mode; stand-ins in mock mode.
+const embedder =
+  env.LLM_MODE === 'live' && env.GEMINI_API_KEY
+    ? createGeminiEmbedder(env.GEMINI_API_KEY)
+    : mockEmbedder;
+const vectors = env.QDRANT_URL ? createQdrantStore(env.QDRANT_URL) : createMemoryVectorStore();
+const stopCleanup = startFileCleanup({ chat, store: fileStore, vectors, logger });
+
 const app = createApp({
   logger,
   readinessChecks: { mongo: pingMongo, redis: () => pingRedis(redis) },
@@ -104,13 +116,22 @@ const app = createApp({
     available: availableAgents(agents),
     stops,
   },
-  files: { store: fileStore, chat },
+  files: {
+    store: fileStore,
+    chat,
+    onPdfReady: (file) => {
+      if (fileStore) {
+        void indexPdf(file, { store: fileStore, embedder, vectors, logger });
+      }
+    },
+  },
 });
 
 await startService(app, {
   port: env.PORT,
   logger,
   onShutdown: async () => {
+    stopCleanup();
     await stops.close();
     await disconnectMongo();
     await redis.quit();

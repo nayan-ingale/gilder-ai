@@ -304,3 +304,20 @@ describe('GET /internal/chats/:id/last-turn', () => {
     });
   });
 });
+
+describe('POST /internal/chats/deleted', () => {
+  it("names the chats that are gone for this user: deleted, missing or someone else's", async () => {
+    const [alive, deleted, theirs] = await ConversationModel.create([
+      { userId: 'u1' },
+      { userId: 'u1', deletedAt: new Date() },
+      { userId: 'u2' },
+    ]);
+    const missing = '65f0c0ffee1234567890ffff';
+
+    const response = await as('u1', 'post', '/internal/chats/deleted').send({
+      ids: [alive?.id, deleted?.id, theirs?.id, missing, 'not-an-id'],
+    });
+
+    expect(response.body.deleted).toEqual([deleted?.id, theirs?.id, missing, 'not-an-id']);
+  });
+});

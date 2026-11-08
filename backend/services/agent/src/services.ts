@@ -65,6 +65,8 @@ export interface ChatService {
   updateMessage(userId: string, messageId: string, update: MessageUpdate): Promise<SavedMessage>;
   /** Names a new chat; a title the user chose is kept. */
   autoTitle(userId: string, chatId: string, title: string): Promise<void>;
+  /** Of these chats, the ones that are gone for the user. */
+  deletedChats(userId: string, chatIds: string[]): Promise<string[]>;
 }
 
 export function chatService(client: InternalClient): ChatService {
@@ -110,6 +112,18 @@ export function chatService(client: InternalClient): ChatService {
         { userId, body: update, retry: true },
       );
       return message;
+    },
+    async deletedChats(userId, chatIds) {
+      const { deleted } = await client.request<{ deleted: string[] }>(
+        'POST',
+        '/internal/chats/deleted',
+        {
+          userId,
+          body: { ids: chatIds },
+          retry: true,
+        },
+      );
+      return deleted;
     },
     async autoTitle(userId, chatId, title) {
       await client.request('PATCH', `/internal/chats/${encodeURIComponent(chatId)}`, {

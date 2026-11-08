@@ -9,6 +9,7 @@ import {
 } from '@gilder/shared';
 import { Router } from 'express';
 import {
+  ConversationModel,
   DEFAULT_CHAT_TITLE,
   findOwnedConversation,
   MESSAGE_ROLES,
@@ -62,6 +63,7 @@ const updateMessageBody = z
   .strict()
   .refine((body) => Object.keys(body).length > 0, 'Give at least one field');
 
+const deletedBody = z.object({ ids: z.array(id).max(200) }).strict();
 const autoTitleBody = z.object({ title: z.string().trim().min(1).max(120) }).strict();
 const recentQuery = z.object({
   limit: z.coerce.number().int().min(1).max(MAX_RECENT).default(20),
@@ -157,6 +159,21 @@ export function internalRouter(): Router {
       user: user ? toMessage(user) : null,
       answer: answer ? toMessage(answer) : null,
     });
+  });
+
+  // Of these chats, the ones that are gone for this user (deleted, or never theirs): the agent
+  // removes their files and indexed documents.
+  router.post('/internal/chats/deleted', validate({ body: deletedBody }), async (req, res) => {
+    const userId = res.locals.userId as string;
+    const { ids } = req.body as z.output<typeof deletedBody>;
+    const valid = ids.filter((value) => mongoose.isValidObjectId(value));
+    const alive = await ConversationModel.find({
+      _id: { $in: valid },
+      userId,
+      deletedAt: null,
+    }).select({ _id: 1 });
+    const aliveIds = new Set(alive.map((chat) => chat.id));
+    res.json({ deleted: ids.filter((value) => !aliveIds.has(value)) });
   });
 
   // Save a message. A retried send with the same client ID returns the first copy (200, not 201).
