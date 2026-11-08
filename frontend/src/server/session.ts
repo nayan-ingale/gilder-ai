@@ -1,6 +1,5 @@
-import { cookies } from 'next/headers';
 import { cache } from 'react';
-import { gatewayUrlFromEnv } from './gateway-proxy';
+import { gatewayGet } from './gateway-fetch';
 
 /** What the app shows of the signed-in user (the gateway's GET /api/me). */
 export interface Profile {
@@ -11,23 +10,14 @@ export interface Profile {
   themePreference: 'system' | 'light' | 'dark';
 }
 
-const SESSION_COOKIE = 'gilder_sid';
-
 /**
  * Looks up the signed-in user, or null. Server components call the gateway directly with the browser's
  * cookie; the browser's own requests go through /api. Reading cookies makes this per-request,
  * so it must run inside a <Suspense> boundary.
  */
 async function fetchCurrentUser(): Promise<Profile | null> {
-  const store = await cookies();
-  if (!store.get(SESSION_COOKIE)) {
-    return null;
-  }
-  const response = await fetch(`${gatewayUrlFromEnv().replace(/\/+$/, '')}/api/me`, {
-    headers: { cookie: store.toString(), 'x-gilder-client': 'web' },
-    cache: 'no-store',
-  });
-  if (response.status === 401) {
+  const response = await gatewayGet('/api/me');
+  if (!response || response.status === 401) {
     return null;
   }
   if (!response.ok) {

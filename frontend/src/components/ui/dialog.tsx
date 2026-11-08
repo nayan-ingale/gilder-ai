@@ -16,20 +16,33 @@ export interface DialogProps {
 /**
  * A modal dialog. Radix keeps focus inside it and closes it on Escape; the title and description
  * are wired to it for screen readers. Focus goes back to whatever opened it, even a plain button
- * or a menu item (Radix only does that by itself for its own Trigger).
+ * or a menu item (Radix only does that by itself for its own Trigger). A field marked
+ * `data-autofocus` is focused first.
  */
 export function Dialog({ open, onOpenChange, title, description, children }: DialogProps) {
   const returnFocusTo = useRef<HTMLElement | null>(null);
+  const contentRef = useRef<HTMLDivElement>(null);
 
   return (
     <DialogPrimitive.Root open={open} onOpenChange={onOpenChange}>
       <DialogPrimitive.Portal>
         <DialogPrimitive.Overlay className="fixed inset-0 z-40 bg-canvas/70" />
         <DialogPrimitive.Content
-          onOpenAutoFocus={() => {
+          ref={contentRef}
+          onOpenAutoFocus={(event) => {
             // Runs before focus moves into the dialog, so this is still the opener.
             returnFocusTo.current =
               document.activeElement instanceof HTMLElement ? document.activeElement : null;
+            // A field marked data-autofocus gets focus (and its text selected) instead of the
+            // first button, which is the close button.
+            const field = contentRef.current?.querySelector<HTMLElement>('[data-autofocus]');
+            if (field) {
+              event.preventDefault();
+              field.focus();
+              if (field instanceof HTMLInputElement) {
+                field.select();
+              }
+            }
           }}
           onCloseAutoFocus={(event) => {
             const opener = returnFocusTo.current;
