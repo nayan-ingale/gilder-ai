@@ -118,6 +118,7 @@ The whole app runs on one server with Docker Compose, behind Caddy:
 - **One public service.** Caddy gets and renews the HTTPS certificates and passes the answer stream through without buffering. MongoDB (a single-node replica set, for transactions), Redis, Qdrant and the apps share an internal network.
 - **Deploys** run from GitHub Actions by hand: build both images, push them to GitHub's container registry tagged with the commit, copy the Compose files to the server and restart.
 - **Backups:** `deploy/backup.sh` copies MongoDB to S3 nightly from cron and keeps a week of copies on the server.
+- **Monitoring:** `GET /api/health` answers 200 only when the web server reaches a ready gateway (503 otherwise), so one uptime monitor covers Caddy, the web server, the gateway and Redis.
 
 See [`deploy/compose.yml`](deploy/compose.yml) for the files the server needs.
 
