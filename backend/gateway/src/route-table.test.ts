@@ -15,6 +15,27 @@ describe('matchRoute', () => {
     expect(matchRoute('PATCH', '/api/me')?.targetPath).toBe('/me');
   });
 
+  it('maps each chat route to the chat service, always behind a session', () => {
+    const id = '65f0c0ffee1234567890abcd';
+    const cases = [
+      ['GET', '/api/chats', '/chats'],
+      ['POST', '/api/chats', '/chats'],
+      ['GET', `/api/chats/${id}`, `/chats/${id}`],
+      ['PATCH', `/api/chats/${id}`, `/chats/${id}`],
+      ['DELETE', `/api/chats/${id}`, `/chats/${id}`],
+      ['GET', `/api/chats/${id}/messages`, `/chats/${id}/messages`],
+    ] as const;
+
+    for (const [method, path, target] of cases) {
+      expect(matchRoute(method, path), `${method} ${path}`).toMatchObject({
+        route: { service: 'chat', session: 'required' },
+        targetPath: target,
+      });
+    }
+    expect(matchRoute('PUT', `/api/chats/${id}`)).toBeUndefined();
+    expect(matchRoute('DELETE', '/api/chats')).toBeUndefined();
+  });
+
   it('finds nothing for an unknown path or a method the route does not have', () => {
     expect(matchRoute('GET', '/api/nothing-here')).toBeUndefined();
     expect(matchRoute('DELETE', '/api/me')).toBeUndefined();
@@ -26,6 +47,9 @@ describe('matchRoute', () => {
       '/internal/users/1',
       '/api/internal/users/1',
       '/api/me/../internal/users/1',
+      '/internal/chats/1',
+      '/api/internal/messages',
+      '/api/chats/1/../../internal/messages',
       '/sessions',
       '/me',
     ]) {

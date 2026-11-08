@@ -1,5 +1,6 @@
 import { createApp as createAuthApp } from '@gilder/auth/app';
 import { googleSignInNotSetUp } from '@gilder/auth/firebase';
+import { createApp as createChatApp } from '@gilder/chat/app';
 import {
   createLogger,
   generateInternalKeyPair,
@@ -18,13 +19,14 @@ import request from 'supertest';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { createApp } from './app.ts';
 
-// The real gateway in front of the real auth service, each on its own port, as they run in
-// development: real Redis sessions, a real MongoDB, real internal tokens.
+// The real gateway in front of the real auth and chat services, each on its own port, as they run
+// in development: real Redis sessions, a real MongoDB, real internal tokens.
 const logger = createLogger({ service: 'journey', level: 'silent' });
 const ORIGIN = 'http://localhost:3000';
 let mongo: TestMongo;
 let store: TestRedis;
 let auth: RunningService;
+let chat: RunningService;
 let gateway: ReturnType<typeof createApp>;
 
 beforeAll(async () => {
@@ -41,17 +43,24 @@ beforeAll(async () => {
   });
   auth = await startService(authApp, { port: 0, logger, handleSignals: false });
   const authUrl = `http://localhost:${auth.port}`;
+  const chatApp = createChatApp({
+    logger,
+    internalPublicKey: await importInternalPublicKey(pair.publicKey),
+  });
+  chat = await startService(chatApp, { port: 0, logger, handleSignals: false });
+  const chatUrl = `http://localhost:${chat.port}`;
   gateway = createApp({
     logger,
     redis: store.redis,
     privateKey: await importInternalPrivateKey(pair.privateKey),
-    serviceUrls: { auth: authUrl, chat: authUrl, agent: authUrl, billing: authUrl },
+    serviceUrls: { auth: authUrl, chat: chatUrl, agent: authUrl, billing: authUrl },
     allowedOrigins: [ORIGIN],
     trustProxyHops: 1,
   });
 }, 120_000);
 
 afterAll(async () => {
+  await chat.close();
   await auth.close();
   await store.cleanup();
   await mongo.stop();
@@ -131,5 +140,82 @@ describe('sign-in journey through the gateway', () => {
 
     expect(response.status).toBe(401);
     expect(response.body.detail).toBe('Sign in first');
+  });
+});
+
+describe('chats through the gateway', () => {
+  async function signIn(email: string): Promise<string> {
+    const response = await request(gateway)
+      .post('/api/auth/dev-session')
+      .set('Origin', ORIGIN)
+      .send({ email });
+    return cookieFrom(response);
+  }
+
+  it('creates, lists, renames, pins and deletes a chat for the signed-in user', async () => {
+    const cookie = await signIn('chats@example.com');
+    const send = (method: 'get' | 'post' | 'patch' | 'delete', path: string) =>
+      request(gateway)[method](path).set('Cookie', cookie).set('Origin', ORIGIN);
+
+    const created = await send('post', '/api/chats').send({});
+    expect(created.status).toBe(201);
+    const id = created.body.chat.id as string;
+
+    expect((await send('patch', `/api/chats/${id}`).send({ title: 'Goa' })).body.chat.title).toBe(
+      'Goa',
+    );
+    expect((await send('patch', `/api/chats/${id}`).send({ pinned: true })).body.chat.pinned).toBe(
+      true,
+    );
+    const listed = await send('get', '/api/chats?query=goa');
+    expect(listed.body.items.map((item: { id: string }) => item.id)).toEqual([id]);
+    expect((await send('get', `/api/chats/${id}/messages`)).body.items).toEqual([]);
+
+    expect((await send('delete', `/api/chats/${id}`)).status).toBe(204);
+    expect((await send('get', `/api/chats/${id}`)).status).toBe(404);
+  });
+
+  it("gives another user a 404 for every route on someone else's chat (SEC-04)", async () => {
+    const owner = await signIn('owner@example.com');
+    const intruder = await signIn('intruder@example.com');
+    const created = await request(gateway)
+      .post('/api/chats')
+      .set('Cookie', owner)
+      .set('Origin', ORIGIN)
+      .send({ title: 'Private plans' });
+    const id = created.body.chat.id as string;
+
+    const attempts = [
+      request(gateway).get(`/api/chats/${id}`),
+      request(gateway).get(`/api/chats/${id}/messages`),
+      request(gateway).patch(`/api/chats/${id}`).send({ title: 'Mine' }),
+      request(gateway).delete(`/api/chats/${id}`),
+    ];
+    for (const attempt of attempts) {
+      const response = await attempt.set('Cookie', intruder).set('Origin', ORIGIN);
+      expect(response.status).toBe(404);
+    }
+    const theirList = await request(gateway).get('/api/chats').set('Cookie', intruder);
+    expect(theirList.body.items).toEqual([]);
+
+    const stillThere = await request(gateway).get(`/api/chats/${id}`).set('Cookie', owner);
+    expect(stillThere.body.chat.title).toBe('Private plans');
+  });
+
+  it("keeps chat's internal routes out of reach (SEC-01)", async () => {
+    const cookie = await signIn('internal@example.com');
+
+    for (const [method, path] of [
+      ['get', '/api/internal/chats/65f0c0ffee1234567890abcd'],
+      ['post', '/internal/messages'],
+      ['post', '/api/internal/messages'],
+    ] as const) {
+      const response = await request(gateway)
+        [method](path)
+        .set('Cookie', cookie)
+        .set('Origin', ORIGIN);
+      expect(response.status, path).toBe(404);
+    }
+    expect((await request(`http://localhost:${chat.port}`).get('/chats')).status).toBe(401);
   });
 });

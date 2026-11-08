@@ -44,6 +44,38 @@ export const PUBLIC_ROUTES: readonly PublicRoute[] = [
   },
   { method: 'GET', path: '/api/me', service: 'auth', target: '/me', session: 'required' },
   { method: 'PATCH', path: '/api/me', service: 'auth', target: '/me', session: 'required' },
+
+  // Chats: list and search, create, rename, pin, delete, and read the history.
+  { method: 'GET', path: '/api/chats', service: 'chat', target: '/chats', session: 'required' },
+  { method: 'POST', path: '/api/chats', service: 'chat', target: '/chats', session: 'required' },
+  {
+    method: 'GET',
+    path: '/api/chats/:id',
+    service: 'chat',
+    target: '/chats/:id',
+    session: 'required',
+  },
+  {
+    method: 'PATCH',
+    path: '/api/chats/:id',
+    service: 'chat',
+    target: '/chats/:id',
+    session: 'required',
+  },
+  {
+    method: 'DELETE',
+    path: '/api/chats/:id',
+    service: 'chat',
+    target: '/chats/:id',
+    session: 'required',
+  },
+  {
+    method: 'GET',
+    path: '/api/chats/:id/messages',
+    service: 'chat',
+    target: '/chats/:id/messages',
+    session: 'required',
+  },
 ];
 
 export interface MatchedRoute {
