@@ -45,9 +45,19 @@ export interface MessageUpdate {
   citations?: Record<string, unknown>[];
 }
 
+/** A finished message from history, with its ID. */
+export type HistoryMessage = MemoryMessage & { id: string };
+
+/** The latest user message and the answer after it: what regenerate and edit act on. */
+export interface LastTurn {
+  user: SavedMessage | null;
+  answer: SavedMessage | null;
+}
+
 export interface ChatService {
   getChat(userId: string, chatId: string): Promise<ChatInfo>;
-  recentMessages(userId: string, chatId: string): Promise<MemoryMessage[]>;
+  recentMessages(userId: string, chatId: string): Promise<HistoryMessage[]>;
+  lastTurn(userId: string, chatId: string): Promise<LastTurn>;
   saveMessage(
     userId: string,
     message: NewMessage,
@@ -73,7 +83,17 @@ export function chatService(client: InternalClient): ChatService {
         `/internal/chats/${encodeURIComponent(chatId)}/recent-messages`,
         { userId },
       );
-      return items.map(({ role, content }) => ({ role, content }));
+      return items.map(({ id, role, content }) => ({ id, role, content }));
+    },
+    lastTurn(userId, chatId) {
+      return client.request<LastTurn>(
+        'GET',
+        `/internal/chats/${encodeURIComponent(chatId)}/last-turn`,
+        {
+          userId,
+          retry: true,
+        },
+      );
     },
     async saveMessage(userId, message) {
       // Safe to retry: a message with a client ID is saved once (chat returns the first copy).

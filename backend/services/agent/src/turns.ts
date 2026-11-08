@@ -14,9 +14,10 @@ import { type Response, Router } from 'express';
 import type { AgentRunner } from './agents/types.ts';
 import { type EventStream, openEventStream } from './event-stream.ts';
 import type { Llm } from './llm/llm.ts';
-import type { Memory, MemoryMessage } from './memory.ts';
+import { type Memory, type MemoryMessage, trimToBudget } from './memory.ts';
 import { parseShortcut, type Route, routeMessage } from './routing.ts';
-import type { BillingService, ChatService, Reservation } from './services.ts';
+import type { BillingService, ChatInfo, ChatService, Reservation } from './services.ts';
+import type { StopSignals } from './stops.ts';
 import { generateTitle } from './title.ts';
 
 /**
@@ -29,20 +30,26 @@ import { generateTitle } from './title.ts';
 const DEFAULT_TITLE = 'New chat';
 const LOCK_SECONDS = 15 * 60;
 
-const turnParams = z.object({ chatId: z.string().min(1).max(64) });
+const id = z.string().min(1).max(64);
+const turnParams = z.object({ chatId: id });
+const messageParams = z.object({ chatId: id, messageId: id });
+const turnIdParams = z.object({ turnId: id });
+/** Chosen by the browser per action, so a retried request is answered once. */
+const clientMessageId = z
+  .string()
+  .min(8)
+  .max(64)
+  .regex(/^[A-Za-z0-9_-]+$/);
+const content = z.string().trim().min(1).max(20_000);
 const turnBody = z
   .object({
-    content: z.string().trim().min(1).max(20_000),
-    /** Chosen by the browser per message, so a retried send is answered once. */
-    clientMessageId: z
-      .string()
-      .min(8)
-      .max(64)
-      .regex(/^[A-Za-z0-9_-]+$/),
+    content,
+    clientMessageId,
     /** The agent chip the user picked, if any. */
     agent: z.enum(AGENTS).optional(),
   })
   .strict();
+const regenerateBody = z.object({ clientMessageId }).strict();
 
 export interface TurnDeps {
   llm: Llm;
@@ -53,12 +60,14 @@ export interface TurnDeps {
   logger: Logger;
   agents: Partial<Record<Agent, AgentRunner>>;
   available: ReadonlySet<Agent>;
+  stops: StopSignals;
   heartbeatMs?: number;
 }
 
 export function turnRouter(deps: TurnDeps): Router {
   const router = Router();
 
+  // A new message.
   router.post(
     '/chats/:chatId/turns',
     requireUser(),
@@ -66,78 +75,239 @@ export function turnRouter(deps: TurnDeps): Router {
     async (req, res) => {
       const userId = res.locals.userId as string;
       const { chatId } = req.params as z.output<typeof turnParams>;
-      const { content, clientMessageId, agent: chosen } = req.body as z.output<typeof turnBody>;
-      const parsed = parseShortcut(content);
-      if (parsed.text.trim() === '') {
-        throw new AppError('bad_request', 'Write a message after the shortcut');
-      }
-
+      const body = req.body as z.output<typeof turnBody>;
+      const parsed = parseShortcut(body.content);
+      requireText(parsed.text);
       const chat = await deps.chat.getChat(userId, chatId);
 
-      // One answer per message at a time: a second copy of the same send is refused.
-      const lockKey = `turn-lock:${chatId}:${clientMessageId}`;
-      if (!(await deps.redis.set(lockKey, '1', 'EX', LOCK_SECONDS, 'NX'))) {
-        throw new AppError('conflict', 'This message is already being answered');
-      }
-      try {
-        // No credits at all: refuse before any AI call, the router's included.
-        if ((await deps.billing.balance(userId)) < CREDIT_COSTS.chat) {
-          throw new AppError('insufficient_credits', 'You are out of credits');
-        }
-        const memory = await deps.memory.load(chatId, userId);
-        const route = await routeMessage(
-          { text: parsed.text, chosen: chosen ?? parsed.shortcut, available: deps.available },
-          deps.llm,
-          deps.logger,
-        );
-        const { reservation } = await deps.billing.reserve(
-          userId,
-          route.agent,
-          `turn:${chatId}:${clientMessageId}`,
-        );
-        if (reservation.status !== 'held') {
-          throw new AppError('conflict', 'This message was already answered');
-        }
+      await runTurn(deps, res, {
+        userId,
+        chat,
+        clientMessageId: body.clientMessageId,
+        content: body.content,
+        text: parsed.text,
+        chooseAgent: { chosen: body.agent ?? parsed.shortcut },
+        loadMemory: () => deps.memory.load(chatId, userId),
+        reserveKey: `turn:${chatId}:${body.clientMessageId}`,
+        userMessage: { save: true, ...(body.agent ? { agent: body.agent } : {}), supersedes: [] },
+        answerSupersedes: [],
+        historyChanged: false,
+      });
+    },
+  );
 
-        let messageIds: { user: string; answer: string };
-        try {
-          const { message: userMessage } = await deps.chat.saveMessage(userId, {
-            chatId,
-            role: 'user',
-            content,
-            clientMessageId,
-            ...(chosen ? { agent: chosen } : {}),
-          });
-          const { message: answer } = await deps.chat.saveMessage(userId, {
-            chatId,
-            role: 'assistant',
-            agent: route.agent,
-            status: 'streaming',
-          });
-          messageIds = { user: userMessage.id, answer: answer.id };
-        } catch (error) {
-          await deps.billing.release(userId, reservation.id).catch(() => undefined);
-          throw error;
-        }
-
-        await streamAnswer(deps, res, {
-          userId,
-          chatId,
-          content,
-          text: parsed.text,
-          memory,
-          route,
-          reservation,
-          messageIds,
-          needsTitle: chat.title === DEFAULT_TITLE,
-        });
-      } finally {
-        await deps.redis.del(lockKey);
+  // A new answer to the latest message, with the same agent. The old answer is hidden.
+  router.post(
+    '/chats/:chatId/messages/:messageId/regenerate',
+    requireUser(),
+    validate({ params: messageParams, body: regenerateBody }),
+    async (req, res) => {
+      const userId = res.locals.userId as string;
+      const { chatId, messageId } = req.params as z.output<typeof messageParams>;
+      const { clientMessageId: actionId } = req.body as z.output<typeof regenerateBody>;
+      const chat = await deps.chat.getChat(userId, chatId);
+      const last = await deps.chat.lastTurn(userId, chatId);
+      if (!last.user || !last.answer || last.answer.id !== messageId) {
+        throw new AppError('conflict', 'Only the latest answer can be regenerated');
       }
+      if (last.answer.status === 'streaming') {
+        throw new AppError('conflict', 'This answer is still being written');
+      }
+      const { user, answer } = last;
+
+      await runTurn(deps, res, {
+        userId,
+        chat,
+        clientMessageId: actionId,
+        content: user.content,
+        text: parseShortcut(user.content).text,
+        chooseAgent: { fixed: answer.agent ?? 'chat' },
+        loadMemory: () => historyWithout(deps, userId, chatId, [user.id, answer.id]),
+        reserveKey: `regenerate:${answer.id}:${actionId}`,
+        userMessage: { save: false, id: user.id },
+        answerSupersedes: [answer.id],
+        historyChanged: true,
+      });
+    },
+  );
+
+  // The latest message, rewritten and answered again. The old message and its answer are hidden.
+  router.post(
+    '/chats/:chatId/messages/:messageId/edit',
+    requireUser(),
+    validate({ params: messageParams, body: turnBody }),
+    async (req, res) => {
+      const userId = res.locals.userId as string;
+      const { chatId, messageId } = req.params as z.output<typeof messageParams>;
+      const body = req.body as z.output<typeof turnBody>;
+      const parsed = parseShortcut(body.content);
+      requireText(parsed.text);
+      const chat = await deps.chat.getChat(userId, chatId);
+      const last = await deps.chat.lastTurn(userId, chatId);
+      if (!last.user || last.user.id !== messageId) {
+        throw new AppError('conflict', 'Only your latest message can be edited');
+      }
+      if (last.answer?.status === 'streaming') {
+        throw new AppError('conflict', 'This answer is still being written');
+      }
+      const replaced = [last.user.id, ...(last.answer ? [last.answer.id] : [])];
+
+      await runTurn(deps, res, {
+        userId,
+        chat,
+        clientMessageId: body.clientMessageId,
+        content: body.content,
+        text: parsed.text,
+        chooseAgent: { chosen: body.agent ?? parsed.shortcut },
+        loadMemory: () => historyWithout(deps, userId, chatId, replaced),
+        reserveKey: `turn:${chatId}:${body.clientMessageId}`,
+        userMessage: {
+          save: true,
+          ...(body.agent ? { agent: body.agent } : {}),
+          supersedes: replaced,
+        },
+        answerSupersedes: [],
+        historyChanged: true,
+      });
+    },
+  );
+
+  // Stop an answer that is being written, from any agent instance.
+  router.post(
+    '/turns/:turnId/stop',
+    requireUser(),
+    validate({ params: turnIdParams }),
+    async (req, res) => {
+      const { turnId } = req.params as z.output<typeof turnIdParams>;
+      if (!(await deps.stops.stop(turnId, res.locals.userId as string))) {
+        throw new AppError('not_found', 'No answer is being written for this turn');
+      }
+      res.status(202).json({ stopping: true });
     },
   );
 
   return router;
+}
+
+function requireText(text: string): void {
+  if (text.trim() === '') {
+    throw new AppError('bad_request', 'Write a message after the shortcut');
+  }
+}
+
+/** The chat's finished messages, fresh from the chat service, without the ones being replaced. */
+async function historyWithout(
+  deps: TurnDeps,
+  userId: string,
+  chatId: string,
+  replaced: string[],
+): Promise<MemoryMessage[]> {
+  const history = await deps.chat.recentMessages(userId, chatId);
+  return trimToBudget(
+    history
+      .filter((message) => !replaced.includes(message.id))
+      .map(({ role, content: text }) => ({ role, content: text })),
+  );
+}
+
+/** How one turn is set up; send, regenerate and edit differ only in these. */
+interface TurnPlan {
+  userId: string;
+  chat: ChatInfo;
+  clientMessageId: string;
+  /** The message as the user wrote it, shortcut included. */
+  content: string;
+  /** What the agent answers, without the shortcut. */
+  text: string;
+  /** Route the message, or keep the agent of the answer being regenerated. */
+  chooseAgent: { chosen?: Agent | undefined } | { fixed: Agent };
+  loadMemory: () => Promise<MemoryMessage[]>;
+  reserveKey: string;
+  /** Save a new user message, or answer an existing one. */
+  userMessage: { save: true; agent?: Agent; supersedes: string[] } | { save: false; id: string };
+  answerSupersedes: string[];
+  /** Edit and regenerate replace earlier history, so the memory cache is dropped afterwards. */
+  historyChanged: boolean;
+}
+
+/**
+ * Everything that can refuse the request happens here, before the stream starts, so refusals
+ * are ordinary error replies: a duplicate in progress, no credits, a reserve that fails.
+ */
+async function runTurn(deps: TurnDeps, res: Response, plan: TurnPlan): Promise<void> {
+  const { userId, chat } = plan;
+  const chatId = chat.id;
+
+  // One answer per action at a time: a second copy of the same request is refused.
+  const lockKey = `turn-lock:${chatId}:${plan.clientMessageId}`;
+  if (!(await deps.redis.set(lockKey, '1', 'EX', LOCK_SECONDS, 'NX'))) {
+    throw new AppError('conflict', 'This message is already being answered');
+  }
+  try {
+    // No credits at all: refuse before any AI call, the router's included.
+    if ((await deps.billing.balance(userId)) < CREDIT_COSTS.chat) {
+      throw new AppError('insufficient_credits', 'You are out of credits');
+    }
+    // Memory is read before the new message is saved, so the question isn't in it twice.
+    const memory = await plan.loadMemory();
+    const route: Route =
+      'fixed' in plan.chooseAgent
+        ? {
+            agent: deps.available.has(plan.chooseAgent.fixed) ? plan.chooseAgent.fixed : 'chat',
+            reason: 'chosen',
+          }
+        : await routeMessage(
+            { text: plan.text, chosen: plan.chooseAgent.chosen, available: deps.available },
+            deps.llm,
+            deps.logger,
+          );
+    const { reservation } = await deps.billing.reserve(userId, route.agent, plan.reserveKey);
+    if (reservation.status !== 'held') {
+      throw new AppError('conflict', 'This message was already answered');
+    }
+
+    let messageIds: { user: string; answer: string };
+    try {
+      const userMessageId = plan.userMessage.save
+        ? (
+            await deps.chat.saveMessage(userId, {
+              chatId,
+              role: 'user',
+              content: plan.content,
+              clientMessageId: plan.clientMessageId,
+              ...(plan.userMessage.agent ? { agent: plan.userMessage.agent } : {}),
+              supersedes: plan.userMessage.supersedes,
+            })
+          ).message.id
+        : plan.userMessage.id;
+      const { message: answer } = await deps.chat.saveMessage(userId, {
+        chatId,
+        role: 'assistant',
+        agent: route.agent,
+        status: 'streaming',
+        supersedes: plan.answerSupersedes,
+      });
+      messageIds = { user: userMessageId, answer: answer.id };
+    } catch (error) {
+      await deps.billing.release(userId, reservation.id).catch(() => undefined);
+      throw error;
+    }
+
+    await streamAnswer(deps, res, {
+      userId,
+      chatId,
+      content: plan.content,
+      text: plan.text,
+      memory,
+      route,
+      reservation,
+      messageIds,
+      needsTitle: chat.title === DEFAULT_TITLE,
+      historyChanged: plan.historyChanged,
+    });
+  } finally {
+    await deps.redis.del(lockKey);
+  }
 }
 
 interface Turn {
@@ -152,6 +322,7 @@ interface Turn {
   reservation: Reservation;
   messageIds: { user: string; answer: string };
   needsTitle: boolean;
+  historyChanged: boolean;
 }
 
 async function streamAnswer(deps: TurnDeps, res: Response, turn: Turn): Promise<void> {
@@ -169,6 +340,9 @@ async function streamAnswer(deps: TurnDeps, res: Response, turn: Turn): Promise<
       controller.abort();
     }
   });
+
+  // The user's stop button reaches this answer through Redis, on whichever instance runs it.
+  const unregister = await deps.stops.register(turn.messageIds.answer, userId, controller);
 
   stream.send('meta', {
     turnId: turn.messageIds.answer,
@@ -216,10 +390,14 @@ async function streamAnswer(deps: TurnDeps, res: Response, turn: Turn): Promise<
       messageId: turn.messageIds.answer,
     });
     stream.send('usage', { creditsCharged: reservation.amount, balance: committed.balance });
-    await deps.memory.append(chatId, [
-      { role: 'user', content: turn.content },
-      { role: 'assistant', content: text },
-    ]);
+    if (turn.historyChanged) {
+      await deps.memory.forget(chatId);
+    } else {
+      await deps.memory.append(chatId, [
+        { role: 'user', content: turn.content },
+        { role: 'assistant', content: text },
+      ]);
+    }
     const newTitle = await title;
     if (newTitle) {
       stream.send('title', { title: newTitle });
@@ -233,6 +411,7 @@ async function streamAnswer(deps: TurnDeps, res: Response, turn: Turn): Promise<
       started: firstTokenAt !== undefined,
     });
   } finally {
+    await unregister().catch(() => undefined);
     stream.close();
   }
 }

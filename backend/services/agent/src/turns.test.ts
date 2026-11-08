@@ -29,12 +29,14 @@ import { createMockProvider } from './llm/mock.ts';
 import { LlmError, type LlmProvider, type StreamRequest } from './llm/types.ts';
 import { createMemory } from './memory.ts';
 import { billingService, chatService } from './services.ts';
+import { createStopSignals, type StopSignals } from './stops.ts';
 
 // A whole turn: the agent app with real chat and billing services on their own ports, real
 // Redis, and a scripted AI provider.
 const logger = createLogger({ service: 'agent', level: 'silent' });
 let mongo: TestMongo;
 let store: TestRedis;
+let stops: StopSignals;
 let chatApp: RunningService;
 let billingApp: RunningService;
 let gatewayKey: InternalKey;
@@ -101,12 +103,14 @@ afterAll(async () => {
 
 beforeEach(async () => {
   store = await createTestRedis();
+  stops = await createStopSignals(store.redis, logger);
   aiCalls = [];
   script = {};
   me = `user-${randomUUID()}`;
 });
 
 afterEach(async () => {
+  await stops.close();
   await store.cleanup();
 });
 
@@ -126,10 +130,13 @@ function agentApp() {
       llm: createLlm({ mode: 'mock', providers: { mock: scriptedProvider }, logger }),
       chat,
       billing: billingService(client('billing', billingApp.port)),
-      memory: createMemory(store.redis, (chatId, userId) => chat.recentMessages(userId, chatId)),
+      memory: createMemory(store.redis, async (chatId, userId) =>
+        (await chat.recentMessages(userId, chatId)).map(({ role, content }) => ({ role, content })),
+      ),
       redis: store.redis,
       agents: { chat: chatAgent },
       available: new Set(['chat']),
+      stops,
     },
   });
 }
@@ -165,7 +172,13 @@ async function historyOf(userId: string, chatId: string) {
   const response = await request(`http://localhost:${chatApp.port}`)
     .get(`/chats/${chatId}/messages`)
     .set(INTERNAL_TOKEN_HEADER, await gatewayToken(userId, 'chat'));
-  return response.body.items as { role: string; content: string; status: string; agent: string }[];
+  return response.body.items as {
+    id: string;
+    role: string;
+    content: string;
+    status: string;
+    agent: string;
+  }[];
 }
 
 interface SseEvent {
@@ -390,6 +403,167 @@ describe('POST /chats/:chatId/turns', () => {
       expect(answer.length).toBeGreaterThan(0);
       expect(answer).not.toBe('one two three four five six seven');
       await expect.poll(() => balanceOf(me), { timeout: 5_000 }).toBe(99);
+    } finally {
+      await server.close();
+    }
+  });
+});
+
+/** Sends a turn and returns its parsed events. */
+async function turnEvents(path: string, userId: string, body: Record<string, unknown>) {
+  const response = await request(agentApp())
+    .post(path)
+    .set(INTERNAL_TOKEN_HEADER, await gatewayToken(userId, 'agent'))
+    .send(body);
+  return { response, events: response.status === 200 ? parseEvents(response.text) : [] };
+}
+
+const tokensOf = (events: SseEvent[]) =>
+  events
+    .filter((event) => event.event === 'token')
+    .map((event) => event.data.text)
+    .join('');
+
+describe('regenerate and edit', () => {
+  it('regenerates the latest answer with the same agent, hiding the old one', async () => {
+    const chatId = await newChat(me);
+    await grantCredits(me);
+    let version = 0;
+    script.answer = (streamRequest) =>
+      streamRequest.json
+        ? '{"agent":"chat","confidence":1}'
+        : streamRequest.messages[0]?.content.includes('short title')
+          ? 'A title'
+          : `answer v${(version += 1)}`;
+    await sendTurn(me, chatId, { content: 'Earlier question', clientMessageId: 'client-0001' });
+    await sendTurn(me, chatId, { content: 'Tell me a joke', clientMessageId: 'client-0002' });
+    const old = (await historyOf(me, chatId)).at(-1);
+    aiCalls = [];
+
+    const { events } = await turnEvents(`/chats/${chatId}/messages/${old?.id}/regenerate`, me, {
+      clientMessageId: 'regen-0001',
+    });
+
+    expect(tokensOf(events)).toBe('answer v3');
+    expect(events.find((event) => event.event === 'agent')?.data).toEqual({
+      agent: 'chat',
+      reason: 'chosen',
+    });
+    // The question is asked again with the earlier turn as memory, not the replaced answer.
+    const answerCall = aiCalls.find((call) => !call.json);
+    expect(answerCall?.messages.slice(1)).toEqual([
+      { role: 'user', content: 'Earlier question' },
+      { role: 'assistant', content: 'answer v1' },
+      { role: 'user', content: 'Tell me a joke' },
+    ]);
+    const history = await historyOf(me, chatId);
+    expect(history.map((message) => message.content)).toEqual([
+      'Earlier question',
+      'answer v1',
+      'Tell me a joke',
+      'answer v3',
+    ]);
+    expect(await balanceOf(me)).toBe(97);
+  });
+
+  it('edits the latest message: the old message and answer are replaced', async () => {
+    const chatId = await newChat(me);
+    await grantCredits(me);
+    script.answer = (streamRequest) =>
+      streamRequest.json ? '{"agent":"chat","confidence":1}' : 'reply';
+    await sendTurn(me, chatId, { content: 'Plan a trip to Goa', clientMessageId: 'client-0001' });
+    const question = (await historyOf(me, chatId))[0];
+
+    const { events } = await turnEvents(`/chats/${chatId}/messages/${question?.id}/edit`, me, {
+      content: 'Plan a trip to Kerala',
+      clientMessageId: 'client-0002',
+    });
+
+    expect(events.at(-1)?.event).toBe('done');
+    expect((await historyOf(me, chatId)).map((message) => message.content)).toEqual([
+      'Plan a trip to Kerala',
+      'reply',
+    ]);
+  });
+
+  it('only acts on the latest turn', async () => {
+    const chatId = await newChat(me);
+    await grantCredits(me);
+    await sendTurn(me, chatId, { content: 'one', clientMessageId: 'client-0001' });
+    await sendTurn(me, chatId, { content: 'two', clientMessageId: 'client-0002' });
+    const [firstQuestion, firstAnswer] = await historyOf(me, chatId);
+
+    const regenerate = await turnEvents(
+      `/chats/${chatId}/messages/${firstAnswer?.id}/regenerate`,
+      me,
+      { clientMessageId: 'regen-0001' },
+    );
+    const edit = await turnEvents(`/chats/${chatId}/messages/${firstQuestion?.id}/edit`, me, {
+      content: 'changed',
+      clientMessageId: 'client-0003',
+    });
+
+    expect(regenerate.response.status).toBe(409);
+    expect(edit.response.status).toBe(409);
+    expect(await balanceOf(me)).toBe(98);
+  });
+});
+
+describe('POST /turns/:turnId/stop', () => {
+  it('stops a running answer for its owner, charging the text already sent', async () => {
+    const chatId = await newChat(me);
+    await grantCredits(me);
+    script.delayMs = 25;
+    script.answer = (streamRequest) =>
+      streamRequest.json
+        ? '{"agent":"chat","confidence":1}'
+        : Array.from({ length: 40 }, (_, index) => `word${index}`).join(' ');
+
+    const server = await startService(agentApp(), { port: 0, logger, handleSignals: false });
+    try {
+      const token = await gatewayToken(me, 'agent');
+      const body = await new Promise<string>((resolve, reject) => {
+        let text = '';
+        let stopSent = false;
+        const req = httpRequest(
+          {
+            port: server.port,
+            method: 'POST',
+            path: `/chats/${chatId}/turns`,
+            headers: { 'content-type': 'application/json', [INTERNAL_TOKEN_HEADER]: token },
+          },
+          (res) => {
+            res.on('data', (chunk: Buffer) => {
+              text += chunk.toString();
+              const turnId = /"turnId":"([a-f0-9]+)"/.exec(text)?.[1];
+              if (turnId && !stopSent && text.includes('event: token')) {
+                stopSent = true;
+                void (async () => {
+                  const other = await request(agentApp())
+                    .post(`/turns/${turnId}/stop`)
+                    .set(INTERNAL_TOKEN_HEADER, await gatewayToken('someone-else', 'agent'));
+                  expect(other.status).toBe(404);
+                  const stop = await request(agentApp())
+                    .post(`/turns/${turnId}/stop`)
+                    .set(INTERNAL_TOKEN_HEADER, token);
+                  expect(stop.status).toBe(202);
+                })().catch(reject);
+              }
+            });
+            res.on('end', () => resolve(text));
+          },
+        );
+        req.on('error', reject);
+        req.end(JSON.stringify({ content: 'Count', clientMessageId: 'client-0001' }));
+      });
+
+      const events = parseEvents(body);
+      expect(events.at(-1)?.event).toBe('done');
+      expect(events.some((event) => event.event === 'usage')).toBe(true);
+      const answer = (await historyOf(me, chatId)).at(-1);
+      expect(answer?.status).toBe('stopped');
+      expect(answer?.content.split(' ').length).toBeLessThan(40);
+      expect(await balanceOf(me)).toBe(99);
     } finally {
       await server.close();
     }

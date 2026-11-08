@@ -117,7 +117,7 @@ describe('chatService', () => {
 
     expect(user.created).toBe(true);
     expect(retried).toMatchObject({ created: false, message: { id: user.message.id } });
-    expect(await chat.recentMessages('u1', chatId)).toEqual([
+    expect(await chat.recentMessages('u1', chatId)).toMatchObject([
       { role: 'user', content: 'Plan a Goa trip' },
       { role: 'assistant', content: 'Day 1: beaches' },
     ]);

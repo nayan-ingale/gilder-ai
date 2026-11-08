@@ -17,6 +17,7 @@ import { createLlm } from './llm/llm.ts';
 import { buildProviders } from './llm/providers.ts';
 import { createMemory } from './memory.ts';
 import { billingService, chatService } from './services.ts';
+import { createStopSignals } from './stops.ts';
 
 const logger = createLogger({
   service: 'agent',
@@ -60,6 +61,8 @@ logger.info(
   env.LLM_MODE === 'live' ? 'live' : 'mocked',
 );
 
+const stops = await createStopSignals(redis, logger);
+
 const app = createApp({
   logger,
   readinessChecks: { mongo: pingMongo, redis: () => pingRedis(redis) },
@@ -68,10 +71,13 @@ const app = createApp({
     llm,
     chat,
     billing,
-    memory: createMemory(redis, (chatId, userId) => chat.recentMessages(userId, chatId)),
+    memory: createMemory(redis, async (chatId, userId) =>
+      (await chat.recentMessages(userId, chatId)).map(({ role, content }) => ({ role, content })),
+    ),
     redis,
     agents: AGENT_RUNNERS,
     available: AVAILABLE_AGENTS,
+    stops,
   },
 });
 
@@ -79,6 +85,7 @@ await startService(app, {
   port: env.PORT,
   logger,
   onShutdown: async () => {
+    await stops.close();
     await disconnectMongo();
     await redis.quit();
   },
