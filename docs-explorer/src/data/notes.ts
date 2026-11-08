@@ -20,6 +20,7 @@ const AUTH_ENV_SCHEMA_TEST = 'backend/services/auth/src/env-schema.test.ts';
 const AUTH_USERS_TEST = 'backend/services/auth/src/users.test.ts';
 const AUTH_FIREBASE_TEST = 'backend/services/auth/src/firebase.test.ts';
 const AUTH_SESSION_ROUTES_TEST = 'backend/services/auth/src/session-routes.test.ts';
+const AUTH_ME_ROUTES_TEST = 'backend/services/auth/src/me-routes.test.ts';
 const CHAT_TEST = 'backend/services/chat/src/app.test.ts';
 const AGENT_TEST = 'backend/services/agent/src/app.test.ts';
 const BILLING_TEST = 'backend/services/billing/src/app.test.ts';
@@ -1006,6 +1007,29 @@ export const notes: SymbolNote[] = [
     why: "Outside production the Firebase settings are optional. Google sign-in then answers 503 service_unavailable, while dev sign-in still works. Because it is a 5xx, the client sees only 'Service unavailable'; the message 'Google sign-in is not set up on this server' is in auth's error log. No app uses it yet.",
     returns: 'A function that always rejects with that 503 error.',
     tests: [AUTH_FIREBASE_TEST],
+  },
+  {
+    symbol: 'backend/services/auth/src/me-routes.ts#currentUser',
+    status: 'not-wired',
+    summary: 'Loads the user the internal token names.',
+    why: "A session can outlive its user, for example after the account was deleted. Then the user is gone, and that is a 401, 'This account no longer exists', so the browser treats it as signed out.",
+    returns: 'A promise of the user document.',
+    tests: [AUTH_ME_ROUTES_TEST],
+  },
+  {
+    symbol: 'backend/services/auth/src/me-routes.ts#meRouter',
+    status: 'not-wired',
+    summary: "The signed-in user's own profile, and the user lookup for other services.",
+    how: [
+      'GET /me returns { user } with toProfile for the user in the internal token.',
+      'PATCH /me takes { themePreference } (system, light or dark) and saves it. The body schema is strict, so any other field is a 400 instead of being ignored.',
+      "GET /internal/users/:id returns the user only when :id is the token's own user. Another user's ID gets the same 404 as an unknown one, so the route can't reveal which accounts exist. A malformed ID is a 400.",
+      'Every route needs a user in the internal token (requireUser), so a request with no session is a 401.',
+    ],
+    why: 'A user only ever sees and changes their own account. The internal route is how other services will look up the user a request is for. createApp does not add the router yet, so no running app serves it.',
+    returns: 'An Express Router.',
+    sideEffects: ['PATCH /me updates the user in MongoDB.'],
+    tests: [AUTH_ME_ROUTES_TEST],
   },
   {
     symbol: 'backend/services/auth/src/session-routes.ts#COOKIE_MAX_AGE_MS',
