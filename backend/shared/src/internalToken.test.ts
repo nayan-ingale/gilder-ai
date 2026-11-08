@@ -9,6 +9,7 @@ import {
   importInternalPublicKey,
   INTERNAL_TOKEN_HEADER,
   type InternalKey,
+  requireCaller,
   requireInternalToken,
   requireUser,
   signInternalToken,
@@ -19,12 +20,17 @@ import { createLogger } from './logger.ts';
 let privateKey: InternalKey;
 let publicKey: InternalKey;
 let otherPrivateKey: InternalKey;
+let authPrivateKey: InternalKey;
+let authPublicKey: InternalKey;
 
 beforeAll(async () => {
   const pair = await generateInternalKeyPair();
   privateKey = await importInternalPrivateKey(pair.privateKey);
   publicKey = await importInternalPublicKey(pair.publicKey);
   otherPrivateKey = await importInternalPrivateKey((await generateInternalKeyPair()).privateKey);
+  const authPair = await generateInternalKeyPair();
+  authPrivateKey = await importInternalPrivateKey(authPair.privateKey);
+  authPublicKey = await importInternalPublicKey(authPair.publicKey);
 });
 
 describe('internal tokens', () => {
@@ -34,7 +40,8 @@ describe('internal tokens', () => {
       requestId: 'req-1',
     });
 
-    await expect(verifyInternalToken(token, publicKey, 'chat')).resolves.toEqual({
+    await expect(verifyInternalToken(token, { gateway: publicKey }, 'chat')).resolves.toEqual({
+      caller: 'gateway',
       userId: 'user-1',
       requestId: 'req-1',
     });
@@ -44,7 +51,8 @@ describe('internal tokens', () => {
     const token = await signInternalToken(privateKey, 'auth', { requestId: 'req-2' });
 
     expect(decodeJwt(token)).not.toHaveProperty('sub');
-    await expect(verifyInternalToken(token, publicKey, 'auth')).resolves.toEqual({
+    await expect(verifyInternalToken(token, { gateway: publicKey }, 'auth')).resolves.toEqual({
+      caller: 'gateway',
       requestId: 'req-2',
     });
   });
@@ -52,29 +60,89 @@ describe('internal tokens', () => {
   it('rejects a token addressed to another service', async () => {
     const token = await signInternalToken(privateKey, 'billing', { userId: 'user-1' });
 
-    await expect(verifyInternalToken(token, publicKey, 'chat')).rejects.toThrow();
+    await expect(verifyInternalToken(token, { gateway: publicKey }, 'chat')).rejects.toThrow();
   });
 
   it('rejects an expired token', async () => {
     const token = await signInternalToken(privateKey, 'chat', { userId: 'user-1' }, 60);
     const twoMinutesLater = new Date(Date.now() + 120_000);
 
-    await expect(verifyInternalToken(token, publicKey, 'chat', twoMinutesLater)).rejects.toThrow();
+    await expect(
+      verifyInternalToken(token, { gateway: publicKey }, 'chat', twoMinutesLater),
+    ).rejects.toThrow();
   });
 
   it('rejects a token signed with a different key', async () => {
     const forged = await signInternalToken(otherPrivateKey, 'chat', { userId: 'admin' });
 
-    await expect(verifyInternalToken(forged, publicKey, 'chat')).rejects.toThrow();
+    await expect(verifyInternalToken(forged, { gateway: publicKey }, 'chat')).rejects.toThrow();
+  });
+});
+
+describe('tokens from other services', () => {
+  it("accepts a service's token only where that service is trusted", async () => {
+    const token = await signInternalToken(authPrivateKey, 'billing', { userId: 'u1' }, 60, 'auth');
+
+    await expect(
+      verifyInternalToken(token, { gateway: publicKey, auth: authPublicKey }, 'billing'),
+    ).resolves.toEqual({ caller: 'auth', userId: 'u1' });
+    await expect(verifyInternalToken(token, { gateway: publicKey }, 'billing')).rejects.toThrow(
+      'tokens from gilder-auth are not trusted here',
+    );
+  });
+
+  it("can't pass a service's key off as the gateway's, or the other way round", async () => {
+    const trusted = { gateway: publicKey, auth: authPublicKey };
+    const claimsGateway = await signInternalToken(authPrivateKey, 'billing', { userId: 'u1' });
+    const claimsAuth = await signInternalToken(privateKey, 'billing', { userId: 'u1' }, 60, 'auth');
+
+    await expect(verifyInternalToken(claimsGateway, trusted, 'billing')).rejects.toThrow();
+    await expect(verifyInternalToken(claimsAuth, trusted, 'billing')).rejects.toThrow();
+  });
+});
+
+describe('requireCaller()', () => {
+  function buildApp() {
+    const app = express();
+    app.post(
+      '/internal/accounts',
+      requireInternalToken({ gateway: publicKey, auth: authPublicKey }, 'billing'),
+      requireCaller('auth'),
+      (_req, res) => {
+        res.json({ caller: res.locals.caller });
+      },
+    );
+    app.use(errorHandler(createLogger({ service: 'test', level: 'silent' })));
+    return app;
+  }
+
+  it('lets only the named services use the route', async () => {
+    const fromAuth = await signInternalToken(authPrivateKey, 'billing', {}, 60, 'auth');
+    const fromGateway = await signInternalToken(privateKey, 'billing', { userId: 'u1' });
+
+    const allowed = await request(buildApp())
+      .post('/internal/accounts')
+      .set(INTERNAL_TOKEN_HEADER, fromAuth);
+    const refused = await request(buildApp())
+      .post('/internal/accounts')
+      .set(INTERNAL_TOKEN_HEADER, fromGateway);
+
+    expect(allowed.body).toEqual({ caller: 'auth' });
+    expect(refused.status).toBe(403);
+    expect(refused.body.code).toBe('forbidden');
   });
 });
 
 describe('requireInternalToken()', () => {
   function buildApp() {
     const app = express();
-    app.get('/internal/whoami', requireInternalToken(publicKey, 'chat'), (_req, res) => {
-      res.json({ userId: res.locals.userId });
-    });
+    app.get(
+      '/internal/whoami',
+      requireInternalToken({ gateway: publicKey }, 'chat'),
+      (_req, res) => {
+        res.json({ userId: res.locals.userId });
+      },
+    );
     app.use(errorHandler(createLogger({ service: 'test', level: 'silent' })));
     return app;
   }
@@ -121,9 +189,14 @@ describe('requireInternalToken()', () => {
 describe('requireUser()', () => {
   function buildApp() {
     const app = express();
-    app.get('/me', requireInternalToken(publicKey, 'auth'), requireUser(), (_req, res) => {
-      res.json({ userId: res.locals.userId });
-    });
+    app.get(
+      '/me',
+      requireInternalToken({ gateway: publicKey }, 'auth'),
+      requireUser(),
+      (_req, res) => {
+        res.json({ userId: res.locals.userId });
+      },
+    );
     app.use(errorHandler(createLogger({ service: 'test', level: 'silent' })));
     return app;
   }

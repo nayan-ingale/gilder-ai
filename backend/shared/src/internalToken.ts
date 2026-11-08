@@ -1,5 +1,6 @@
 import type { RequestHandler } from 'express';
 import {
+  decodeJwt,
   exportPKCS8,
   exportSPKI,
   generateKeyPair,
@@ -22,15 +23,34 @@ import { AppError } from './errors.ts';
  */
 export const INTERNAL_TOKEN_HEADER = 'x-internal-token';
 
-const ISSUER = 'gilder-gateway';
+/**
+ * Who can sign internal tokens. The gateway signs for every request it forwards. Auth and the
+ * agent also call other services (auth asks billing for the sign-up grant; the agent saves
+ * messages and charges credits), each with its own key, so a service trusts exactly the callers
+ * it needs, and a route can say which callers may use it.
+ */
+export const INTERNAL_CALLERS = ['gateway', 'auth', 'agent'] as const;
+export type InternalCaller = (typeof INTERNAL_CALLERS)[number];
+/** The callers other than the gateway: the services that call other services. */
+export type ServiceCaller = Exclude<InternalCaller, 'gateway'>;
+
+const issuerOf = (caller: InternalCaller) => `gilder-${caller}`;
 const ALGORITHM = 'EdDSA';
 
 export type InternalKey = Awaited<ReturnType<typeof importPKCS8>>;
+
+/** The public keys a service accepts tokens from, by caller. The gateway's is always there. */
+export type TrustedKeys = { gateway: InternalKey } & Partial<Record<ServiceCaller, InternalKey>>;
 
 export interface InternalTokenClaims {
   /** The signed-in user. Left out for a request with no session, such as a sign-in. */
   userId?: string;
   requestId?: string;
+}
+
+export interface VerifiedInternalToken extends InternalTokenClaims {
+  /** Who signed the token. */
+  caller: InternalCaller;
 }
 
 export function importInternalPrivateKey(pem: string): Promise<InternalKey> {
@@ -50,15 +70,17 @@ export async function generateInternalKeyPair(): Promise<{
   return { privateKey: await exportPKCS8(privateKey), publicKey: await exportSPKI(publicKey) };
 }
 
+/** Signs a token for `audience`. `caller` is who signs it: the gateway unless a service calls. */
 export function signInternalToken(
   privateKey: InternalKey,
   audience: string,
   claims: InternalTokenClaims,
   ttlSeconds = 60,
+  caller: InternalCaller = 'gateway',
 ): Promise<string> {
   const token = new SignJWT(claims.requestId ? { rid: claims.requestId } : {})
     .setProtectedHeader({ alg: ALGORITHM })
-    .setIssuer(ISSUER)
+    .setIssuer(issuerOf(caller))
     .setAudience(audience)
     .setIssuedAt()
     .setExpirationTime(`${ttlSeconds}s`);
@@ -68,20 +90,30 @@ export function signInternalToken(
   return token.sign(privateKey);
 }
 
-/** Throws if the token is missing, forged, expired, or addressed to another service. */
+/**
+ * Throws if the token is missing, forged, expired, addressed to another service, or signed by a
+ * caller this service doesn't trust. The issuer is read first only to pick the key; the
+ * signature check then confirms it.
+ */
 export async function verifyInternalToken(
   token: string,
-  publicKey: InternalKey,
+  trusted: TrustedKeys,
   audience: string,
   currentDate?: Date,
-): Promise<InternalTokenClaims> {
-  const { payload } = await jwtVerify(token, publicKey, {
-    issuer: ISSUER,
+): Promise<VerifiedInternalToken> {
+  const issuer = decodeJwt(token).iss;
+  const caller = INTERNAL_CALLERS.find((candidate) => issuerOf(candidate) === issuer);
+  const key = caller ? trusted[caller] : undefined;
+  if (!caller || !key) {
+    throw new Error(`tokens from ${String(issuer)} are not trusted here`);
+  }
+  const { payload } = await jwtVerify(token, key, {
+    issuer: issuerOf(caller),
     audience,
     algorithms: [ALGORITHM],
     ...(currentDate ? { currentDate } : {}),
   });
-  const claims: InternalTokenClaims = {};
+  const claims: VerifiedInternalToken = { caller };
   if (typeof payload.sub === 'string' && payload.sub !== '') {
     claims.userId = payload.sub;
   }
@@ -93,21 +125,23 @@ export async function verifyInternalToken(
 
 /**
  * Express middleware for services: rejects requests without a valid internal token (401), so
- * only the gateway can call them. When the token names a user, it becomes `res.locals.userId`.
- * It does not require one: routes that act for a user add requireUser() as well.
+ * only the gateway, and the services this one trusts, can call them. The signer becomes
+ * `res.locals.caller`, and a user named in the token becomes `res.locals.userId`. It does not
+ * require a user: routes that act for one add requireUser() as well.
  */
-export function requireInternalToken(publicKey: InternalKey, audience: string): RequestHandler {
+export function requireInternalToken(trusted: TrustedKeys, audience: string): RequestHandler {
   return async (req, res, next) => {
     const token = req.get(INTERNAL_TOKEN_HEADER);
     if (!token) {
       throw new AppError('unauthorized', 'Missing internal token');
     }
-    let claims: InternalTokenClaims;
+    let claims: VerifiedInternalToken;
     try {
-      claims = await verifyInternalToken(token, publicKey, audience);
+      claims = await verifyInternalToken(token, trusted, audience);
     } catch (error) {
       throw new AppError('unauthorized', 'Invalid internal token', { cause: error });
     }
+    res.locals.caller = claims.caller;
     if (claims.userId) {
       res.locals.userId = claims.userId;
       setContextUserId(claims.userId);
@@ -124,6 +158,22 @@ export function requireUser(): RequestHandler {
   return (_req, res, next) => {
     if (!res.locals.userId) {
       next(new AppError('unauthorized', 'This route needs a signed-in user'));
+      return;
+    }
+    next();
+  };
+}
+
+/**
+ * For internal routes meant for one service, after requireInternalToken: answers 403 unless the
+ * token was signed by one of `callers`. The gateway never forwards /internal routes; this keeps a
+ * service's key from reaching routes meant for another.
+ */
+export function requireCaller(...callers: ServiceCaller[]): RequestHandler {
+  return (_req, res, next) => {
+    const caller = res.locals.caller as InternalCaller | undefined;
+    if (!caller || !(callers as InternalCaller[]).includes(caller)) {
+      next(new AppError('forbidden', 'This route is not open to this caller'));
       return;
     }
     next();

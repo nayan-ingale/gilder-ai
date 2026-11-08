@@ -9,6 +9,7 @@ export * from './context.ts';
 export * from './env.ts';
 export * from './errors.ts';
 export * from './health.ts';
+export * from './internalClient.ts';
 export * from './internalToken.ts';
 export * from './logger.ts';
 export * from './mongo.ts';

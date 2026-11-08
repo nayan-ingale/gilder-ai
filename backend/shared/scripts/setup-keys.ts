@@ -1,21 +1,40 @@
 /**
- * `pnpm setup:keys`: gives the gateway a private key for signing internal tokens, and every
- * service the matching public key for checking them, in their .env files.
+ * `pnpm setup:keys`: writes the keys for internal tokens into the .env files.
+ * - The gateway gets a private key, and every service the matching public key.
+ * - Services that call other services (auth calls billing; the agent calls chat and billing) each
+ *   get their own private key, and the services they call get the matching public key.
  *
- * Safe to run again: it keeps the gateway's key and only fixes services whose public key is
- * missing or doesn't match. `pnpm setup:keys --rotate` makes a new key pair for all of them.
+ * Safe to run again: it keeps existing private keys and only fixes public keys that are missing
+ * or don't match. `pnpm setup:keys --rotate` makes new key pairs for all of them.
  * Key values are never printed.
  */
 import { createPublicKey } from 'node:crypto';
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { generateInternalKeyPair } from '../src/internalToken.ts';
 
-const GATEWAY_ENV = 'backend/gateway/.env';
-const SERVICE_ENVS = ['auth', 'chat', 'agent', 'billing'].map(
-  (service) => `backend/services/${service}/.env`,
-);
-const PRIVATE_KEY = 'INTERNAL_PRIVATE_KEY';
-const PUBLIC_KEY = 'INTERNAL_PUBLIC_KEY';
+const serviceEnv = (service: string) => `backend/services/${service}/.env`;
+
+/** Each signer: where its private key lives, and which .env files get its public key, as what. */
+const SIGNERS = [
+  {
+    file: 'backend/gateway/.env',
+    privateKey: 'INTERNAL_PRIVATE_KEY',
+    receivers: ['auth', 'chat', 'agent', 'billing'].map(serviceEnv),
+    publicKey: 'INTERNAL_PUBLIC_KEY',
+  },
+  {
+    file: serviceEnv('auth'),
+    privateKey: 'SERVICE_PRIVATE_KEY',
+    receivers: [serviceEnv('billing')],
+    publicKey: 'AUTH_PUBLIC_KEY',
+  },
+  {
+    file: serviceEnv('agent'),
+    privateKey: 'SERVICE_PRIVATE_KEY',
+    receivers: [serviceEnv('chat'), serviceEnv('billing')],
+    publicKey: 'AGENT_PUBLIC_KEY',
+  },
+] as const;
 
 function say(line: string): void {
   process.stdout.write(`${line}\n`);
@@ -54,42 +73,46 @@ function writeValue(text: string, name: string, value: string): string {
 if (!existsSync('pnpm-workspace.yaml')) {
   fail('Run this from the repository root: pnpm setup:keys');
 }
-for (const file of [GATEWAY_ENV, ...SERVICE_ENVS]) {
+const allFiles = new Set(SIGNERS.flatMap((signer) => [signer.file, ...signer.receivers]));
+for (const file of allFiles) {
   if (!existsSync(file)) {
     fail(`${file} is missing. Create the .env files first: pnpm setup:env`);
   }
 }
 
 const rotate = process.argv.includes('--rotate');
-const gatewayText = readFileSync(GATEWAY_ENV, 'utf8');
-const existingKey = rotate ? undefined : readValue(gatewayText, PRIVATE_KEY);
-const privateKey = existingKey ?? (await generateInternalKeyPair()).privateKey;
 
-// The public key is worked out from the private key, so the two always match. This also checks
-// that a kept key is a real key before anything is written.
-let publicKey: string;
-try {
-  publicKey = String(createPublicKey(privateKey).export({ type: 'spki', format: 'pem' })).trim();
-} catch {
-  fail(
-    `${PRIVATE_KEY} in ${GATEWAY_ENV} is not a valid key. Make a new one: pnpm setup:keys --rotate`,
-  );
-}
+for (const signer of SIGNERS) {
+  const signerText = readFileSync(signer.file, 'utf8');
+  const existingKey = rotate ? undefined : readValue(signerText, signer.privateKey);
+  const privateKey = existingKey ?? (await generateInternalKeyPair()).privateKey;
 
-if (existingKey) {
-  say(`${GATEWAY_ENV}: signing key kept`);
-} else {
-  writeFileSync(GATEWAY_ENV, writeValue(gatewayText, PRIVATE_KEY, privateKey));
-  say(`${GATEWAY_ENV}: new signing key written`);
-}
-
-for (const file of SERVICE_ENVS) {
-  const text = readFileSync(file, 'utf8');
-  const current = readValue(text, PUBLIC_KEY);
-  if (current?.trim() === publicKey) {
-    say(`${file}: public key already matches`);
-    continue;
+  // The public key is worked out from the private key, so the two always match. This also checks
+  // that a kept key is a real key before anything is written.
+  let publicKey: string;
+  try {
+    publicKey = String(createPublicKey(privateKey).export({ type: 'spki', format: 'pem' })).trim();
+  } catch {
+    fail(
+      `${signer.privateKey} in ${signer.file} is not a valid key. Make a new one: pnpm setup:keys --rotate`,
+    );
   }
-  writeFileSync(file, writeValue(text, PUBLIC_KEY, publicKey));
-  say(`${file}: public key ${current ? 'replaced (it did not match)' : 'written'}`);
+
+  if (existingKey) {
+    say(`${signer.file}: ${signer.privateKey} kept`);
+  } else {
+    writeFileSync(signer.file, writeValue(signerText, signer.privateKey, privateKey));
+    say(`${signer.file}: new ${signer.privateKey} written`);
+  }
+
+  for (const file of signer.receivers) {
+    const text = readFileSync(file, 'utf8');
+    const current = readValue(text, signer.publicKey);
+    if (current?.trim() === publicKey) {
+      say(`${file}: ${signer.publicKey} already matches`);
+      continue;
+    }
+    writeFileSync(file, writeValue(text, signer.publicKey, publicKey));
+    say(`${file}: ${signer.publicKey} ${current ? 'replaced (it did not match)' : 'written'}`);
+  }
 }

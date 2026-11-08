@@ -4,7 +4,7 @@ import helmet from 'helmet';
 import { pinoHttp } from 'pino-http';
 import { errorHandler, notFoundHandler } from './errors.ts';
 import { healthRouter, isHealthProbe, type ReadinessCheck } from './health.ts';
-import { type InternalKey, requireInternalToken } from './internalToken.ts';
+import { type InternalKey, requireInternalToken, type ServiceCaller } from './internalToken.ts';
 import type { Logger } from './logger.ts';
 import { REQUEST_ID_HEADER, requestId } from './requestId.ts';
 
@@ -25,7 +25,13 @@ export interface ServiceOptions {
    * For services behind the gateway: every route except /healthz and /readyz then needs a valid
    * internal token addressed to `audience`, so a direct call gets 401 whatever the path.
    */
-  internalAuth?: { publicKey: InternalKey; audience: string };
+  internalAuth?: {
+    /** The gateway's public key. */
+    publicKey: InternalKey;
+    audience: string;
+    /** Public keys of the services allowed to call this one, such as auth for billing. */
+    callers?: Partial<Record<ServiceCaller, InternalKey>>;
+  };
 }
 
 /**
@@ -66,7 +72,12 @@ export function createService({
   // After health, so probes need no token; before the routes, so an unknown path without a token
   // gets 401 rather than a 404 that would confirm which paths exist.
   if (internalAuth) {
-    app.use(requireInternalToken(internalAuth.publicKey, internalAuth.audience));
+    app.use(
+      requireInternalToken(
+        { ...internalAuth.callers, gateway: internalAuth.publicKey },
+        internalAuth.audience,
+      ),
+    );
   }
 
   routes?.(app);

@@ -124,7 +124,8 @@ describe('proxyToService', () => {
     });
     expect(forwarded?.headers['x-request-id']).toBe('req-12345678');
     const token = String(forwarded?.headers[INTERNAL_TOKEN_HEADER]);
-    await expect(verifyInternalToken(token, publicKey, 'chat')).resolves.toEqual({
+    await expect(verifyInternalToken(token, { gateway: publicKey }, 'chat')).resolves.toEqual({
+      caller: 'gateway',
       userId: 'user-1',
       requestId: 'req-12345678',
     });
@@ -138,7 +139,9 @@ describe('proxyToService', () => {
       .send('{}');
 
     const token = String(seen[0]?.headers[INTERNAL_TOKEN_HEADER]);
-    expect(await verifyInternalToken(token, publicKey, 'auth')).not.toHaveProperty('userId');
+    expect(await verifyInternalToken(token, { gateway: publicKey }, 'auth')).not.toHaveProperty(
+      'userId',
+    );
   });
 
   it('passes the cookie to auth only, and keeps other browser headers at the gateway', async () => {

@@ -97,7 +97,9 @@ describe('gateway', () => {
     expect(response.status).toBe(200);
     expect(response.body).toEqual({ reached: '/sessions/dev' });
     const token = String(reached[0]?.headers[INTERNAL_TOKEN_HEADER]);
-    expect(await verifyInternalToken(token, publicKey, 'auth')).not.toHaveProperty('userId');
+    expect(await verifyInternalToken(token, { gateway: publicKey }, 'auth')).not.toHaveProperty(
+      'userId',
+    );
   });
 
   it('refuses a change from another origin before doing anything else', async () => {
@@ -121,8 +123,10 @@ describe('gateway', () => {
     expect(withSession.status).toBe(200);
     expect(reached).toHaveLength(1);
     const token = String(reached[0]?.headers[INTERNAL_TOKEN_HEADER]);
-    await expect(verifyInternalToken(token, publicKey, 'auth')).resolves.toMatchObject({
-      userId: 'user-1',
-    });
+    await expect(verifyInternalToken(token, { gateway: publicKey }, 'auth')).resolves.toMatchObject(
+      {
+        userId: 'user-1',
+      },
+    );
   });
 });
