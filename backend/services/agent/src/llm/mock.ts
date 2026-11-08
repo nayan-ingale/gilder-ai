@@ -1,4 +1,4 @@
-import type { LlmProvider, StreamEvent, StreamRequest } from './types.ts';
+import { type LlmProvider, type StreamEvent, type StreamRequest, textOf } from './types.ts';
 
 /**
  * Streams canned answers, so the whole app runs with no API keys (LLM_MODE=mock). Tests and CI
@@ -18,7 +18,10 @@ export function defaultMockAnswer(request: StreamRequest): string {
     return JSON.stringify({ agent: 'chat', confidence: 0.9 });
   }
   const question = [...request.messages].reverse().find((message) => message.role === 'user');
-  const excerpt = (question?.content ?? '').replace(/\s+/g, ' ').trim().slice(0, 120);
+  const excerpt = textOf(question?.content ?? '')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, 120);
   return [
     `This is a mock answer to: "${excerpt}".`,
     '',
@@ -54,7 +57,9 @@ export function createMockProvider(options: MockProviderOptions = {}): LlmProvid
       }
       yield {
         type: 'usage',
-        inputTokens: estimateTokens(request.messages.map((message) => message.content).join('\n')),
+        inputTokens: estimateTokens(
+          request.messages.map((message) => textOf(message.content)).join('\n'),
+        ),
         outputTokens: estimateTokens(answer),
       };
     },

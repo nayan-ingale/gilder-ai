@@ -24,12 +24,17 @@ import request from 'supertest';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { chatAgent } from './agents/chat.ts';
 import { codeAgent } from './agents/code.ts';
+import { createPdfQaAgent } from './agents/pdf-qa.ts';
 import { createSearchAgent } from './agents/search.ts';
+import { readyDocuments } from './files/documents.ts';
+import { DocumentModel, FileModel } from './files/models.ts';
+import { mockEmbedder } from './rag/embeddings.ts';
+import { createMemoryVectorStore } from './rag/vector-store.ts';
 import { mockWebSearch } from './search/web-search.ts';
 import { createApp } from './app.ts';
 import { createLlm } from './llm/llm.ts';
 import { createMockProvider } from './llm/mock.ts';
-import { LlmError, type LlmProvider, type StreamRequest } from './llm/types.ts';
+import { LlmError, type LlmProvider, type StreamRequest, textOf } from './llm/types.ts';
 import { createMemory } from './memory.ts';
 import { billingService, chatService } from './services.ts';
 import { createStopSignals, type StopSignals } from './stops.ts';
@@ -40,6 +45,7 @@ const logger = createLogger({ service: 'agent', level: 'silent' });
 let mongo: TestMongo;
 let store: TestRedis;
 let stops: StopSignals;
+const vectors = createMemoryVectorStore();
 let chatApp: RunningService;
 let billingApp: RunningService;
 let gatewayKey: InternalKey;
@@ -60,7 +66,7 @@ const scriptedProvider: LlmProvider = {
     if (
       script.fail &&
       !streamRequest.json &&
-      !streamRequest.messages[0]?.content.includes('title')
+      !textOf(streamRequest.messages[0]?.content ?? '').includes('title')
     ) {
       throw script.fail;
     }
@@ -137,8 +143,13 @@ function agentApp() {
         (await chat.recentMessages(userId, chatId)).map(({ role, content }) => ({ role, content })),
       ),
       redis: store.redis,
-      agents: { chat: chatAgent, search: createSearchAgent(mockWebSearch), code: codeAgent },
-      available: new Set(['chat', 'search', 'code']),
+      agents: {
+        chat: chatAgent,
+        search: createSearchAgent(mockWebSearch),
+        code: codeAgent,
+        pdf_qa: createPdfQaAgent({ embedder: mockEmbedder, vectors, documentsFor: readyDocuments }),
+      },
+      available: new Set(['chat', 'search', 'code', 'pdf_qa']),
       stops,
     },
   });
@@ -218,7 +229,7 @@ describe('POST /chats/:chatId/turns', () => {
     script.answer = (streamRequest) =>
       streamRequest.json
         ? '{"agent":"chat","confidence":0.9}'
-        : streamRequest.messages[0]?.content.includes('title')
+        : textOf(streamRequest.messages[0]?.content ?? '').includes('title')
           ? '"Goa Trip Plan."'
           : 'Day 1: beaches. Day 2: forts.';
 
@@ -501,6 +512,93 @@ describe('the code agent in a turn', () => {
   });
 });
 
+describe('attachments', () => {
+  async function uploadedPdf(userId: string, chatId: string, status: 'ready' | 'indexing') {
+    const file = await FileModel.create({
+      userId,
+      chatId,
+      kind: 'upload',
+      purpose: 'pdf',
+      name: 'policy.pdf',
+      s3Key: `users/${userId}/uploads/x`,
+      mime: 'application/pdf',
+      sizeBytes: 100,
+      status: 'ready',
+      pageCount: 1,
+    });
+    const document = await DocumentModel.create({
+      fileId: file._id,
+      userId,
+      chatId,
+      pageCount: 1,
+      status,
+    });
+    const [vector] = await mockEmbedder.embed(['Refunds take seven working days.'], 'document');
+    await vectors.upsert([
+      {
+        vector: vector ?? [],
+        payload: {
+          userId,
+          documentId: document.id,
+          chatId,
+          page: 1,
+          text: 'Refunds take seven working days.',
+        },
+      },
+    ]);
+    return file.id as string;
+  }
+
+  it('answers an attached PDF with cited pages, saving the attachment and citations', async () => {
+    const chatId = await newChat(me);
+    await grantCredits(me);
+    const fileId = await uploadedPdf(me, chatId, 'ready');
+    script.answer = () => 'Seven working days [p. 1].';
+
+    const { events } = await turnEvents(`/chats/${chatId}/turns`, me, {
+      content: 'How long do refunds take?',
+      clientMessageId: 'client-0001',
+      attachments: [fileId],
+    });
+
+    expect(events.find((event) => event.event === 'agent')?.data).toEqual({
+      agent: 'pdf_qa',
+      reason: 'attachment',
+    });
+    const citations = events.find((event) => event.event === 'citations')?.data.items as {
+      page: number;
+    }[];
+    expect(citations[0]?.page).toBe(1);
+    const history = await request(`http://localhost:${chatApp.port}`)
+      .get(`/chats/${chatId}/messages`)
+      .set(INTERNAL_TOKEN_HEADER, await gatewayToken(me, 'chat'));
+    expect(history.body.items[0].attachments).toEqual([fileId]);
+    expect(history.body.items[1].citations[0]).toMatchObject({ name: 'policy.pdf', page: 1 });
+    expect(await balanceOf(me)).toBe(90);
+  });
+
+  it('waits for a PDF still being read, and refuses files from other chats or users', async () => {
+    const chatId = await newChat(me);
+    const otherChat = await newChat(me);
+    await grantCredits(me);
+    const reading = await uploadedPdf(me, chatId, 'indexing');
+    const elsewhere = await uploadedPdf(me, otherChat, 'ready');
+    const theirs = await uploadedPdf('someone-else', chatId, 'ready');
+
+    const send = (fileId: string, n: number) =>
+      sendTurn(me, chatId, {
+        content: 'Question',
+        clientMessageId: `client-000${n}`,
+        attachments: [fileId],
+      });
+
+    expect((await send(reading, 1)).status).toBe(409);
+    expect((await send(elsewhere, 2)).status).toBe(404);
+    expect((await send(theirs, 3)).status).toBe(404);
+    expect(await balanceOf(me)).toBe(100);
+  });
+});
+
 describe('regenerate and edit', () => {
   it('regenerates the latest answer with the same agent, hiding the old one', async () => {
     const chatId = await newChat(me);
@@ -509,7 +607,7 @@ describe('regenerate and edit', () => {
     script.answer = (streamRequest) =>
       streamRequest.json
         ? '{"agent":"chat","confidence":1}'
-        : streamRequest.messages[0]?.content.includes('short title')
+        : textOf(streamRequest.messages[0]?.content ?? '').includes('short title')
           ? 'A title'
           : `answer v${(version += 1)}`;
     await sendTurn(me, chatId, { content: 'Earlier question', clientMessageId: 'client-0001' });

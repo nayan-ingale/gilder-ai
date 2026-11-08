@@ -7,13 +7,15 @@ import {
   getContext,
   hitRateLimit,
   type Logger,
+  mongoose,
   type Redis,
   requireUser,
   validate,
   z,
 } from '@gilder/shared';
 import { type Response, Router } from 'express';
-import type { AgentRunner } from './agents/types.ts';
+import type { AgentRunner, Attachment } from './agents/types.ts';
+import { DocumentModel, FileModel } from './files/models.ts';
 import { type EventStream, openEventStream } from './event-stream.ts';
 import type { Llm } from './llm/llm.ts';
 import { type Memory, type MemoryMessage, trimToBudget } from './memory.ts';
@@ -49,6 +51,8 @@ const turnBody = z
     clientMessageId,
     /** The agent chip the user picked, if any. */
     agent: z.enum(AGENTS).optional(),
+    /** Files uploaded to this chat to send with the message: PDFs or images. */
+    attachments: z.array(id).max(4).optional(),
   })
   .strict();
 const regenerateBody = z.object({ clientMessageId }).strict();
@@ -92,6 +96,7 @@ export function turnRouter(deps: TurnDeps): Router {
         loadMemory: () => deps.memory.load(chatId, userId),
         reserveKey: `turn:${chatId}:${body.clientMessageId}`,
         userMessage: { save: true, ...(body.agent ? { agent: body.agent } : {}), supersedes: [] },
+        attachmentIds: body.attachments ?? [],
         answerSupersedes: [],
         historyChanged: false,
       });
@@ -127,6 +132,7 @@ export function turnRouter(deps: TurnDeps): Router {
         loadMemory: () => historyWithout(deps, userId, chatId, [user.id, answer.id]),
         reserveKey: `regenerate:${answer.id}:${actionId}`,
         userMessage: { save: false, id: user.id },
+        attachmentIds: user.attachments,
         answerSupersedes: [answer.id],
         historyChanged: true,
       });
@@ -168,6 +174,7 @@ export function turnRouter(deps: TurnDeps): Router {
           ...(body.agent ? { agent: body.agent } : {}),
           supersedes: replaced,
         },
+        attachmentIds: body.attachments ?? [],
         answerSupersedes: [],
         historyChanged: true,
       });
@@ -227,6 +234,8 @@ interface TurnPlan {
   reserveKey: string;
   /** Save a new user message, or answer an existing one. */
   userMessage: { save: true; agent?: Agent; supersedes: string[] } | { save: false; id: string };
+  /** Files sent with the message, still unchecked. */
+  attachmentIds: string[];
   answerSupersedes: string[];
   /** Edit and regenerate replace earlier history, so the memory cache is dropped afterwards. */
   historyChanged: boolean;
@@ -250,6 +259,9 @@ async function runTurn(deps: TurnDeps, res: Response, plan: TurnPlan): Promise<v
     if ((await deps.billing.balance(userId)) < CREDIT_COSTS.chat) {
       throw new AppError('insufficient_credits', 'You are out of credits');
     }
+    const attachments = await resolveAttachments(userId, chatId, plan.attachmentIds);
+    const documentsInChat =
+      (await DocumentModel.exists({ userId, chatId, status: 'ready' })) !== null;
     // Memory is read before the new message is saved, so the question isn't in it twice.
     const memory = await plan.loadMemory();
     const route: Route =
@@ -259,7 +271,13 @@ async function runTurn(deps: TurnDeps, res: Response, plan: TurnPlan): Promise<v
             reason: 'chosen',
           }
         : await routeMessage(
-            { text: plan.text, chosen: plan.chooseAgent.chosen, available: deps.available },
+            {
+              text: plan.text,
+              chosen: plan.chooseAgent.chosen,
+              attachmentKinds: attachments.map((file) => file.purpose),
+              documentsInChat,
+              available: deps.available,
+            },
             deps.llm,
             deps.logger,
           );
@@ -292,6 +310,7 @@ async function runTurn(deps: TurnDeps, res: Response, plan: TurnPlan): Promise<v
               clientMessageId: plan.clientMessageId,
               ...(plan.userMessage.agent ? { agent: plan.userMessage.agent } : {}),
               supersedes: plan.userMessage.supersedes,
+              attachments: plan.attachmentIds,
             })
           ).message.id
         : plan.userMessage.id;
@@ -318,6 +337,7 @@ async function runTurn(deps: TurnDeps, res: Response, plan: TurnPlan): Promise<v
       reservation,
       messageIds,
       needsTitle: chat.title === DEFAULT_TITLE,
+      attachments,
       historyChanged: plan.historyChanged,
     });
   } finally {
@@ -325,7 +345,50 @@ async function runTurn(deps: TurnDeps, res: Response, plan: TurnPlan): Promise<v
   }
 }
 
+/**
+ * The files sent with a message, checked: each must be the user's, from this chat and ready, and
+ * a PDF must have finished being read. Anything else refuses the message before it is charged.
+ */
+async function resolveAttachments(
+  userId: string,
+  chatId: string,
+  ids: string[],
+): Promise<Attachment[]> {
+  if (ids.length === 0) {
+    return [];
+  }
+  const unique = [...new Set(ids)];
+  const files = await FileModel.find({
+    _id: { $in: unique.filter((value) => mongoose.isValidObjectId(value)) },
+    userId,
+    chatId,
+  });
+  if (files.length !== unique.length || files.some((file) => file.status !== 'ready')) {
+    throw new AppError('not_found', 'An attached file is missing or not uploaded yet');
+  }
+  const pdfs = files.filter((file) => file.purpose === 'pdf');
+  if (pdfs.length > 0) {
+    const documents = await DocumentModel.find({ fileId: { $in: pdfs.map((file) => file._id) } });
+    if (documents.some((document) => document.status === 'failed')) {
+      throw new AppError('conflict', 'An attached PDF could not be read; upload it again');
+    }
+    if (
+      documents.length !== pdfs.length ||
+      documents.some((document) => document.status !== 'ready')
+    ) {
+      throw new AppError('conflict', 'Still reading your PDF; try again in a moment');
+    }
+  }
+  return files.map((file) => ({
+    fileId: file.id,
+    purpose: file.purpose === 'image' ? 'image' : 'pdf',
+    name: file.name,
+    mime: file.mime,
+  }));
+}
+
 interface Turn {
+  attachments: Attachment[];
   userId: string;
   chatId: string;
   /** The message as the user wrote it, shortcut included. */
@@ -376,17 +439,24 @@ async function streamAnswer(deps: TurnDeps, res: Response, turn: Turn): Promise<
   let usage = { inputTokens: 0, outputTokens: 0 };
   let sources: Record<string, unknown>[] | undefined;
   let artifacts: Record<string, unknown>[] | undefined;
+  let citations: Record<string, unknown>[] | undefined;
 
   try {
     for await (const event of runner.run({
       text: turn.text,
       memory: turn.memory,
+      userId,
+      chatId,
+      attachments: turn.attachments,
       llm: deps.llm,
       signal: controller.signal,
       messageId: turn.messageIds.answer,
     })) {
       if (event.type === 'model') {
         model = event.model;
+      } else if (event.type === 'citations') {
+        citations = event.items.map((item) => ({ ...item }));
+        stream.send('citations', { items: event.items });
       } else if (event.type === 'artifact') {
         artifacts = [{ files: event.files }];
         stream.send('artifact', { files: event.files });
@@ -407,6 +477,7 @@ async function streamAnswer(deps: TurnDeps, res: Response, turn: Turn): Promise<
       status: 'complete',
       ...(sources ? { sources } : {}),
       ...(artifacts ? { artifacts } : {}),
+      ...(citations ? { citations } : {}),
     });
     const committed = await deps.billing.commit(userId, reservation.id, {
       ...(model ? { model } : {}),

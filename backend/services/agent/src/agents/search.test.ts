@@ -2,7 +2,7 @@ import { createLogger } from '@gilder/shared';
 import { describe, expect, it, vi } from 'vitest';
 import { createLlm } from '../llm/llm.ts';
 import { createMockProvider } from '../llm/mock.ts';
-import type { StreamRequest } from '../llm/types.ts';
+import { type StreamRequest, textOf } from '../llm/types.ts';
 import type { Source } from '../search/web-search.ts';
 import { createSearchAgent, SEARCH_SYSTEM_PROMPT } from './search.ts';
 import type { AgentEvent } from './types.ts';
@@ -70,7 +70,7 @@ describe('search agent', () => {
 
   it('turns a follow-up into a standalone query using the conversation', async () => {
     const { llm, search } = setup((request) =>
-      request.messages[0]?.content.includes('standalone web search query')
+      textOf(request.messages[0]?.content ?? '').includes('standalone web search query')
         ? '"Goa weather in December"'
         : 'answer',
     );

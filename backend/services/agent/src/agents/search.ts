@@ -1,3 +1,4 @@
+import { textOf } from '../llm/types.ts';
 import type { WebSearch } from '../search/web-search.ts';
 import type { AgentContext, AgentEvent, AgentRunner } from './types.ts';
 
@@ -26,7 +27,7 @@ async function searchQuery(context: AgentContext): Promise<string> {
   try {
     const recent = context.memory
       .slice(-6)
-      .map((message) => `${message.role}: ${message.content.slice(0, 500)}`)
+      .map((message) => `${message.role}: ${textOf(message.content).slice(0, 500)}`)
       .join('\n');
     const { text } = await context.llm.complete({
       purpose: 'title',

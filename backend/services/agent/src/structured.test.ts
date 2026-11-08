@@ -2,6 +2,7 @@ import { createLogger, z } from '@gilder/shared';
 import { describe, expect, it } from 'vitest';
 import { createLlm } from './llm/llm.ts';
 import { createMockProvider } from './llm/mock.ts';
+import { textOf } from './llm/types.ts';
 import { completeJson } from './structured.ts';
 
 const logger = createLogger({ service: 'agent', level: 'silent' });
@@ -16,7 +17,7 @@ function llmReplying(replies: string[]) {
       mock: createMockProvider({
         delayMs: 0,
         respond: (request) => {
-          asked.push(request.messages.map((message) => message.content));
+          asked.push(request.messages.map((message) => textOf(message.content)));
           return replies[asked.length - 1] ?? '';
         },
       }),

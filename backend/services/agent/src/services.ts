@@ -22,6 +22,7 @@ export interface SavedMessage {
   agent: Agent | null;
   status: 'streaming' | 'complete' | 'stopped' | 'failed';
   clientMessageId: string | null;
+  attachments: string[];
   createdAt: string;
 }
 

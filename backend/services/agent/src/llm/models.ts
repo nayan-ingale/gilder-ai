@@ -31,8 +31,12 @@ export const MODEL_ROUTES = {
     { provider: 'openrouter', model: 'deepseek/deepseek-chat' },
     { provider: 'groq', model: 'openai/gpt-oss-120b', reasoningEffort: 'medium' },
   ],
-  /** Questions about an image. */
-  vision: [{ provider: 'gemini', model: 'gemini-2.5-flash' }],
+  /** Questions about an image. (Google retired gemini-2.5-flash for new keys.) */
+  vision: [
+    { provider: 'gemini', model: 'gemini-3.5-flash', reasoningEffort: 'low' },
+    { provider: 'gemini', model: 'gemini-3.8-flash', reasoningEffort: 'low' },
+    { provider: 'gemini', model: 'gemini-flash-latest', reasoningEffort: 'low' },
+  ],
 } as const satisfies Record<string, readonly ModelTarget[]>;
 
 export type ModelPurpose = keyof typeof MODEL_ROUTES;

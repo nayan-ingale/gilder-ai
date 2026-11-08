@@ -15,7 +15,9 @@ import { createApp } from './app.ts';
 import { env } from './env.ts';
 import { createLlm } from './llm/llm.ts';
 import { buildProviders } from './llm/providers.ts';
+import { readyDocuments } from './files/documents.ts';
 import { createS3FileStore } from './files/file-store.ts';
+import { FileModel } from './files/models.ts';
 import { startFileCleanup } from './rag/cleanup.ts';
 import { createGeminiEmbedder, mockEmbedder } from './rag/embeddings.ts';
 import { indexPdf } from './rag/indexer.ts';
@@ -70,15 +72,6 @@ logger.info(
 );
 
 const stops = await createStopSignals(redis, logger);
-const agents = buildAgents({
-  webSearch:
-    env.LLM_MODE === 'mock'
-      ? mockWebSearch
-      : env.TAVILY_API_KEY
-        ? createTavilySearch(env.TAVILY_API_KEY)
-        : undefined,
-});
-logger.info({ agents: [...availableAgents(agents)] }, 'agents ready');
 
 const { AWS_REGION: region, S3_BUCKET: bucket, AWS_ACCESS_KEY_ID: accessKeyId } = env;
 const secretAccessKey = env.AWS_SECRET_ACCESS_KEY;
@@ -99,6 +92,35 @@ const embedder =
     : mockEmbedder;
 const vectors = env.QDRANT_URL ? createQdrantStore(env.QDRANT_URL) : createMemoryVectorStore();
 const stopCleanup = startFileCleanup({ chat, store: fileStore, vectors, logger });
+
+const agents = buildAgents({
+  webSearch:
+    env.LLM_MODE === 'mock'
+      ? mockWebSearch
+      : env.TAVILY_API_KEY
+        ? createTavilySearch(env.TAVILY_API_KEY)
+        : undefined,
+  // PDF and image questions read uploaded files, so they need storage (and Gemini when live).
+  ...(fileStore
+    ? {
+        pdfQa: { embedder, vectors, documentsFor: readyDocuments },
+        ...(env.LLM_MODE === 'mock' || env.GEMINI_API_KEY
+          ? {
+              imageQa: {
+                readImage: async (fileId: string) => {
+                  const file = await FileModel.findById(fileId);
+                  if (!file) {
+                    throw new Error(`file ${fileId} is gone`);
+                  }
+                  return fileStore.read(file.s3Key);
+                },
+              },
+            }
+          : {}),
+      }
+    : {}),
+});
+logger.info({ agents: [...availableAgents(agents)] }, 'agents ready');
 
 const app = createApp({
   logger,

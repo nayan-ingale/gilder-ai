@@ -3,9 +3,20 @@
 export const PROVIDER_NAMES = ['groq', 'openrouter', 'gemini', 'mock'] as const;
 export type ProviderName = (typeof PROVIDER_NAMES)[number];
 
+/** A piece of a message: text, or an image as a data URL (for models that can see). */
+export type LlmContentPart =
+  { type: 'text'; text: string } | { type: 'image_url'; image_url: { url: string } };
+
 export interface LlmMessage {
   role: 'system' | 'user' | 'assistant';
-  content: string;
+  content: string | LlmContentPart[];
+}
+
+/** The text of a message, with any images left out. */
+export function textOf(content: LlmMessage['content']): string {
+  return typeof content === 'string'
+    ? content
+    : content.flatMap((part) => (part.type === 'text' ? [part.text] : [])).join('\n');
 }
 
 export interface StreamRequest {
