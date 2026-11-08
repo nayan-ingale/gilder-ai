@@ -165,7 +165,7 @@ export const packageNotes: PackageNote[] = [
   {
     name: 'mongoose',
     layer: 'data',
-    why: 'Connects the services to MongoDB (`connectMongo`) and checks the connection for `/readyz` (`pingMongo`). There are no models yet.',
+    why: 'Connects the services to MongoDB (`connectMongo`) and checks the connection for `/readyz` (`pingMongo`). Auth defines its users model with it. The shared library re-exports it, so every app uses one copy and the connection `connectMongo` opens.',
   },
   {
     name: 'ioredis',

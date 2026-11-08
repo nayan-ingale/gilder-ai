@@ -1,4 +1,8 @@
+// Every app uses this library's copies, so there is one Zod version and one Mongoose, whose
+// connection is the one connectMongo opens.
 export { z } from 'zod';
+export { default as mongoose } from 'mongoose';
+export type { HydratedDocument, InferSchemaType } from 'mongoose';
 
 export * from './constants.ts';
 export * from './context.ts';

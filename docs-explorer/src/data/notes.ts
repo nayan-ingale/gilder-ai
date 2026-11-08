@@ -17,6 +17,7 @@ const SESSIONS_TEST = 'backend/shared/src/sessions.test.ts';
 const GATEWAY_TEST = 'backend/gateway/src/app.test.ts';
 const AUTH_TEST = 'backend/services/auth/src/app.test.ts';
 const AUTH_ENV_SCHEMA_TEST = 'backend/services/auth/src/env-schema.test.ts';
+const AUTH_USERS_TEST = 'backend/services/auth/src/users.test.ts';
 const CHAT_TEST = 'backend/services/chat/src/app.test.ts';
 const AGENT_TEST = 'backend/services/agent/src/app.test.ts';
 const BILLING_TEST = 'backend/services/billing/src/app.test.ts';
@@ -816,6 +817,20 @@ export const notes: SymbolNote[] = [
     sideEffects: ['Opens a connection to the test Redis.'],
     tests: [SESSIONS_TEST, RATE_LIMIT_TEST],
   },
+  {
+    symbol: 'backend/shared/src/test-mongo.ts#startTestMongo',
+    status: 'verified',
+    summary: 'Starts a real MongoDB for one test file and connects Mongoose to it.',
+    how: [
+      'mongodb-memory-server downloads a mongod binary on first use and starts it as a single server, so no Docker is needed.',
+      'connectMongo connects the shared Mongoose to its gilder_test database, with a silent logger.',
+      '`stop()` disconnects Mongoose and stops the server.',
+    ],
+    why: "For tests only: an app's tests import it from `@gilder/shared/testing`, a separate entry that the running apps never load. Each call starts its own server, so test files running at the same time never share data. auth's users.test.ts uses it.",
+    returns: 'A promise of { stop }.',
+    sideEffects: ['Starts a mongod process and connects Mongoose to it.'],
+    tests: [AUTH_USERS_TEST],
+  },
 
   // -------------------------------------------------------------------------------------------
   // backend/shared/src/validate.ts
@@ -934,6 +949,49 @@ export const notes: SymbolNote[] = [
     returns:
       'A read-only array: FIREBASE_PROJECT_ID, FIREBASE_CLIENT_EMAIL and FIREBASE_PRIVATE_KEY.',
     tests: [AUTH_ENV_SCHEMA_TEST],
+  },
+  {
+    symbol: 'backend/services/auth/src/users.ts#THEME_PREFERENCES',
+    status: 'not-wired',
+    summary: "The themes a user can pick: 'system', 'light' or 'dark'.",
+    why: "'system' follows the device's light or dark setting and is the default. The list types ThemePreference and limits the users model's themePreference field. No route reads or changes it yet.",
+    returns: "A read-only array: 'system', 'light', 'dark'.",
+    tests: [AUTH_USERS_TEST],
+  },
+  {
+    symbol: 'backend/services/auth/src/users.ts#userSchema',
+    status: 'not-wired',
+    summary: 'The shape and rules of a document in the users collection.',
+    how: [
+      'firebaseUid is required and unique: one user per Google account.',
+      'email is required, unique, trimmed and stored in lowercase, so the same address in a different case is the same user. It is at most 254 characters.',
+      'name (at most 100 characters) and avatarUrl (at most 2048) are optional and trimmed.',
+      "themePreference is one of THEME_PREFERENCES and defaults to 'system'.",
+      'timestamps adds createdAt and updatedAt.',
+    ],
+    why: 'The unique indexes make duplicate accounts impossible in the database itself, even if two sign-ins race. Mongoose works out the field types from it, so themePreference is typed as the three themes, not any string.',
+    tests: [AUTH_USERS_TEST],
+  },
+  {
+    symbol: 'backend/services/auth/src/users.ts#UserModel',
+    status: 'not-wired',
+    summary: 'The Mongoose model for the users collection in the auth database (gilder_auth).',
+    why: 'Only auth reads or writes users; other services will ask auth over HTTP. It is built from the `mongoose` that @gilder/shared re-exports, so it uses the connection connectMongo opens. Mongoose creates the unique indexes when the model first connects. No route uses it yet.',
+    returns: 'A Mongoose model of User documents.',
+    tests: [AUTH_USERS_TEST],
+  },
+  {
+    symbol: 'backend/services/auth/src/users.ts#toProfile',
+    status: 'not-wired',
+    summary: 'Turns a user document into what the API shows of a user.',
+    how: [
+      'It returns id, email, name, avatarUrl and themePreference.',
+      'A name or avatar that is not set becomes null, so the shape is always the same.',
+      'The Firebase ID is left out: it stays inside auth.',
+    ],
+    why: 'One function decides what leaves the service, so a new field in the model is never sent by accident. No route uses it yet.',
+    returns: '{ id, email, name, avatarUrl, themePreference }',
+    tests: [AUTH_USERS_TEST],
   },
   {
     symbol: 'backend/services/chat/src/app.ts#createApp',
