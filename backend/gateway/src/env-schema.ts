@@ -1,5 +1,6 @@
 import {
   baseEnvSchema,
+  GATEWAY_RATE_LIMITS,
   internalPrivateKeySchema,
   portSchema,
   serviceUrlSchema,
@@ -58,6 +59,17 @@ export const gatewayEnvSchema = baseEnvSchema.extend({
    * X-Forwarded-For header): 1 locally (the Next.js server), more behind a load balancer.
    */
   TRUST_PROXY_HOPS: z.coerce.number().int().min(0).max(5).default(1),
+  /**
+   * Requests a minute from one IP address and from one signed-in user. Raise them only where
+   * many people share one address, or for end-to-end test runs that all come from one machine.
+   */
+  RATE_LIMIT_PER_IP: z.coerce.number().int().min(1).max(100_000).default(GATEWAY_RATE_LIMITS.perIp),
+  RATE_LIMIT_PER_USER: z.coerce
+    .number()
+    .int()
+    .min(1)
+    .max(100_000)
+    .default(GATEWAY_RATE_LIMITS.perUser),
 });
 
 export type GatewayEnv = z.output<typeof gatewayEnvSchema>;

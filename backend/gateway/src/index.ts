@@ -29,6 +29,7 @@ const app = createApp({
   },
   allowedOrigins: env.FRONTEND_ORIGIN,
   trustProxyHops: env.TRUST_PROXY_HOPS,
+  rateLimits: { perIp: env.RATE_LIMIT_PER_IP, perUser: env.RATE_LIMIT_PER_USER },
 });
 
 await startService(app, {

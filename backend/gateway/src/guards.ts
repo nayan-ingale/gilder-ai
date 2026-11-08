@@ -70,15 +70,17 @@ export function requireSession(): RequestHandler {
 }
 
 /** At most 120 requests a minute from one IP address, signed in or not. */
-export function ipRateLimit(redis: Redis): RequestHandler {
-  return rateLimit(redis, { scope: 'ip', limit: GATEWAY_RATE_LIMITS.perIp }, (req) => req.ip);
+export function ipRateLimit(
+  redis: Redis,
+  limit: number = GATEWAY_RATE_LIMITS.perIp,
+): RequestHandler {
+  return rateLimit(redis, { scope: 'ip', limit }, (req) => req.ip);
 }
 
 /** At most 60 requests a minute from one signed-in user, from any number of devices. */
-export function userRateLimit(redis: Redis): RequestHandler {
-  return rateLimit(
-    redis,
-    { scope: 'user', limit: GATEWAY_RATE_LIMITS.perUser },
-    (_req, res) => res.locals.userId,
-  );
+export function userRateLimit(
+  redis: Redis,
+  limit: number = GATEWAY_RATE_LIMITS.perUser,
+): RequestHandler {
+  return rateLimit(redis, { scope: 'user', limit }, (_req, res) => res.locals.userId);
 }

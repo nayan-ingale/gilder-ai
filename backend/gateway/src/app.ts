@@ -27,6 +27,8 @@ export interface AppDeps {
   allowedOrigins: readonly string[];
   /** Proxies in front of the gateway to trust for the client's IP address. */
   trustProxyHops: number;
+  /** Requests a minute per IP address and per signed-in user; the shared defaults if left out. */
+  rateLimits?: { perIp: number; perUser: number };
   /** How long to wait for a service to start answering. */
   headersTimeoutMs?: number;
 }
@@ -44,7 +46,7 @@ export function createApp(deps: AppDeps): Express {
   const { logger, readinessChecks, redis } = deps;
 
   const api = Router();
-  api.use(ipRateLimit(redis));
+  api.use(ipRateLimit(redis, deps.rateLimits?.perIp));
   api.use((req, res, next) => {
     const matched = matchRoute(req.method, req.path);
     if (!matched) {
@@ -56,7 +58,7 @@ export function createApp(deps: AppDeps): Express {
   });
   api.use(originCheck(deps.allowedOrigins));
   api.use(sessionLookup(redis));
-  api.use(userRateLimit(redis));
+  api.use(userRateLimit(redis, deps.rateLimits?.perUser));
   api.use((req, res, next) => {
     const { route } = res.locals.route as MatchedRoute;
     if (route.session === 'required') {
