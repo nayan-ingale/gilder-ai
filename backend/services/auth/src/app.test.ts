@@ -41,6 +41,7 @@ function buildApp(devLogin = false) {
     verifyIdToken: googleSignInNotSetUp,
     devLogin,
     secureCookie: false,
+    grantSignupCredits: async () => {},
   });
 }
 

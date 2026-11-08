@@ -21,6 +21,10 @@ const app = createApp({
   logger,
   readinessChecks: { mongo: pingMongo },
   internalPublicKey: await importInternalPublicKey(env.INTERNAL_PUBLIC_KEY),
+  callerKeys: {
+    auth: await importInternalPublicKey(env.AUTH_PUBLIC_KEY),
+    agent: await importInternalPublicKey(env.AGENT_PUBLIC_KEY),
+  },
 });
 
 await startService(app, {

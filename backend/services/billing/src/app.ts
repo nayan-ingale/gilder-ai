@@ -1,20 +1,35 @@
-import { createService, type InternalKey, type Logger, type ReadinessCheck } from '@gilder/shared';
+import {
+  createService,
+  type InternalKey,
+  type Logger,
+  type ReadinessCheck,
+  type ServiceCaller,
+} from '@gilder/shared';
 import type { Express } from 'express';
+import { internalRouter } from './internal-routes.ts';
 
 export interface AppDeps {
   logger: Logger;
   readinessChecks?: Record<string, ReadinessCheck>;
-  /** The gateway's public key: every route except the health checks needs its token. */
+  /** The gateway's public key: every route except the health checks needs a valid token. */
   internalPublicKey: InternalKey;
+  /** Public keys of the services that call billing directly: auth and the agent. */
+  callerKeys: Partial<Record<ServiceCaller, InternalKey>>;
 }
 
-export function createApp({ logger, readinessChecks, internalPublicKey }: AppDeps): Express {
-  // No routes of its own yet, but locked already: only the gateway's token gets past the health
-  // checks, so a direct call gets 401 on any path.
+export function createApp({
+  logger,
+  readinessChecks,
+  internalPublicKey,
+  callerKeys,
+}: AppDeps): Express {
   return createService({
     name: 'billing',
     logger,
     readinessChecks,
-    internalAuth: { publicKey: internalPublicKey, audience: 'billing' },
+    internalAuth: { publicKey: internalPublicKey, audience: 'billing', callers: callerKeys },
+    routes: (app) => {
+      app.use(internalRouter());
+    },
   });
 }

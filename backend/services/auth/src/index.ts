@@ -1,14 +1,17 @@
 import {
   connectMongo,
+  createInternalClient,
   createLogger,
   createRedis,
   disconnectMongo,
+  importInternalPrivateKey,
   importInternalPublicKey,
   pingMongo,
   pingRedis,
   startService,
 } from '@gilder/shared';
 import { createApp } from './app.ts';
+import { billingSignupGrant } from './billing.ts';
 import { env } from './env.ts';
 import { createFirebaseVerifier, googleSignInNotSetUp } from './firebase.ts';
 
@@ -35,6 +38,13 @@ if (env.AUTH_DEV_LOGIN) {
   logger.warn('dev sign-in is on: anyone who can reach auth can sign in with just an email');
 }
 
+const billing = createInternalClient({
+  caller: 'auth',
+  privateKey: await importInternalPrivateKey(env.SERVICE_PRIVATE_KEY),
+  service: 'billing',
+  baseUrl: env.BILLING_SERVICE_URL,
+});
+
 const app = createApp({
   logger,
   readinessChecks: { mongo: pingMongo, redis: () => pingRedis(redis) },
@@ -43,6 +53,7 @@ const app = createApp({
   verifyIdToken,
   devLogin: env.AUTH_DEV_LOGIN,
   secureCookie: env.NODE_ENV === 'production',
+  grantSignupCredits: billingSignupGrant(billing),
 });
 
 await startService(app, {

@@ -11,6 +11,7 @@ import {
   z,
 } from '@gilder/shared';
 import { type CookieOptions, type Response, Router } from 'express';
+import type { GrantSignupCredits } from './billing.ts';
 import type { VerifyIdToken } from './firebase.ts';
 import { findOrCreateDevUser, type SignedInUser, toProfile, upsertGoogleUser } from './users.ts';
 
@@ -26,6 +27,8 @@ export interface SessionRouteDeps {
   devLogin: boolean;
   /** Marks the cookie Secure, so browsers send it over HTTPS only. On in production. */
   secureCookie: boolean;
+  /** Billing's sign-up grant, asked for on every sign-in (it grants only once). */
+  grantSignupCredits: GrantSignupCredits;
   logger: Logger;
 }
 
@@ -52,9 +55,18 @@ export function sessionRouter(deps: SessionRouteDeps): Router {
 
   async function startSession(res: Response, signedIn: SignedInUser, method: 'google' | 'dev') {
     const { user, created } = signedIn;
+    setContextUserId(user.id);
+    // A billing outage must not stop sign-in: the grant is asked for again on the next one.
+    try {
+      await deps.grantSignupCredits(user.id);
+    } catch (error) {
+      deps.logger.warn(
+        { err: error },
+        'sign-up credits could not be granted; the next sign-in asks again',
+      );
+    }
     const sessionId = await createSession(deps.redis, user.id);
     res.cookie(SESSION_COOKIE, sessionId, { ...cookieOptions, maxAge: COOKIE_MAX_AGE_MS });
-    setContextUserId(user.id);
     deps.logger.info({ method, newUser: created }, 'signed in');
     res.json({ user: toProfile(user) });
   }

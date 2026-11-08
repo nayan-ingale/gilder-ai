@@ -32,6 +32,7 @@ function buildApp() {
     logger,
     readinessChecks: { dependency: async () => {} },
     internalPublicKey: publicKey,
+    callerKeys: {},
   });
 }
 

@@ -1,13 +1,19 @@
+import { generateKeyPairSync } from 'node:crypto';
 import { EnvError, loadEnv } from '@gilder/shared';
 import { describe, expect, it } from 'vitest';
 import { authEnvSchema } from './env-schema.ts';
 
 // Shapes only: the schema checks that the key looks like PEM; importing it happens at startup.
 const PUBLIC_KEY = '-----BEGIN PUBLIC KEY-----\nMCowBQYDK2VwAyEA\n-----END PUBLIC KEY-----';
+// Auth's own signing key is parsed for real, so the test makes one.
+const SERVICE_KEY = generateKeyPairSync('ed25519')
+  .privateKey.export({ type: 'pkcs8', format: 'pem' })
+  .toString();
 const REQUIRED = {
   MONGODB_URI: 'mongodb://db',
   REDIS_URL: 'redis://cache',
   INTERNAL_PUBLIC_KEY: PUBLIC_KEY,
+  SERVICE_PRIVATE_KEY: SERVICE_KEY,
 };
 const FIREBASE = {
   FIREBASE_PROJECT_ID: 'demo-gilder',
@@ -102,5 +108,21 @@ describe('auth settings', () => {
     const wrong = problemsFor({ ...REQUIRED, INTERNAL_PUBLIC_KEY: 'not-a-key-SECRET123' });
     expect(wrong).toEqual(['INTERNAL_PUBLIC_KEY: is not a PEM public key: run pnpm setup:keys']);
     expect(wrong.join()).not.toContain('SECRET123');
+  });
+
+  it("needs auth's own signing key, and defaults billing's URL", () => {
+    const { SERVICE_PRIVATE_KEY: _omitted, ...withoutKey } = REQUIRED;
+
+    expect(problemsFor(withoutKey)).toEqual([
+      'SERVICE_PRIVATE_KEY: is missing: run pnpm setup:keys',
+    ]);
+    expect(problemsFor({ ...REQUIRED, SERVICE_PRIVATE_KEY: 'SECRET-VALUE' })).toEqual([
+      'SERVICE_PRIVATE_KEY: is not a valid Ed25519 private key: run pnpm setup:keys',
+    ]);
+    expect(loadEnv(authEnvSchema, REQUIRED).BILLING_SERVICE_URL).toBe('http://localhost:8004');
+    expect(
+      loadEnv(authEnvSchema, { ...REQUIRED, BILLING_SERVICE_URL: 'http://billing:8004/' })
+        .BILLING_SERVICE_URL,
+    ).toBe('http://billing:8004');
   });
 });

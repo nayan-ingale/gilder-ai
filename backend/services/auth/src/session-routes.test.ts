@@ -17,7 +17,7 @@ import {
   type TestRedis,
 } from '@gilder/shared/testing';
 import request, { type Response } from 'supertest';
-import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { googleSignInNotSetUp, type VerifyIdToken } from './firebase.ts';
 import { type SessionRouteDeps, sessionRouter } from './session-routes.ts';
 import { UserModel } from './users.ts';
@@ -40,9 +40,14 @@ afterAll(async () => {
   await mongo.stop();
 });
 
+/** Stands in for billing's sign-up grant. */
+const grants = vi.fn<(userId: string) => Promise<void>>(async () => {});
+
 beforeEach(async () => {
   store = await createTestRedis();
   await UserModel.deleteMany({});
+  grants.mockReset();
+  grants.mockImplementation(async () => {});
 });
 
 afterEach(async () => {
@@ -70,6 +75,7 @@ function buildApp(overrides: Partial<SessionRouteDeps> = {}) {
           verifyIdToken: fakeFirebase,
           devLogin: true,
           secureCookie: false,
+          grantSignupCredits: (userId) => grants(userId),
           logger,
           ...overrides,
         }),
@@ -115,6 +121,24 @@ describe('POST /sessions (Google sign-in)', () => {
     await expect(resolveSession(store.redis, sessionIdIn(response))).resolves.toEqual({
       userId: response.body.user.id,
     });
+    expect(grants).toHaveBeenCalledWith(response.body.user.id);
+  });
+
+  it('still signs in when billing is down, and asks for the grant again next time', async () => {
+    grants.mockRejectedValueOnce(new AppError('service_unavailable', 'billing did not answer'));
+    const sendSignIn = async () =>
+      request(buildApp())
+        .post('/sessions')
+        .set(INTERNAL_TOKEN_HEADER, await signedOutToken())
+        .send({ idToken: 'good-token' });
+
+    const first = await sendSignIn();
+    const second = await sendSignIn();
+
+    expect(first.status).toBe(200);
+    expect(sessionCookieHeader(first)).toBeDefined();
+    expect(second.status).toBe(200);
+    expect(grants).toHaveBeenCalledTimes(2);
   });
 
   it('marks the cookie Secure when asked to', async () => {
@@ -172,6 +196,7 @@ describe('POST /sessions/dev (dev sign-in)', () => {
     await expect(resolveSession(store.redis, sessionIdIn(response))).resolves.toEqual({
       userId: response.body.user.id,
     });
+    expect(grants).toHaveBeenCalledWith(response.body.user.id);
   });
 
   it('does not exist when dev sign-in is off', async () => {

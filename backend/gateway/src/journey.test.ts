@@ -40,6 +40,7 @@ beforeAll(async () => {
     verifyIdToken: googleSignInNotSetUp,
     devLogin: true,
     secureCookie: false,
+    grantSignupCredits: async () => {},
   });
   auth = await startService(authApp, { port: 0, logger, handleSignals: false });
   const authUrl = `http://localhost:${auth.port}`;

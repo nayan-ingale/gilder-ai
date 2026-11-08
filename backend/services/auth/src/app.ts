@@ -6,6 +6,7 @@ import {
   type Redis,
 } from '@gilder/shared';
 import type { Express } from 'express';
+import type { GrantSignupCredits } from './billing.ts';
 import type { VerifyIdToken } from './firebase.ts';
 import { meRouter } from './me-routes.ts';
 import { sessionRouter } from './session-routes.ts';
@@ -21,6 +22,8 @@ export interface AppDeps {
   devLogin: boolean;
   /** Marks the session cookie Secure. On in production. */
   secureCookie: boolean;
+  /** Billing's sign-up grant, asked for on every sign-in. */
+  grantSignupCredits: GrantSignupCredits;
 }
 
 /** The auth service: sign-in, logout, sessions and the user's profile. */
@@ -38,6 +41,7 @@ export function createApp(deps: AppDeps): Express {
           verifyIdToken: deps.verifyIdToken,
           devLogin: deps.devLogin,
           secureCookie: deps.secureCookie,
+          grantSignupCredits: deps.grantSignupCredits,
           logger,
         }),
       );
