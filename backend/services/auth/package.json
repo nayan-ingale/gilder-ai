@@ -5,6 +5,7 @@
   "type": "module",
   "exports": {
     "./app": "./src/app.ts",
+    "./billing": "./src/billing.ts",
     "./firebase": "./src/firebase.ts"
   },
   "scripts": {

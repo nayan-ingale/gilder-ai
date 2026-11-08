@@ -6,6 +6,7 @@ import {
   type ServiceCaller,
 } from '@gilder/shared';
 import type { Express } from 'express';
+import { accountRouter } from './account-routes.ts';
 import { internalRouter } from './internal-routes.ts';
 
 export interface AppDeps {
@@ -29,6 +30,7 @@ export function createApp({
     readinessChecks,
     internalAuth: { publicKey: internalPublicKey, audience: 'billing', callers: callerKeys },
     routes: (app) => {
+      app.use(accountRouter());
       app.use(internalRouter());
     },
   });

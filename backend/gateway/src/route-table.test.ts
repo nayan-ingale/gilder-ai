@@ -36,6 +36,20 @@ describe('matchRoute', () => {
     expect(matchRoute('DELETE', '/api/chats')).toBeUndefined();
   });
 
+  it("maps the credits route to billing, behind a session, and never billing's internal routes", () => {
+    expect(matchRoute('GET', '/api/billing/account')).toMatchObject({
+      route: { service: 'billing', session: 'required' },
+      targetPath: '/account',
+    });
+    for (const path of [
+      '/api/billing/internal/credits/reserve',
+      '/internal/credits/reserve',
+      '/api/internal/accounts',
+    ]) {
+      expect(matchRoute('POST', path)).toBeUndefined();
+    }
+  });
+
   it('finds nothing for an unknown path or a method the route does not have', () => {
     expect(matchRoute('GET', '/api/nothing-here')).toBeUndefined();
     expect(matchRoute('DELETE', '/api/me')).toBeUndefined();

@@ -116,3 +116,31 @@ describe('POST /internal/accounts', () => {
     expect(await AccountModel.countDocuments()).toBe(0);
   });
 });
+
+describe('GET /account', () => {
+  const app = () =>
+    createApp({
+      logger: createLogger({ service: 'billing', level: 'silent' }),
+      internalPublicKey: gatewayPublicKey,
+      callerKeys: { auth: authPublicKey },
+    });
+
+  it("shows the signed-in user's plan and balance, or none yet", async () => {
+    await grantSignupCredits('u1');
+    const read = async (userId: string) =>
+      request(app())
+        .get('/account')
+        .set(INTERNAL_TOKEN_HEADER, await signInternalToken(gatewayKey, 'billing', { userId }));
+
+    expect((await read('u1')).body).toEqual({
+      account: { plan: 'free', planExpiresAt: null, balance: SIGNUP_CREDITS },
+    });
+    expect((await read('u2')).body).toEqual({
+      account: { plan: 'free', planExpiresAt: null, balance: 0 },
+    });
+    const noUser = await request(app())
+      .get('/account')
+      .set(INTERNAL_TOKEN_HEADER, await signInternalToken(gatewayKey, 'billing', {}));
+    expect(noUser.status).toBe(401);
+  });
+});

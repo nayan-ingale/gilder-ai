@@ -76,6 +76,15 @@ export const PUBLIC_ROUTES: readonly PublicRoute[] = [
     target: '/chats/:id/messages',
     session: 'required',
   },
+
+  // Credits: the user's plan and balance.
+  {
+    method: 'GET',
+    path: '/api/billing/account',
+    service: 'billing',
+    target: '/account',
+    session: 'required',
+  },
 ];
 
 export interface MatchedRoute {

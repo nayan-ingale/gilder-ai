@@ -1,8 +1,12 @@
 import { createApp as createAuthApp } from '@gilder/auth/app';
+import { billingSignupGrant } from '@gilder/auth/billing';
 import { googleSignInNotSetUp } from '@gilder/auth/firebase';
+import { createApp as createBillingApp } from '@gilder/billing/app';
 import { createApp as createChatApp } from '@gilder/chat/app';
 import {
+  createInternalClient,
   createLogger,
+  SIGNUP_CREDITS,
   generateInternalKeyPair,
   importInternalPrivateKey,
   importInternalPublicKey,
@@ -19,20 +23,30 @@ import request from 'supertest';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { createApp } from './app.ts';
 
-// The real gateway in front of the real auth and chat services, each on its own port, as they run
-// in development: real Redis sessions, a real MongoDB, real internal tokens.
+// The real gateway in front of the real auth, chat and billing services, each on its own port, as
+// they run in development: real Redis sessions, a real MongoDB replica set, real internal tokens,
+// and auth calling billing with its own key.
 const logger = createLogger({ service: 'journey', level: 'silent' });
 const ORIGIN = 'http://localhost:3000';
 let mongo: TestMongo;
 let store: TestRedis;
 let auth: RunningService;
 let chat: RunningService;
+let billing: RunningService;
 let gateway: ReturnType<typeof createApp>;
 
 beforeAll(async () => {
-  mongo = await startTestMongo();
+  mongo = await startTestMongo({ replicaSet: true });
   store = await createTestRedis();
   const pair = await generateInternalKeyPair();
+  const authPair = await generateInternalKeyPair();
+  const billingApp = createBillingApp({
+    logger,
+    internalPublicKey: await importInternalPublicKey(pair.publicKey),
+    callerKeys: { auth: await importInternalPublicKey(authPair.publicKey) },
+  });
+  billing = await startService(billingApp, { port: 0, logger, handleSignals: false });
+  const billingUrl = `http://localhost:${billing.port}`;
   const authApp = createAuthApp({
     logger,
     internalPublicKey: await importInternalPublicKey(pair.publicKey),
@@ -40,7 +54,14 @@ beforeAll(async () => {
     verifyIdToken: googleSignInNotSetUp,
     devLogin: true,
     secureCookie: false,
-    grantSignupCredits: async () => {},
+    grantSignupCredits: billingSignupGrant(
+      createInternalClient({
+        caller: 'auth',
+        privateKey: await importInternalPrivateKey(authPair.privateKey),
+        service: 'billing',
+        baseUrl: billingUrl,
+      }),
+    ),
   });
   auth = await startService(authApp, { port: 0, logger, handleSignals: false });
   const authUrl = `http://localhost:${auth.port}`;
@@ -54,13 +75,14 @@ beforeAll(async () => {
     logger,
     redis: store.redis,
     privateKey: await importInternalPrivateKey(pair.privateKey),
-    serviceUrls: { auth: authUrl, chat: chatUrl, agent: authUrl, billing: authUrl },
+    serviceUrls: { auth: authUrl, chat: chatUrl, agent: authUrl, billing: billingUrl },
     allowedOrigins: [ORIGIN],
     trustProxyHops: 1,
   });
 }, 120_000);
 
 afterAll(async () => {
+  await billing.close();
   await chat.close();
   await auth.close();
   await store.cleanup();
@@ -218,5 +240,50 @@ describe('chats through the gateway', () => {
       expect(response.status, path).toBe(404);
     }
     expect((await request(`http://localhost:${chat.port}`).get('/chats')).status).toBe(401);
+  });
+});
+
+describe('credits through the gateway', () => {
+  it('grants the sign-up credits at the first sign-in, once, and shows the balance', async () => {
+    const signIn = () =>
+      request(gateway)
+        .post('/api/auth/dev-session')
+        .set('Origin', ORIGIN)
+        .send({ email: 'credits@example.com' });
+
+    const first = await signIn();
+    await signIn();
+    const account = await request(gateway)
+      .get('/api/billing/account')
+      .set('Cookie', cookieFrom(first));
+
+    expect(account.status).toBe(200);
+    expect(account.body).toEqual({
+      account: { plan: 'free', planExpiresAt: null, balance: SIGNUP_CREDITS },
+    });
+  });
+
+  it("keeps billing's internal routes out of reach (SEC-01)", async () => {
+    const signIn = await request(gateway)
+      .post('/api/auth/dev-session')
+      .set('Origin', ORIGIN)
+      .send({ email: 'free-credits@example.com' });
+    const cookie = cookieFrom(signIn);
+
+    for (const path of [
+      '/api/internal/accounts',
+      '/internal/credits/reserve',
+      '/api/billing/internal/accounts',
+    ]) {
+      const response = await request(gateway)
+        .post(path)
+        .set('Cookie', cookie)
+        .set('Origin', ORIGIN);
+      expect(response.status, path).toBe(404);
+    }
+    // And billing itself refuses the gateway's token on them: only auth or the agent may call.
+    expect(
+      (await request(`http://localhost:${billing.port}`).post('/internal/accounts')).status,
+    ).toBe(401);
   });
 });
