@@ -19,7 +19,7 @@ const uploadFile: Flow = {
   id: 'upload-file',
   title: 'Upload a file',
   category: 'api',
-  apps: ['gateway', 'agent', 'chat'],
+  apps: ['frontend', 'gateway', 'agent', 'chat'],
   summary:
     "An upload, in two calls to the agent around the client's own upload to S3. Start checks the type, the size and the chat, records the file as pending under a key made from IDs only, and returns a signed form for that one key, type and size range. The client posts the file straight to S3. Complete then checks what actually arrived: that it is there, its type and size, its first bytes, and a PDF's page count. A file that fails is deleted and marked failed; a PDF that passes is queued for indexing (see Index an uploaded PDF). Uploads are off (503) unless the agent has all four S3 settings. file-routes.test.ts and file-checks.test.ts run every check against an in-memory bucket; a live upload needs a bucket the agent's key can use.",
   status: 'partial',
@@ -29,7 +29,7 @@ const uploadFile: Flow = {
       title: 'Start an upload',
       kind: 'trigger',
       status: 'verified',
-      what: 'A signed-in client posts what it is about to upload to POST /api/files/uploads: the chat, the file name, its type and its size. The Next.js server and the gateway forward it to the agent (target /files/uploads, Origin checked, session required), with a token that names the user.',
+      what: 'In a chat, attaching a file in the composer makes uploadFile post what it is about to upload to POST /api/files/uploads: the chat, the file name, its type and its size. The Next.js server and the gateway forward it to the agent (target /files/uploads, Origin checked, session required), with a token that names the user.',
       why: 'The agent decides where the file goes before any bytes move.',
       input:
         'POST /api/files/uploads, { "chatId": "...", "name": "trip.pdf", "mime": "application/pdf", "sizeBytes": 48213 }',
@@ -90,7 +90,7 @@ const uploadFile: Flow = {
       title: 'The client posts the file to S3',
       kind: 'external',
       status: 'inferred',
-      what: "The client posts the form fields and the file to the form's URL. S3 refuses a file outside the size range or with another Content-Type. The bytes never pass through the gateway or the agent. This part happens outside the app's code and has been tested only against an in-memory bucket; a live run needs a bucket the agent's key can use.",
+      what: "uploadFile posts the form's fields, then the file, to the form's URL. S3 refuses a file outside the size range or with another Content-Type. The bytes never pass through the gateway or the agent. This part happens outside the app's code and has been tested only against an in-memory bucket; a live run needs a bucket the agent's key can use.",
       why: 'Large files go straight to storage instead of through every server on the way.',
     },
     {
@@ -207,7 +207,7 @@ const indexPdfFlow: Flow = {
   category: 'lifecycle',
   apps: ['agent'],
   summary:
-    "How a PDF becomes searchable, in the background once its upload completes. The agent reads the file, extracts its text page by page with unpdf, cuts it into overlapping pieces of about 1,000 characters that each keep their page, embeds them (Gemini's embedding model in live mode, a stand-in in mock mode) and stores them in Qdrant, labelled with the owner, document, chat and page. The document is then marked ready, or failed with the reason. Every search filters by owner and document. indexer.test.ts runs it with a real PDF, the stand-in embedder and an in-memory store; a live check with real Gemini embeddings and a local Qdrant ranked the right page first. Answering questions from indexed PDFs is not built yet.",
+    "How a PDF becomes searchable, in the background once its upload completes. The agent reads the file, extracts its text page by page with unpdf, cuts it into overlapping pieces of about 1,000 characters that each keep their page, embeds them (Gemini's embedding model in live mode, a stand-in in mock mode) and stores them in Qdrant, labelled with the owner, document, chat and page. The document is then marked ready, or failed with the reason. Every search filters by owner and document. indexer.test.ts runs it with a real PDF, the stand-in embedder and an in-memory store; a live check with real Gemini embeddings and a local Qdrant ranked the right page first. PDF questions then search these pieces (see Ask about a PDF).",
   status: 'verified',
   steps: [
     {

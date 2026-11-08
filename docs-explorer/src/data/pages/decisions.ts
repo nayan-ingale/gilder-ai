@@ -1746,5 +1746,310 @@ export const decisionsPage: DocPage = {
         { flow: 'chat-file-cleanup' },
       ],
     },
+    {
+      id: 'checked-outlines',
+      title: 'Files are drawn from checked outlines, never from model markup',
+      status: 'verified',
+      blocks: [
+        {
+          kind: 'fields',
+          fields: [
+            {
+              label: 'Decision',
+              text: 'To make a PDF, a deck or an image, the model writes JSON in a fixed shape (an outline, or an image prompt), checked by a schema with limits on every list and string. The agent lays the file out itself with pdfkit or pptxgenjs.',
+            },
+            {
+              label: 'Why',
+              text: 'Markup or HTML from the model could carry links, scripts or tricks into a file people download. Plain text in a known shape cannot, and the limits stop a runaway reply from making a huge file.',
+            },
+            {
+              label: 'Trade-off',
+              text: 'Files follow one plain layout; the model cannot choose fonts, colours or pictures inside a document.',
+            },
+          ],
+        },
+        {
+          kind: 'quote',
+          file: 'backend/services/agent/src/generate/outlines.ts',
+          text: 'What the model writes before a file is drawn: a checked outline, never free-form markup, so a',
+        },
+      ],
+      refs: [
+        { symbol: 'backend/services/agent/src/generate/outlines.ts#documentOutline' },
+        { symbol: 'backend/services/agent/src/generate/render.ts#renderPdf' },
+        { flow: 'generate-file' },
+      ],
+    },
+    {
+      id: 'file-ids-not-links',
+      title: 'Generated files keep their IDs, never their links',
+      status: 'verified',
+      blocks: [
+        {
+          kind: 'fields',
+          fields: [
+            {
+              label: 'Decision',
+              text: 'A file an agent makes is announced once in the stream with a fresh 5-minute link, but the answer saves only its ID (fileRefs). Whenever the file is shown or downloaded later, the browser asks for a new link.',
+            },
+            {
+              label: 'Why',
+              text: 'Signed links expire. A chat opened next week must still show its images and download its files; IDs never go stale, and links never sit in the database.',
+            },
+            {
+              label: 'Trade-off',
+              text: 'Each image or download costs one more request for its link.',
+            },
+          ],
+        },
+        {
+          kind: 'quote',
+          file: 'backend/services/agent/src/files/generated.ts',
+          text: '/** A generated file as the stream announces it: a fresh link, never stored. */',
+        },
+      ],
+      refs: [
+        { symbol: 'backend/services/agent/src/files/generated.ts#saveGenerated' },
+        { symbol: 'frontend/src/components/chat/generated-files.tsx#GeneratedFiles' },
+        { flow: 'generate-file' },
+      ],
+    },
+    {
+      id: 'vision-fallback',
+      title: 'Three vision models in turn, each with low reasoning',
+      status: 'verified',
+      blocks: [
+        {
+          kind: 'fields',
+          fields: [
+            {
+              label: 'Decision',
+              text: 'Image questions go to gemini-3.5-flash, then gemini-3.8-flash, then gemini-flash-latest, each asked for low reasoning. The next one is tried only if one fails before its first token, as for every route.',
+            },
+            {
+              label: 'Why',
+              text: 'Google retired gemini-2.5-flash for new keys, and a single model can be retired or busy. Low reasoning keeps answers about a picture quick.',
+            },
+            {
+              label: 'Trade-off',
+              text: 'Answers can come from different Gemini models from one day to the next.',
+            },
+          ],
+        },
+        {
+          kind: 'quote',
+          file: 'backend/services/agent/src/llm/models.ts',
+          text: '/** Questions about an image. (Google retired gemini-2.5-flash for new keys.) */',
+        },
+      ],
+      refs: [
+        { symbol: 'backend/services/agent/src/llm/models.ts#MODEL_ROUTES' },
+        { symbol: 'backend/services/agent/src/agents/image-qa.ts#createImageQaAgent' },
+        { flow: 'image-question' },
+      ],
+    },
+    {
+      id: 'pdf-follow-ups',
+      title: 'Follow-up PDF questions go through the router, only when the chat has a ready PDF',
+      status: 'verified',
+      blocks: [
+        {
+          kind: 'fields',
+          fields: [
+            {
+              label: 'Decision',
+              text: "An attached PDF always picks the PDF question agent. Without one, the router model is offered PDF questions as a choice only when the chat already has a PDF that has been read, and then the agent searches all of the chat's ready PDFs.",
+            },
+            {
+              label: 'Why',
+              text: 'People ask several questions about one document; they should not have to attach it each time. A chat with no documents is never sent to an agent that has nothing to read.',
+            },
+            {
+              label: 'Trade-off',
+              text: 'In a chat with a PDF, a question that is not about it may still be sent to the PDF agent if the router thinks so; that agent then says the document does not cover it.',
+            },
+          ],
+        },
+        {
+          kind: 'quote',
+          file: 'backend/services/agent/src/routing.ts',
+          text: 'offered too once the chat has a readable PDF, so follow-ups need no re-upload.',
+        },
+      ],
+      refs: [
+        { symbol: 'backend/services/agent/src/routing.ts#routerPrompt' },
+        { symbol: 'backend/services/agent/src/files/documents.ts#readyDocuments' },
+        { flow: 'pdf-question' },
+      ],
+    },
+    {
+      id: 'attachments-before-charge',
+      title: 'Attachments are checked before anything is charged',
+      status: 'verified',
+      blocks: [
+        {
+          kind: 'fields',
+          fields: [
+            {
+              label: 'Decision',
+              text: "Every attached file must be the user's, from this chat and ready, and a PDF must have been read, before the message is routed, the credits are held or anything is saved. Otherwise the request gets a 404 or 409.",
+            },
+            {
+              label: 'Why',
+              text: "An agent never sees another user's file, and a message that cannot be answered costs nothing.",
+            },
+            {
+              label: 'Trade-off',
+              text: 'A question sent while its PDF is still being read is refused, not queued; the composer avoids it by waiting for the PDF.',
+            },
+          ],
+        },
+        {
+          kind: 'quote',
+          file: 'backend/services/agent/src/turns.ts',
+          text: 'a PDF must have finished being read. Anything else refuses the message before it is charged.',
+        },
+      ],
+      refs: [
+        { symbol: 'backend/services/agent/src/turns.ts#resolveAttachments' },
+        { flow: 'pdf-question' },
+        { flow: 'image-question' },
+      ],
+    },
+    {
+      id: 'e2e-behaviour',
+      title: 'End-to-end tests check behaviour, not wording',
+      status: 'verified',
+      blocks: [
+        {
+          kind: 'fields',
+          fields: [
+            {
+              label: 'Decision',
+              text: 'The Playwright tests look for what a person sees and can do: a new answer, a title instead of New chat, sources, a charge on the usage page, the sign-in page after signing out. They never check the text of an answer.',
+            },
+            {
+              label: 'Why',
+              text: 'CI runs in mock mode with canned answers, and the same tests also pass against live providers on a laptop, where the words change every time. Locally all 9 passed.',
+            },
+            {
+              label: 'Trade-off',
+              text: 'A wrong but well-formed answer would still pass; answer quality is not what these tests are for.',
+            },
+          ],
+        },
+        {
+          kind: 'quote',
+          file: 'e2e/playwright.config.ts',
+          text: 'In CI the app runs in mock mode, so answers are canned; the tests check behaviour, not wording,',
+        },
+      ],
+      refs: [
+        { file: 'e2e/tests/app.spec.ts' },
+        { file: 'e2e/tests/helpers.ts' },
+        { flow: 'e2e-run' },
+      ],
+    },
+    {
+      id: 'axe-gate',
+      title: 'Accessibility checks fail CI on serious or critical problems',
+      status: 'verified',
+      blocks: [
+        {
+          kind: 'fields',
+          fields: [
+            {
+              label: 'Decision',
+              text: 'axe runs on the sign-in, new chat, chat, billing and usage pages, on a desktop and a phone screen, with the WCAG 2.0 A and AA and 2.1 AA rules. A serious or critical problem fails the test; minor ones do not.',
+            },
+            {
+              label: 'Why',
+              text: 'Accessibility problems are treated like other bugs, and the first runs found two: a scroll anchor inside the message list, and a <main> that keyboard users could not scroll.',
+            },
+            {
+              label: 'Trade-off',
+              text: 'Minor problems and anything axe cannot detect still need a person to check.',
+            },
+          ],
+        },
+        {
+          kind: 'quote',
+          file: 'e2e/tests/a11y.spec.ts',
+          text: ".filter((violation) => violation.impact === 'serious' || violation.impact === 'critical')",
+        },
+      ],
+      refs: [
+        { file: 'e2e/tests/a11y.spec.ts' },
+        { symbol: 'frontend/src/app/(app)/layout.tsx#AppLayout' },
+        { flow: 'e2e-run' },
+      ],
+    },
+    {
+      id: 'forward-visitor-ip',
+      title: "Server renders pass on the visitor's address",
+      status: 'verified',
+      blocks: [
+        {
+          kind: 'fields',
+          fields: [
+            {
+              label: 'Decision',
+              text: "When a server component calls the gateway directly, it sends the visitor's x-forwarded-for, as the /api proxy already did.",
+            },
+            {
+              label: 'Why',
+              text: "Without it, every server render counted against the Next.js server's own address, so all visitors together shared one per-IP limit. The end-to-end run hit that limit and found it.",
+            },
+            {
+              label: 'Trade-off',
+              text: 'The gateway must trust exactly one proxy hop (TRUST_PROXY_HOPS) for the address to be the real one.',
+            },
+          ],
+        },
+        {
+          kind: 'quote',
+          file: 'frontend/src/server/gateway-fetch.ts',
+          text: "// The visitor's own address, as the /api proxy forwards it: without it every server render",
+        },
+      ],
+      refs: [
+        { symbol: 'frontend/src/server/gateway-fetch.ts#gatewayGet' },
+        { symbol: 'backend/gateway/src/guards.ts#ipRateLimit' },
+        { flow: 'e2e-run' },
+      ],
+    },
+    {
+      id: 'configurable-limits',
+      title: 'Gateway rate limits can be set, with strict defaults',
+      status: 'verified',
+      blocks: [
+        {
+          kind: 'fields',
+          fields: [
+            {
+              label: 'Decision',
+              text: 'RATE_LIMIT_PER_IP and RATE_LIMIT_PER_USER set the per-IP and per-user limits, by default 120 and 60 requests a minute. The e2e job raises the per-IP limit; the example settings leave both commented out.',
+            },
+            {
+              label: 'Why',
+              text: 'A test run, or many people behind one address, can need more from one IP; everyone else keeps the strict limits.',
+            },
+            {
+              label: 'Trade-off',
+              text: 'A raised limit in the wrong place would weaken the protection, so the settings say to raise them only for those cases.',
+            },
+          ],
+        },
+        {
+          kind: 'quote',
+          file: 'backend/gateway/src/env-schema.ts',
+          text: 'Requests a minute from one IP address and from one signed-in user. Raise them only where',
+        },
+      ],
+      refs: [
+        { symbol: 'backend/gateway/src/env-schema.ts#gatewayEnvSchema' },
+        { symbol: 'backend/gateway/src/guards.ts#userRateLimit' },
+      ],
+    },
   ],
 };

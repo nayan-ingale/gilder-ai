@@ -4,7 +4,7 @@ export const stackPage: DocPage = {
   id: 'stack',
   title: 'Tech stack',
   summary:
-    'What GilderAi is built with today, how the pieces connect, and the tools the roadmap adds next.',
+    'What GilderAi is built with today, how the pieces connect, and the packages each part uses.',
   sections: [
     {
       id: 'how-it-fits',
@@ -13,7 +13,7 @@ export const stackPage: DocPage = {
       blocks: [
         {
           kind: 'text',
-          text: "A request goes from the browser to the Next.js server, then to the gateway, then to one service, which reads and writes its data stores. Today that path carries sign-in, logout, the profile, chats (the list and search, renaming, pinning and deleting, and each chat's history), answers streamed back from the agent, the credits balance, buying credits, the usage page and file uploads, end to end.",
+          text: "A request goes from the browser to the Next.js server, then to the gateway, then to one service, which reads and writes its data stores. Today that path carries sign-in, logout, the profile, chats (the list and search, renaming, pinning and deleting, and each chat's history), answers streamed back from the agent, the credits balance, buying credits, the usage page, file uploads, questions about PDFs and images, and files the agents make, end to end.",
         },
         {
           kind: 'list',
@@ -22,8 +22,8 @@ export const stackPage: DocPage = {
             "Next.js server → gateway (port 8000): the Next.js server forwards every `/api/*` call to the gateway (`forwardToGateway`), so backend addresses and secrets never reach the browser. Server components also call the gateway directly with the browser's cookie (`gatewayGet`), for the signed-in user and for a chat page.",
             'Gateway → services: the gateway checks the rate limits, its route table, the Origin and the session, then calls the service with fetch and a short-lived signed token: auth (8001), chat (8002), the agent (8003) and billing (8004), for the routes in its table. An answer streams back through the gateway and the Next.js server as it is written.',
             'Service → service: auth calls billing for the sign-up grant, and the agent calls chat and billing during a turn, each with fetch and a token signed with its own key (`createInternalClient`).',
-            "Agent → outside services: the agent streams answers from Groq (and code from OpenRouter when its key is set) over their OpenAI-compatible APIs, and searches the web with Tavily, all with fetch and no SDK. It embeds the pieces of uploaded PDFs with Gemini's embedding API, also with fetch. By default (`LLM_MODE=mock`) a mock provider, canned search results and a stand-in embedder answer instead, so nothing needs a key.",
-            "Services → data stores: auth, chat, agent and billing connect to MongoDB at startup, and the gateway, auth and agent open a Redis client. Auth keeps its users in MongoDB and its sessions in Redis; chat keeps conversations and messages, and billing accounts, credit holds and the ledger, in MongoDB; the agent keeps a record of every model attempt in MongoDB, and a short memory of each chat, request locks, per-agent limits and stop signals in Redis. Billing also keeps payments and webhook events, and the agent its files and indexed documents, in MongoDB. The agent stores PDF pieces in Qdrant (over its REST API) when QDRANT_URL is set, and files in AWS S3 when its four S3 settings are set; S3 has been tested only against an in-memory bucket, and a live run needs a bucket the agent's key can use.",
+            "Agent → outside services: the agent streams answers from Groq (code from OpenRouter, and image answers from Gemini, when their keys are set) over their OpenAI-compatible APIs, searches the web with Tavily and draws images with Pollinations, all with fetch and no SDK. It embeds PDF pieces and questions with Gemini's embedding API, also with fetch. By default (`LLM_MODE=mock`) a mock provider, canned search results, a stand-in embedder and one-colour images answer instead, so nothing needs a key.",
+            "Services → data stores: auth, chat, agent and billing connect to MongoDB at startup, and the gateway, auth and agent open a Redis client. Auth keeps its users in MongoDB and its sessions in Redis; chat keeps conversations and messages, and billing accounts, credit holds and the ledger, in MongoDB; the agent keeps a record of every model attempt in MongoDB, and a short memory of each chat, request locks, per-agent limits and stop signals in Redis. Billing also keeps payments and webhook events, and the agent its files and indexed documents, in MongoDB. The agent stores PDF pieces in Qdrant (over its REST API) when QDRANT_URL is set, and uploads and the files it makes (PDFs drawn with pdfkit, decks with pptxgenjs, images) in AWS S3 when its four S3 settings are set; S3 has been tested only against an in-memory bucket, and a live run needs a bucket the agent's key can use.",
             "Billing → Razorpay: billing creates each order over Razorpay's REST API with fetch, no SDK, and checks every payment's HMAC signature. The browser pays in Razorpay's checkout window, and Razorpay's webhook comes back through the Next.js server and the gateway to billing.",
             'Every backend app is built from the shared library, `@gilder/shared`, so they all start, log and fail in the same way.',
           ],
@@ -45,8 +45,11 @@ export const stackPage: DocPage = {
         { component: 'qdrant' },
         { component: 's3' },
         { component: 'razorpay' },
+        { component: 'pollinations' },
         { flow: 'buy-credits' },
         { flow: 'upload-file' },
+        { flow: 'pdf-question' },
+        { flow: 'generate-file' },
       ],
     },
     {
@@ -78,7 +81,7 @@ export const stackPage: DocPage = {
       blocks: [
         {
           kind: 'text',
-          text: 'All apps live in one repository and one pnpm workspace (pnpm 11, set by `packageManager` in the root `package.json`). One `pnpm install` installs every app, and root scripts such as `pnpm dev` and `pnpm test` run the same script in each app that has it (`pnpm dev` leaves out the docs explorer). The backend apps depend on the shared library as `"@gilder/shared": "workspace:*"`, so they always use the copy in this repo.',
+          text: 'All apps live in one repository and one pnpm workspace (pnpm 11, set by `packageManager` in the root `package.json`). One `pnpm install` installs every app, and root scripts such as `pnpm dev` and `pnpm test` run the same script in each app that has it (`pnpm dev` leaves out the docs explorer). The e2e package holds the end-to-end tests, which run against an app that is already running. The backend apps depend on the shared library as `"@gilder/shared": "workspace:*"`, so they always use the copy in this repo.',
         },
         {
           kind: 'quote',
@@ -108,13 +111,21 @@ export const stackPage: DocPage = {
               'Routing, new-chat titles and search queries',
             ],
             ['chat', 'Groq openai/gpt-oss-120b, then openai/gpt-oss-20b', 'The chat agent'],
-            ['write', 'Groq openai/gpt-oss-120b, then openai/gpt-oss-20b', 'The search agent'],
+            [
+              'write',
+              'Groq openai/gpt-oss-120b, then openai/gpt-oss-20b',
+              'The search and PDF question agents, and the outlines of PDFs, decks and images',
+            ],
             [
               'code',
               'OpenRouter deepseek/deepseek-chat, then Groq openai/gpt-oss-120b',
               'The code agent',
             ],
-            ['vision', 'Gemini gemini-2.5-flash', 'No agent yet'],
+            [
+              'vision',
+              'Gemini gemini-3.5-flash, then gemini-3.8-flash, then gemini-flash-latest, each with low reasoning',
+              'The image question agent',
+            ],
           ],
         },
         {
@@ -124,6 +135,10 @@ export const stackPage: DocPage = {
         {
           kind: 'text',
           text: "PDF pieces are embedded apart from these routes, with Gemini's `gemini-embedding-001` over its own `batchEmbedContents` API (`createGeminiEmbedder`), in live mode with `GEMINI_API_KEY`. Mock mode uses a stand-in that hashes words into a vector (`mockEmbedder`). A live check with a local Qdrant ranked the right page first.",
+        },
+        {
+          kind: 'text',
+          text: "Google retired gemini-2.5-flash for new keys, so the vision route now lists three Gemini models in turn. A live check: Gemini answered 'Red' for a generated red PNG. Images are drawn by Pollinations, which needs no key; a live check returned a 1024×1024 JPEG in about 10 seconds.",
         },
         {
           kind: 'quote',
@@ -145,6 +160,7 @@ export const stackPage: DocPage = {
         { symbol: 'backend/services/agent/src/rag/embeddings.ts#createGeminiEmbedder' },
         { flow: 'run-turn' },
         { flow: 'index-pdf' },
+        { flow: 'image-question' },
       ],
     },
     {
@@ -272,6 +288,16 @@ export const packageNotes: PackageNote[] = [
     why: 'Reads uploaded PDFs in the agent: their page count when an upload completes (`countPdfPages`), and their text page by page for indexing (`extractPages`).',
   },
   {
+    name: 'pdfkit',
+    layer: 'backend',
+    why: 'Draws the PDF documents the PDF agent makes (`renderPdf`): an A4 page with the title, summary, headings, paragraphs and bullets of a checked outline.',
+  },
+  {
+    name: 'pptxgenjs',
+    layer: 'backend',
+    why: 'Draws the slide decks the slides agent makes (`renderSlides`): a 16:9 PowerPoint file with a title slide, then one slide per point with its notes.',
+  },
+  {
     name: 'pino-pretty',
     layer: 'backend',
     why: 'Turns log lines into colored, readable text when an app runs in development.',
@@ -332,6 +358,16 @@ export const packageNotes: PackageNote[] = [
     why: 'A browser-like DOM for the frontend component tests, which opt into it per file.',
   },
   {
+    name: '@playwright/test',
+    layer: 'quality',
+    why: 'Runs the end-to-end tests in the e2e package in a real browser, on a desktop and a phone (Pixel 7) screen, against the running app. CI runs them in mock mode in its e2e job; locally they use the installed Chrome.',
+  },
+  {
+    name: '@axe-core/playwright',
+    layer: 'quality',
+    why: 'Runs axe accessibility checks inside those tests on the main pages. Any serious or critical problem under the WCAG 2.0 A and AA and 2.1 AA rules fails the run.',
+  },
+  {
     name: 'supertest',
     layer: 'quality',
     why: 'Sends HTTP requests to an Express app in tests. It serves the app on a temporary local port, so no fixed port or running server is needed.',
@@ -378,27 +414,5 @@ export const packageNotes: PackageNote[] = [
   },
 ];
 
-export const plannedTools: PlannedTool[] = [
-  // AI
-  {
-    name: 'Gemini',
-    layer: 'ai',
-    why: "Google's gemini-2.5-flash, for questions about images. Its chat client is built (used when GEMINI_API_KEY is set), but no running agent sends it anything yet. Gemini's embedding model already indexes PDFs.",
-    plannedIn: 'PDF and image Q&A',
-  },
-  {
-    name: 'Pollinations',
-    layer: 'ai',
-    why: 'An image generation API for the image agent.',
-    plannedIn: 'File generation',
-  },
-
-  // Quality
-  {
-    name: 'Playwright',
-    package: '@playwright/test',
-    layer: 'quality',
-    why: 'End-to-end tests in a real browser, run in CI with mock AI providers.',
-    plannedIn: 'Launch',
-  },
-];
+/** Tools the roadmap adds next. Everything planned so far is built, so the list is empty. */
+export const plannedTools: PlannedTool[] = [];

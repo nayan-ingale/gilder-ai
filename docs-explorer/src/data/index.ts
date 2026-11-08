@@ -7,6 +7,7 @@ import { authRouteFlows } from './flows/auth-routes.ts';
 import { billingRouteFlows } from './flows/billing-routes.ts';
 import { chatErrorFlows, chatRouteFlows } from './flows/chat-routes.ts';
 import { errorFlows } from './flows/errors.ts';
+import { fileAnswerFlows } from './flows/file-answers.ts';
 import { fileFlows } from './flows/files.ts';
 import { httpFlows } from './flows/http.ts';
 import { lifecycleFlows } from './flows/lifecycle.ts';
@@ -26,6 +27,7 @@ export const flows: Flow[] = [
   ...agentTurnFlows,
   ...agentAnswerFlows,
   ...fileFlows,
+  ...fileAnswerFlows,
   ...errorFlows,
   ...chatErrorFlows,
   ...lifecycleFlows,

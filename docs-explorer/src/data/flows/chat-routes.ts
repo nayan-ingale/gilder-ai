@@ -96,9 +96,8 @@ function ipLimit(): FlowStep {
     kind: 'middleware',
     status: 'verified',
     symbol: 'backend/gateway/src/guards.ts#ipRateLimit',
-    highlight:
-      "return rateLimit(redis, { scope: 'ip', limit: GATEWAY_RATE_LIMITS.perIp }, (req) => req.ip);",
-    what: 'The first check in the /api router counts the request under rl:ip:<req.ip> in Redis. Up to 120 requests a minute from one address go on.',
+    highlight: "return rateLimit(redis, { scope: 'ip', limit }, (req) => req.ip);",
+    what: 'The first check in the /api router counts the request under rl:ip:<req.ip> in Redis. Up to 120 requests a minute from one address go on (RATE_LIMIT_PER_IP can change it).',
     why: 'It is the cheapest check and covers every request, signed in or not.',
     sideEffects: ['Increments rl:ip:<address> in Redis, with a 60-second expiry.'],
     next: [
@@ -198,8 +197,9 @@ function sessionAndLimits(then: string): FlowStep[] {
       kind: 'middleware',
       status: 'verified',
       symbol: 'backend/gateway/src/guards.ts#userRateLimit',
-      highlight: '(_req, res) => res.locals.userId,',
-      what: 'The session named a user, so the request is counted under rl:user:<user ID>. Up to 60 requests a minute from one user go on; over that is a 429 with Retry-After.',
+      highlight:
+        "return rateLimit(redis, { scope: 'user', limit }, (_req, res) => res.locals.userId);",
+      what: 'The session named a user, so the request is counted under rl:user:<user ID>. Up to 60 requests a minute from one user go on (RATE_LIMIT_PER_USER can change it); over that is a 429 with Retry-After.',
       why: 'One account cannot use more than its share, however many devices it uses.',
       sideEffects: ['Increments rl:user:<user ID> in Redis, with a 60-second expiry.'],
     },

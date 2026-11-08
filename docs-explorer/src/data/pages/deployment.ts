@@ -106,7 +106,7 @@ export const deploymentPage: DocPage = {
         },
         {
           kind: 'text',
-          text: "The gateway's own settings: `FRONTEND_ORIGIN` lists the frontend origins that may send requests that change something, one or several separated by commas, each just an origin such as `http://localhost:3000`. `AUTH_SERVICE_URL`, `CHAT_SERVICE_URL`, `AGENT_SERVICE_URL` and `BILLING_SERVICE_URL` say where each service listens; trailing slashes are dropped. `INTERNAL_PRIVATE_KEY` signs the internal tokens. `TRUST_PROXY_HOPS`, a whole number from 0 to 5 and 1 when not set, says how many proxies in front of the gateway to trust for the client's IP address, which the per-IP rate limit counts; its `.env.example` sets 1, for the Next.js server meant to sit in front of it, and more is needed behind a load balancer.",
+          text: "The gateway's own settings: `FRONTEND_ORIGIN` lists the frontend origins that may send requests that change something, one or several separated by commas, each just an origin such as `http://localhost:3000`. `AUTH_SERVICE_URL`, `CHAT_SERVICE_URL`, `AGENT_SERVICE_URL` and `BILLING_SERVICE_URL` say where each service listens; trailing slashes are dropped. `INTERNAL_PRIVATE_KEY` signs the internal tokens. `TRUST_PROXY_HOPS`, a whole number from 0 to 5 and 1 when not set, says how many proxies in front of the gateway to trust for the client's IP address, which the per-IP rate limit counts; its `.env.example` sets 1, for the Next.js server meant to sit in front of it, and more is needed behind a load balancer. `RATE_LIMIT_PER_IP` and `RATE_LIMIT_PER_USER` (whole numbers, by default 120 and 60) set the requests a minute allowed from one address and from one signed-in user; the example leaves them commented out, to be raised only for end-to-end test runs or many people behind one address.",
         },
         {
           kind: 'text',
@@ -188,7 +188,7 @@ export const deploymentPage: DocPage = {
       blocks: [
         {
           kind: 'text',
-          text: 'GitHub Actions runs one job on every push to `main` and on every pull request. A newer run for the same branch or pull request cancels the one still running, the job can only read the repo, and it stops after 15 minutes. It starts a Redis 7 service, then sets up pnpm (the version in `packageManager`) and Node (the version in `.nvmrc`), then runs these steps in order. The first one that fails stops the job.',
+          text: 'GitHub Actions runs two jobs on every push to `main` and on every pull request: quality, described here, and e2e, below. A newer run for the same branch or pull request cancels the one still running, and the jobs can only read the repo. The quality job stops after 15 minutes. It starts a Redis 7 service, then sets up pnpm (the version in `packageManager`) and Node (the version in `.nvmrc`), then runs these steps in order. The first one that fails stops the job.',
         },
         {
           kind: 'quote',
@@ -211,6 +211,34 @@ export const deploymentPage: DocPage = {
         { file: '.nvmrc' },
         { file: 'package.json' },
         { symbol: 'backend/shared/src/test-redis.ts#createTestRedis' },
+      ],
+    },
+    {
+      id: 'e2e',
+      title: 'End-to-end tests',
+      status: 'verified',
+      blocks: [
+        {
+          kind: 'text',
+          text: 'The e2e package runs Playwright against the whole app, on a desktop and a phone (Pixel 7) screen: behaviour tests (app.spec.ts) and axe accessibility checks (a11y.spec.ts). Each test signs in a fresh user with dev sign-in. In CI the e2e job starts the data stores, writes fresh settings in mock mode with dev sign-in on and RATE_LIMIT_PER_IP raised, builds and starts the frontend and the five backend apps, waits for each to answer, installs Chromium and runs the tests; a failed run keeps its report, traces and logs as the e2e-report artifact for 7 days. The job stops after 25 minutes.',
+        },
+        {
+          kind: 'text',
+          text: 'Locally, with the app running (`pnpm dev`, with `AUTH_DEV_LOGIN=true` for auth), `pnpm --filter @gilder/e2e e2e` runs them in the installed Chrome against http://localhost:3000, or `E2E_BASE_URL`. They check behaviour, not wording, so they pass against live providers too: all 9 passed. The agent in CI has no S3 settings, so the file agents are not part of this run.',
+        },
+        {
+          kind: 'quote',
+          file: '.github/workflows/ci.yml',
+          text: "          echo 'RATE_LIMIT_PER_IP=10000' >> backend/gateway/.env",
+          caption: 'Every test request comes from one machine, so its per-IP limit is raised',
+        },
+      ],
+      refs: [
+        { file: '.github/workflows/ci.yml' },
+        { file: 'e2e/playwright.config.ts' },
+        { file: 'e2e/tests/app.spec.ts' },
+        { file: 'e2e/tests/a11y.spec.ts' },
+        { flow: 'e2e-run' },
       ],
     },
     {

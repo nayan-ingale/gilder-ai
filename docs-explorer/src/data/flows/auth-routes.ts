@@ -41,9 +41,8 @@ function ipLimit(): FlowStep {
     kind: 'middleware',
     status: 'verified',
     symbol: 'backend/gateway/src/guards.ts#ipRateLimit',
-    highlight:
-      "return rateLimit(redis, { scope: 'ip', limit: GATEWAY_RATE_LIMITS.perIp }, (req) => req.ip);",
-    what: 'The first check in the /api router. rateLimit counts the request under rl:ip:<req.ip> with hitRateLimit: one MULTI increments the count, starts a 60-second window if none is running and reads the time left. Up to 120 requests a minute from one address go on.',
+    highlight: "return rateLimit(redis, { scope: 'ip', limit }, (req) => req.ip);",
+    what: 'The first check in the /api router. rateLimit counts the request under rl:ip:<req.ip> with hitRateLimit: one MULTI increments the count, starts a 60-second window if none is running and reads the time left. Up to 120 requests a minute from one address go on (RATE_LIMIT_PER_IP can change it).',
     why: 'It is the cheapest check and covers every request, signed in or not, including paths the gateway does not forward.',
     sideEffects: ['Increments rl:ip:<address> in Redis, with a 60-second expiry.'],
     next: [
@@ -131,8 +130,9 @@ function userLimit(): FlowStep {
     kind: 'middleware',
     status: 'verified',
     symbol: 'backend/gateway/src/guards.ts#userRateLimit',
-    highlight: '(_req, res) => res.locals.userId,',
-    what: 'The session named a user, so rateLimit counts the request under rl:user:<user ID>. Up to 60 requests a minute from one user, across all their devices, go on; over that is a 429 with Retry-After, the same as for the per-IP limit.',
+    highlight:
+      "return rateLimit(redis, { scope: 'user', limit }, (_req, res) => res.locals.userId);",
+    what: 'The session named a user, so rateLimit counts the request under rl:user:<user ID>. Up to 60 requests a minute from one user, across all their devices, go on (RATE_LIMIT_PER_USER can change it); over that is a 429 with Retry-After, the same as for the per-IP limit.',
     why: 'One account cannot use more than its share, however many devices or addresses it uses.',
     sideEffects: ['Increments rl:user:<user ID> in Redis, with a 60-second expiry.'],
   };

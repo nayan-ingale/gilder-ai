@@ -73,6 +73,11 @@ const AGENT_INDEXER_TEST = 'backend/services/agent/src/rag/indexer.test.ts';
 const AGENT_CLEANUP_TEST = 'backend/services/agent/src/rag/cleanup.test.ts';
 const FRONTEND_BILLING_TEST = 'frontend/src/components/billing/billing.test.tsx';
 const FRONTEND_DAILY_CHART_TEST = 'frontend/src/components/billing/daily-chart.test.ts';
+const AGENT_QA_TEST = 'backend/services/agent/src/agents/qa.test.ts';
+const AGENT_GENERATE_TEST = 'backend/services/agent/src/agents/generate.test.ts';
+const AGENT_RENDER_TEST = 'backend/services/agent/src/generate/render.test.ts';
+const FRONTEND_UPLOADS_TEST = 'frontend/src/lib/uploads.test.ts';
+const FRONTEND_CHAT_THREAD_TEST = 'frontend/src/components/chat/chat-thread.test.tsx';
 
 export const notes: SymbolNote[] = [
   // -------------------------------------------------------------------------------------------
@@ -1107,7 +1112,7 @@ export const notes: SymbolNote[] = [
       "It builds an /api router with, in this order: ipRateLimit; a matcher that looks the method and path up with matchRoute and stores the result in `res.locals.route`, or calls `next('router')` to leave the router when nothing matches; originCheck; sessionLookup; userRateLimit; requireSession, only when the matched route needs a session; express.raw, which reads any body as raw bytes up to 1 MB (MAX_BODY); and proxyToService.",
       "It calls createService with the name 'gateway', the logger, the readiness checks and `parseJson: false`, so no body is parsed as JSON. Its routes set Express's `trust proxy` to trustProxyHops, so `req.ip` is the client's address read from X-Forwarded-For across that many proxies, then mount the router.",
       'A request that leaves the router reaches the shared 404 handler and never reaches a service. /healthz and /readyz are answered before the router, so they are not rate-limited.',
-      'At startup, index.ts passes one readiness check (redis), the Redis client, the imported INTERNAL_PRIVATE_KEY, the four service URLs, FRONTEND_ORIGIN as allowedOrigins and TRUST_PROXY_HOPS.',
+      'At startup, index.ts passes one readiness check (redis), the Redis client, the imported INTERNAL_PRIVATE_KEY, the four service URLs, FRONTEND_ORIGIN as allowedOrigins, TRUST_PROXY_HOPS, and the two rate limits as rateLimits, which go to ipRateLimit and userRateLimit.',
     ],
     why: "Every check every request needs lives in one place, cheapest first, and the route table decides what may reach a service at all, so a service's internal routes cannot be called from outside. Building the app apart from starting it lets tests pass a test Redis, a key pair made for the test and a stand-in service, or the real auth, chat and billing apps (journey.test.ts). The optional `headersTimeoutMs` can shorten the proxy's 10-second wait for a service; index.ts does not set it.",
     returns:
@@ -1147,6 +1152,7 @@ export const notes: SymbolNote[] = [
       'AUTH_SERVICE_URL, CHAT_SERVICE_URL, AGENT_SERVICE_URL and BILLING_SERVICE_URL must be http(s) URLs (the shared serviceUrlSchema); trailing slashes are stripped.',
       'INTERNAL_PRIVATE_KEY, which signs the internal tokens, is required and must parse as an Ed25519 private key (the shared internalPrivateKeySchema). Its messages say to run `pnpm setup:keys` and never repeat the value.',
       "TRUST_PROXY_HOPS is a whole number from 0 to 5 (default 1): how many proxies in front of the gateway to trust for the client's IP address.",
+      'RATE_LIMIT_PER_IP and RATE_LIMIT_PER_USER are whole numbers from 1 to 100,000, by default the shared GATEWAY_RATE_LIMITS (120 and 60): requests a minute from one IP address and from one signed-in user.',
     ],
     why: 'A wrong origin list, service URL or key would break every request, so the gateway refuses to start instead. The schema lives apart from env.ts, which loads it at startup, so tests can check the rules without a real environment.',
     returns: 'A Zod object schema.',
@@ -1280,8 +1286,9 @@ export const notes: SymbolNote[] = [
   {
     symbol: 'backend/gateway/src/guards.ts#ipRateLimit',
     status: 'verified',
-    summary: 'At most 120 requests a minute from one IP address, signed in or not.',
-    why: "It is rateLimit with the scope 'ip', GATEWAY_RATE_LIMITS.perIp and `req.ip` as the key, which `trust proxy` reads from X-Forwarded-For. It runs first in the /api router, so it counts every request that reaches it, including unknown paths, and a client over the limit gets 429 with Retry-After before anything else is done.",
+    summary:
+      'At most 120 requests a minute from one IP address, signed in or not, unless RATE_LIMIT_PER_IP says otherwise.',
+    why: "It is rateLimit with the scope 'ip', the given limit (GATEWAY_RATE_LIMITS.perIp by default) and `req.ip` as the key, which `trust proxy` reads from X-Forwarded-For. It runs first in the /api router, so it counts every request that reaches it, including unknown paths, and a client over the limit gets 429 with Retry-After before anything else is done.",
     returns: 'An async Express middleware function.',
     sideEffects: ['Counts the request in Redis under rl:ip:<address>.'],
     tests: [GATEWAY_GUARDS_TEST],
@@ -1289,8 +1296,9 @@ export const notes: SymbolNote[] = [
   {
     symbol: 'backend/gateway/src/guards.ts#userRateLimit',
     status: 'verified',
-    summary: 'At most 60 requests a minute from one signed-in user, from any number of devices.',
-    why: "It is rateLimit with the scope 'user', GATEWAY_RATE_LIMITS.perUser and `res.locals.userId` as the key. It runs after sessionLookup, so a request with no session is not counted here and only the per-IP limit applies to it.",
+    summary:
+      'At most 60 requests a minute from one signed-in user, from any number of devices, unless RATE_LIMIT_PER_USER says otherwise.',
+    why: "It is rateLimit with the scope 'user', the given limit (GATEWAY_RATE_LIMITS.perUser by default) and `res.locals.userId` as the key. It runs after sessionLookup, so a request with no session is not counted here and only the per-IP limit applies to it.",
     returns: 'An async Express middleware function.',
     sideEffects: ['Counts the request in Redis under rl:user:<user ID>, when there is a user.'],
     tests: [GATEWAY_GUARDS_TEST],
@@ -1716,13 +1724,13 @@ export const notes: SymbolNote[] = [
     status: 'verified',
     summary: 'Turns a message document into what the API shows of a message.',
     how: [
-      'It returns id, role, content, agent, status, clientMessageId, attachments, artifacts, sources, citations and createdAt.',
+      'It returns id, role, content, agent, status, clientMessageId, attachments, fileRefs, artifacts, sources, citations and createdAt.',
       'An agent or clientMessageId that is not set becomes null, so the shape is always the same.',
-      'userId, conversationId, supersededBy and fileRefs stay inside the service.',
+      'userId, conversationId and supersededBy stay inside the service.',
     ],
     why: "As with toChat, what leaves the service is chosen in one place. The frontend's ChatMessage type has the same shape.",
     returns:
-      '{ id, role, content, agent, status, clientMessageId, attachments, artifacts, sources, citations, createdAt }',
+      '{ id, role, content, agent, status, clientMessageId, attachments, fileRefs, artifacts, sources, citations, createdAt }',
     tests: [CHAT_MODELS_TEST, CHAT_ROUTES_TEST],
   },
   {
@@ -1788,7 +1796,7 @@ export const notes: SymbolNote[] = [
       'GET /internal/chats/:id/last-turn returns the latest user message that is not superseded and the latest answer after it, whatever their status (either may be null): what regenerate and edit act on.',
       'POST /internal/messages saves a message, with up to 400,000 characters of text. If the chat already has a message with the same clientMessageId, it answers 200 with that message and created: false. If two copies race past that check, the unique index keeps one and the other answers with it.',
       "A new message answers 201 with created: true. It hides the messages listed in supersedes (valid IDs in the same chat only) and moves the chat's lastMessageAt to it.",
-      "PATCH /internal/messages/:id fills in content, status, agent, attachments, artifacts, sources or citations; at least one, and nothing else. Once the status is no longer 'streaming', the chat's lastMessageAt moves to now.",
+      "PATCH /internal/messages/:id fills in content, status, agent, attachments, fileRefs, artifacts, sources or citations; at least one, and nothing else. Once the status is no longer 'streaming', the chat's lastMessageAt moves to now.",
       "POST /internal/chats/deleted takes up to 200 IDs and answers { deleted } with those that are not the user's live chats: deleted, missing, someone else's, or not an ID at all. The agent's file clean-up uses it.",
     ],
     why: "These are the calls the agent makes while it answers (its chatService): check the chat, read its memory, save the user's message and the answer, fill the answer in, and name the chat; and, every ten minutes, find the chats whose files can go. The gateway's route table has no /internal entries, so they cannot be reached from outside (journey.test.ts, SEC-01), and requireCaller keeps the gateway's own token off them too.",
@@ -2244,7 +2252,7 @@ export const notes: SymbolNote[] = [
     how: [
       "It calls createService with the name 'agent', the given logger and readiness checks, and `internalAuth: { publicKey: internalPublicKey, audience: 'agent' }`: only the gateway's tokens are trusted.",
       'When `turns` is given, its routes add turnRouter (send, regenerate, edit and stop) with those dependencies and the logger, and when `files` is given, fileRouter (uploads, details and download links); without either the app has no routes.',
-      "At startup, index.ts builds the model layer (createLlm over buildProviders, with llmCallRecorder as its telemetry hook), chat and billing clients that sign with the agent's SERVICE_PRIVATE_KEY, the stop signals (createStopSignals) and the agents (buildAgents, with Tavily search, mock search in mock mode, or none), logs 'agents ready' with their names, and passes them with two readiness checks (mongo and redis), the imported INTERNAL_PUBLIC_KEY, the Redis memory and the Redis client. It also picks the file store (createS3FileStore when all four S3 settings are set; otherwise it logs 'uploads are off: ...'), the embedder (Gemini in live mode with GEMINI_API_KEY, mockEmbedder otherwise) and the vector store (Qdrant when QDRANT_URL is set, in memory otherwise), starts the file clean-up (startFileCleanup), and gives fileRouter the file store, the chat client and an onPdfReady that indexes a ready PDF (indexPdf) without waiting. On shutdown it stops the file clean-up, then closes the stop signals.",
+      "At startup, index.ts builds the model layer (createLlm over buildProviders, with llmCallRecorder as its telemetry hook), chat and billing clients that sign with the agent's SERVICE_PRIVATE_KEY, the stop signals (createStopSignals) and the agents (buildAgents, with Tavily search, mock search in mock mode, or none, and, when it has storage, the PDF question, image question and file-making tools), logs 'agents ready' with their names, and passes them with two readiness checks (mongo and redis), the imported INTERNAL_PUBLIC_KEY, the Redis memory and the Redis client. It also picks the file store (createS3FileStore when all four S3 settings are set; otherwise it logs 'uploads are off: ...'), the embedder (Gemini in live mode with GEMINI_API_KEY, mockEmbedder otherwise) and the vector store (Qdrant when QDRANT_URL is set, in memory otherwise), starts the file clean-up (startFileCleanup), and gives fileRouter the file store, the chat client and an onPdfReady that indexes a ready PDF (indexPdf) without waiting. On shutdown it stops the file clean-up, then closes the stop signals.",
     ],
     why: 'Building the app apart from starting it lets tests pass a scripted mock model, a test Redis and the real chat and billing apps (turns.test.ts). Its app.test.ts checks the SEC-02 token cases. The gateway forwards POST /api/chats/:id/messages, the regenerate and edit routes, POST /api/turns/:turnId/stop and the four /api/files routes here.',
     returns:
@@ -2290,8 +2298,8 @@ export const notes: SymbolNote[] = [
       'The answer routes: send a message, regenerate or edit the latest turn, and stop an answer.',
     how: [
       'Every route needs a user in the token (requireUser) and checks its params and a strict body with validate.',
-      "POST /chats/:chatId/turns takes { content, clientMessageId, agent? }, refuses a shortcut with nothing after it (400), loads the chat through chat (someone else's is a 404), and runs runTurn with a plan that routes the message and loads the memory cache.",
-      "POST /chats/:chatId/messages/:messageId/regenerate takes { clientMessageId }. It asks chat for the last turn: only the latest answer, and not while it is still being written, can be regenerated (409 otherwise). The plan keeps the old answer's agent, builds the memory without the old turn and makes the new answer supersede the old.",
+      "POST /chats/:chatId/turns takes { content, clientMessageId, agent?, attachments? } (up to 4 file IDs), refuses a shortcut with nothing after it (400), loads the chat through chat (someone else's is a 404), and runs runTurn with a plan that routes the message and loads the memory cache.",
+      "POST /chats/:chatId/messages/:messageId/regenerate takes { clientMessageId }. It asks chat for the last turn: only the latest answer, and not while it is still being written, can be regenerated (409 otherwise). The plan keeps the old answer's agent and the user message's attachments, builds the memory without the old turn and makes the new answer supersede the old.",
       "POST /chats/:chatId/messages/:messageId/edit takes the same body as a new message. Only the user's latest message can be edited (409 otherwise); the plan routes the new text and makes it supersede the old message and its answer.",
       "POST /turns/:turnId/stop asks the stop signals to stop that turn for this user: 202 { stopping: true }, or 404 'No answer is being written for this turn'.",
     ],
@@ -2311,10 +2319,11 @@ export const notes: SymbolNote[] = [
     how: [
       "A Redis lock (turn-lock:<chat>:<client ID>, 15 minutes, set only if absent) refuses a second copy of the same request with 409 'This message is already being answered'.",
       "Below the price of a chat answer, it refuses with 402 'You are out of credits' before any AI call, the router's included (SEC-03).",
-      "It loads the plan's memory before saving anything, so the question is not in it twice, then routes the message, or keeps a fixed agent for a regenerate (chat if that agent no longer runs).",
+      "It checks the attached files (resolveAttachments): 404 or 409 when one is not the user's, not from this chat, not ready, or a PDF still being read. It notes whether the chat has any ready PDF.",
+      "It loads the plan's memory before saving anything, so the question is not in it twice, then routes the message with the kinds of files attached and whether the chat has a ready PDF, or keeps a fixed agent for a regenerate (chat if that agent no longer runs).",
       "It applies the agent's per-minute limit (hitRateLimit with AGENT_RATE_LIMITS under rl:agent-<agent>): over it, 429 with Retry-After, before anything is charged.",
       "It holds the credits with the plan's reserve key: 402 when too few for that agent, 409 'This message was already answered' when the key's hold is no longer held.",
-      "It saves the user's message (unless the plan answers an existing one) and an empty 'streaming' answer, each with the messages they supersede; if saving fails, the hold is released.",
+      "It saves the user's message with its attachments (unless the plan answers an existing one) and an empty 'streaming' answer, each with the messages they supersede; if saving fails, the hold is released.",
       'Then streamAnswer streams and settles. The lock is always removed at the end.',
     ],
     why: 'Everything that can refuse the request happens before the stream starts, so refusals are ordinary problem+json errors and cost nothing.',
@@ -2347,8 +2356,8 @@ export const notes: SymbolNote[] = [
     how: [
       'It opens the event stream, registers the answer with the stop signals under its answer ID, and aborts the answer if the client goes away before the end.',
       "It sends meta (the turn and message IDs) and agent (the agent and why it was chosen), and starts titling a new chat (title 'New chat') at the same time.",
-      'It runs the agent with the answer ID for telemetry, and sends each piece of text as a token event, sources as a sources event and files as an artifact event.',
-      'Once the answer is done: it fills in the answer as complete with its sources and files, commits the credits with the model, tokens, latency, chat and message, sends usage (credits charged and the new balance), appends the turn to the memory cache (or drops the cache when regenerate or edit changed the history), sends the title if one was made, and sends done.',
+      'It runs the agent with the user, the chat, the attachments and the answer ID, and sends each piece of text as a token event, sources as a sources event, code files as an artifact event, PDF passages as a citations event, each part of making a file as a progress event, and each file made as a file event.',
+      'Once the answer is done: it fills in the answer as complete with its sources, code files, citations and the IDs of the files it made (fileRefs), commits the credits with the model, tokens, latency, chat and message, sends usage (credits charged and the new balance), appends the turn to the memory cache (or drops the cache when regenerate or edit changed the history), sends the title if one was made, and sends done.',
       'It always unregisters the answer from the stop signals.',
       'Anything that goes wrong, a stop included, goes to settleUnfinished.',
     ],
@@ -2462,11 +2471,11 @@ export const notes: SymbolNote[] = [
     summary: 'Picks the agent for a message.',
     how: [
       'An agent the user chose (a chip or a shortcut) wins; then an attached PDF or image picks the Q&A agent.',
-      'Otherwise the router model is asked for JSON { agent, confidence } through completeJson, with the message inside <message> tags (at most 4,000 characters) and a prompt that says never to follow instructions in it.',
+      'Otherwise the router model is asked for JSON { agent, confidence } through completeJson, with the message inside <message> tags (at most 4,000 characters) and a prompt that says never to follow instructions in it (routerPrompt). pdf_qa is offered only when the chat has a ready PDF, and a pdf_qa reply without one becomes chat.',
       'A confidence below 0.6, an invalid reply or a failed call goes to chat; a stop is passed on.',
       'An agent this server does not run also becomes chat.',
     ],
-    why: 'Chat is the cheapest agent, so a routing problem never costs the user more. Chat and code always run; search runs only with web search (a Tavily key, or mock mode). Regenerate skips routing and keeps the old agent.',
+    why: 'Chat is the cheapest agent, so a routing problem never costs the user more. Chat and code always run; search runs only with web search (a Tavily key, or mock mode), and the file agents only with storage. Regenerate skips routing and keeps the old agent.',
     returns: '{ agent, reason }: the reason is chosen, attachment, router or default.',
     tests: [AGENT_ROUTING_TEST, AGENT_TURNS_TEST],
   },
@@ -2514,10 +2523,16 @@ export const notes: SymbolNote[] = [
   {
     symbol: 'backend/services/agent/src/agents/index.ts#buildAgents',
     status: 'verified',
-    summary: 'The agents this server runs: chat, code, and search when there is web search.',
-    why: 'index.ts passes Tavily search in live mode with TAVILY_API_KEY, canned search in mock mode, or none; without it there is no search agent and routing sends search questions to chat. The turn route looks the routed agent up here and falls back to chat.',
-    returns: '{ chat, code, search? }',
-    tests: [AGENT_TURNS_TEST],
+    summary:
+      'The agents this server runs: chat and code always, and the others when their tools are there.',
+    how: [
+      'search needs web search: Tavily in live mode with TAVILY_API_KEY, canned search in mock mode.',
+      'pdf_qa needs the document search tools (the embedder, the vector store and readyDocuments), and pdf, slides and image need the generate tools (storage, a way to draw images and the mode). index.ts passes both only when the agent has storage.',
+      'image_qa needs a way to read images, which index.ts passes with storage, in mock mode or with GEMINI_API_KEY.',
+    ],
+    why: 'An agent without what it needs is simply not there, and routing sends its questions to chat. The turn route looks the routed agent up here and falls back to chat.',
+    returns: '{ chat, code, search?, pdf_qa?, image_qa?, pdf?, slides?, image? }',
+    tests: [AGENT_TURNS_TEST, AGENT_GENERATE_TEST],
   },
   {
     symbol: 'backend/services/agent/src/agents/index.ts#availableAgents',
@@ -2701,9 +2716,9 @@ export const notes: SymbolNote[] = [
       'router and title: Groq openai/gpt-oss-20b, low reasoning.',
       'chat and write: Groq openai/gpt-oss-120b, then openai/gpt-oss-20b.',
       'code: OpenRouter deepseek/deepseek-chat, then Groq openai/gpt-oss-120b.',
-      'vision: Gemini gemini-2.5-flash.',
+      'vision: Gemini gemini-3.5-flash, then gemini-3.8-flash, then gemini-flash-latest, each with low reasoning (Google retired gemini-2.5-flash for new keys).',
     ],
-    why: "Models are changed in this one place. The chat agent uses chat, the router router, titles and the search agent's query rewrite title, the search agent write, and the code agent code (OpenRouter first when its key is set). vision is ready for the image agent, which is not built yet.",
+    why: "Models are changed in this one place. The chat agent uses chat, the router router, titles and the search agent's query rewrite title, the search and PDF question agents and the outlines of files write, the code agent code (OpenRouter first when its key is set), and the image question agent vision.",
     returns: 'A read-only map from purpose to a list of { provider, model, reasoningEffort? }.',
     tests: [AGENT_LLM_TEST],
   },
@@ -2834,7 +2849,8 @@ export const notes: SymbolNote[] = [
   {
     symbol: 'backend/services/agent/src/files/file-checks.ts#storageKey',
     status: 'verified',
-    summary: 'The storage key of a file, built from IDs only: users/<user ID>/<kind>s/<file ID>.',
+    summary:
+      'The storage key of a file, built from IDs only: users/<user ID>/uploads/<file ID>, or users/<user ID>/generated/<file ID>.',
     why: "A file name can never choose or change where a file is stored, so a name like ../../other-user cannot reach another user's files (SEC-07).",
     returns: "A key such as 'users/<user ID>/uploads/<file ID>'.",
     tests: [AGENT_FILE_CHECKS_TEST, AGENT_FILE_ROUTES_TEST],
@@ -2869,7 +2885,7 @@ export const notes: SymbolNote[] = [
     status: 'verified',
     summary: "The agent's files, in gilder_agent.",
     how: [
-      'Each file has its owner and chat, a kind (upload, the only kind written today, or generated), a purpose (pdf, image or slides), a display name, its storage key, type and size, a status (pending, ready or failed) and, for a PDF, its page count.',
+      'Each file has its owner and chat, a kind (upload, or generated for the files agents make), a purpose (pdf, image or slides), a display name, its storage key, type and size, a status (pending, ready or failed) and, for a PDF, its page count.',
       "An index on userId, chatId and createdAt serves a chat's files.",
     ],
     why: 'Files are reached only by their ID and their owner, and links are signed on request, never stored.',
@@ -3066,6 +3082,303 @@ export const notes: SymbolNote[] = [
   },
 
   // -------------------------------------------------------------------------------------------
+  // backend/services/agent: questions about files, and making files
+
+  {
+    symbol: 'backend/services/agent/src/llm/types.ts#LlmContentPart',
+    status: 'verified',
+    summary: 'A piece of a message: text, or an image as a data URL.',
+    why: 'A message is plain text, or a list of these parts when a model that can see gets an image. The parts follow the OpenAI chat format, so the same provider client sends them to Gemini unchanged.',
+    tests: [AGENT_QA_TEST],
+  },
+  {
+    symbol: 'backend/services/agent/src/llm/types.ts#textOf',
+    status: 'verified',
+    summary: 'The text of a message, with any images left out.',
+    how: [
+      'Plain text comes back as it is; for a list of parts, the text parts are joined with line breaks.',
+    ],
+    why: 'Code that only reads text, such as the mock provider, token estimates and the search query rewrite, works the same whether a message has an image or not.',
+    returns: 'A string.',
+    tests: [AGENT_MOCK_TEST, AGENT_QA_TEST],
+  },
+  {
+    symbol: 'backend/services/agent/src/agents/types.ts#Attachment',
+    status: 'verified',
+    summary:
+      'A file sent with a message, already checked: the file ID, pdf or image, its name and type.',
+    why: "Agents only ever get attachments that resolveAttachments checked: the user's own, from this chat and ready.",
+    tests: [AGENT_TURNS_TEST],
+  },
+  {
+    symbol: 'backend/services/agent/src/agents/types.ts#Citation',
+    status: 'verified',
+    summary:
+      'A PDF passage an answer is based on: the document ID, the file name, the page and a short quote.',
+    why: 'The citations event and the saved answer carry these, so the browser can list the pages under the answer.',
+    tests: [AGENT_QA_TEST, AGENT_TURNS_TEST],
+  },
+  {
+    symbol: 'backend/services/agent/src/agents/pdf-qa.ts#PDF_QA_SYSTEM_PROMPT',
+    status: 'verified',
+    summary: 'The rules for answering from PDF passages.',
+    how: [
+      'Answer only from the passages, cite the page of each fact as [p. N] right after it, and say when the document does not cover the question instead of guessing.',
+      'The passages are untrusted text inside <passages> tags, whose instructions must never be followed.',
+    ],
+    why: 'Answers stay tied to what the document says, and a PDF that contains instructions cannot steer the model.',
+    returns: 'A string.',
+    tests: [AGENT_QA_TEST],
+  },
+  {
+    symbol: 'backend/services/agent/src/agents/pdf-qa.ts#createPdfQaAgent',
+    status: 'verified',
+    summary: "The PDF question agent: answers from the chat's PDFs and cites their pages.",
+    how: [
+      "It gets the user's ready documents for the question (documentsFor, which is readyDocuments). None is a 409 'There is no readable PDF in this chat yet'.",
+      'It embeds the question with the query task and asks the vector store for the 5 closest pieces, filtered by the owner and those document IDs.',
+      'It yields a citations event: each piece with its document ID, file name, page and first 240 characters.',
+      "It streams the answer on the write route: the system prompt, the chat's recent messages, then the passages inside <passages> tags, each labelled with its file and page, and the question.",
+    ],
+    why: "Only the user's own documents are ever searched, and the model sees the passages as data. The tests check the cited pages, the fencing and that another user's documents are never found.",
+    returns: 'An AgentRunner named pdf_qa.',
+    tests: [AGENT_QA_TEST, AGENT_TURNS_TEST],
+  },
+  {
+    symbol: 'backend/services/agent/src/files/documents.ts#readyDocuments',
+    status: 'verified',
+    summary: 'The PDFs a question is about: the attached ones, or every ready PDF of the chat.',
+    how: [
+      "It reads the user's documents in this chat that are ready: only those of the attached PDFs when there are any, otherwise all of them.",
+      "It names each one after its file, or 'Document' when the file is gone.",
+    ],
+    why: 'A follow-up question needs no new upload, and a question never reaches another chat or another user.',
+    returns: 'A list of { id, name }; empty without a user or chat.',
+    tests: [AGENT_TURNS_TEST],
+  },
+  {
+    symbol: 'backend/services/agent/src/agents/image-qa.ts#IMAGE_QA_SYSTEM_PROMPT',
+    status: 'verified',
+    summary: 'The rules for answering about an image.',
+    why: 'The model describes only what it can see, says when something is unclear, and treats any text inside the image as data, never as instructions.',
+    returns: 'A string.',
+    tests: [AGENT_QA_TEST],
+  },
+  {
+    symbol: 'backend/services/agent/src/agents/image-qa.ts#createImageQaAgent',
+    status: 'verified',
+    summary: 'The image question agent: shows the attached image to a model that can see.',
+    how: [
+      "It takes the latest attached image; with none it throws 400 'Attach an image to ask about it'.",
+      'It reads the bytes (readImage) and streams on the vision route, with the question and the image as a data URL in one user message.',
+    ],
+    why: "The image goes to the model directly, so no link to the user's file leaves the server. In live mode the vision route is Gemini; a live check answered 'Red' for a generated red PNG.",
+    returns: 'An AgentRunner named image_qa.',
+    tests: [AGENT_QA_TEST],
+  },
+  {
+    symbol: 'backend/services/agent/src/agents/generate.ts#outline',
+    status: 'verified',
+    summary:
+      'Asks the model for a checked outline, and reports the model and tokens for the charge.',
+    how: [
+      "It calls completeJson on the write route with the agent's prompt, the chat's recent messages and the request, up to 4,000 tokens, and the outline's schema (one repair allowed).",
+      'It yields a model event and a usage event, then returns the checked value.',
+    ],
+    why: 'The model only ever supplies text in a known shape, and the usage events make the charge and the telemetry record the real tokens.',
+    returns: 'The checked outline.',
+    tests: [AGENT_GENERATE_TEST],
+  },
+  {
+    symbol: 'backend/services/agent/src/agents/generate.ts#createPdfAgent',
+    status: 'verified',
+    summary: "The PDF agent: writes an outline, draws an A4 PDF and saves it as the user's file.",
+    how: [
+      "Progress 1 of 3, 'Writing the document': in live mode the model writes a document outline; in mock mode cannedDocument is used.",
+      "It streams 'Here is your PDF, <title>.' as the answer's text.",
+      "Progress 2 of 3, 'Laying out the pages': renderPdf draws it. Progress 3 of 3, 'Saving the file': saveGenerated stores it under a name made from the title.",
+      'It yields the file with its fresh link.',
+    ],
+    why: 'Each part shows in the browser, and the file is saved the same way in live and mock mode. A live check: Groq wrote the outline and the PDF was drawn in about 1.5 seconds.',
+    returns: 'An AgentRunner named pdf.',
+    sideEffects: ['Writes the file to storage and a file record to MongoDB.'],
+    tests: [AGENT_GENERATE_TEST, AGENT_TURNS_TEST],
+  },
+  {
+    symbol: 'backend/services/agent/src/agents/generate.ts#createSlidesAgent',
+    status: 'verified',
+    summary: 'The slides agent: writes a deck outline, draws a PowerPoint file and saves it.',
+    how: [
+      "The same three parts as the PDF agent ('Writing the slides', 'Designing the deck', 'Saving the file'), with a deck outline (cannedDeck in mock mode) and renderSlides.",
+      'The answer says how many slides the deck has, the title slide included.',
+    ],
+    why: 'A deck the user can open and edit, made from checked text.',
+    returns: 'An AgentRunner named slides.',
+    sideEffects: ['Writes the file to storage and a file record to MongoDB.'],
+    tests: [AGENT_GENERATE_TEST],
+  },
+  {
+    symbol: 'backend/services/agent/src/agents/generate.ts#createImageAgent',
+    status: 'verified',
+    summary: 'The image agent: writes an image prompt, draws the image and saves it.',
+    how: [
+      "Progress 1 of 3, 'Writing the prompt': in live mode the model writes { prompt, title }, told never to add text, logos or real people the user did not ask for; in mock mode cannedImagePrompt uses the request.",
+      "Progress 2 of 3, 'Drawing the image': drawImage (Pollinations in live mode, a one-colour PNG in mock mode). Progress 3 of 3, 'Saving the image'.",
+      'It yields the file with its fresh link, named .jpg or .png to match.',
+    ],
+    why: 'The prompt is written for the image service from the conversation, and the rest of the flow is the same as for documents.',
+    returns: 'An AgentRunner named image.',
+    sideEffects: [
+      'Calls the image service; writes the file to storage and a file record to MongoDB.',
+    ],
+    tests: [AGENT_GENERATE_TEST],
+  },
+  {
+    symbol: 'backend/services/agent/src/agents/generate.ts#cannedDocument',
+    status: 'verified',
+    summary:
+      'The document outline used in mock mode: a short title from the request and two sections.',
+    why: 'Files can be made, saved and downloaded with no AI keys, in development and tests. cannedDeck and cannedImagePrompt do the same for decks and images.',
+    returns: 'A DocumentOutline.',
+    tests: [AGENT_GENERATE_TEST],
+  },
+  {
+    symbol: 'backend/services/agent/src/generate/outlines.ts#documentOutline',
+    status: 'verified',
+    summary: 'The shape a document outline must have before it is drawn.',
+    how: [
+      'A title (up to 120 characters), an optional summary (400), and 1 to 12 sections, each with a heading, up to 8 paragraphs of up to 2,000 characters and up to 12 bullets of up to 600.',
+      'Every string is trimmed; missing lists become empty.',
+    ],
+    why: 'The model supplies only plain text in a known shape, never markup, so nothing but text can end up in the file, and a runaway reply cannot make a huge one.',
+    returns: 'A Zod schema.',
+    tests: [AGENT_GENERATE_TEST, AGENT_RENDER_TEST],
+  },
+  {
+    symbol: 'backend/services/agent/src/generate/outlines.ts#deckOutline',
+    status: 'verified',
+    summary: 'The shape a deck outline must have: a title, a subtitle and 1 to 15 slides.',
+    how: [
+      'Each slide has a title, up to 7 bullets of up to 600 characters, and notes of up to 1,000.',
+    ],
+    why: 'As for documents: only checked text, with limits, reaches the drawing code.',
+    returns: 'A Zod schema.',
+    tests: [AGENT_RENDER_TEST],
+  },
+  {
+    symbol: 'backend/services/agent/src/generate/outlines.ts#imagePrompt',
+    status: 'verified',
+    summary: 'The shape of an image request: a prompt of 3 to 600 characters and a short title.',
+    why: 'The title becomes the file name and the alt text, so it is kept short.',
+    returns: 'A Zod schema.',
+    tests: [AGENT_GENERATE_TEST],
+  },
+  {
+    symbol: 'backend/services/agent/src/generate/render.ts#renderPdf',
+    status: 'verified',
+    summary: 'Draws a document outline as a simple A4 PDF, with pdfkit.',
+    how: [
+      'The title in bold at 22 points, the summary in grey, then each section: its heading in bold, its paragraphs and its bullets in Helvetica at 11 points, with 56-point margins.',
+      "The PDF's metadata gives the title, and GilderAi as its creator.",
+    ],
+    why: 'A plain, readable layout that needs no fonts or templates of its own.',
+    returns: 'A promise of the PDF bytes.',
+    tests: [AGENT_RENDER_TEST],
+  },
+  {
+    symbol: 'backend/services/agent/src/generate/render.ts#renderSlides',
+    status: 'verified',
+    summary: 'Draws a deck outline as a 16:9 PowerPoint file, with pptxgenjs.',
+    how: [
+      'A title slide with the title and subtitle, then one slide per point with its title, its bullets and its speaker notes.',
+    ],
+    why: 'A file people can open and edit in PowerPoint, Keynote or Google Slides.',
+    returns: 'A promise of the .pptx bytes.',
+    tests: [AGENT_RENDER_TEST],
+  },
+  {
+    symbol: 'backend/services/agent/src/generate/render.ts#PptxGenJS',
+    status: 'verified',
+    summary: 'The pptxgenjs class, whichever way the package hands it over.',
+    why: "Per its comment, the package's types put the class on a default property, while in Node the default import is the class itself; this accepts either, so the code runs under Node and type-checks.",
+  },
+  {
+    symbol: 'backend/services/agent/src/generate/images.ts#pollinationsImage',
+    status: 'verified',
+    summary: 'Draws an image with Pollinations: one GET with the prompt in the path.',
+    how: [
+      'It asks for 1024×1024, with no logo and as private, using the first 500 characters of the prompt, and waits up to 90 seconds (or until the answer is stopped).',
+      'No answer is a 503; so is an error status, a type other than JPEG or PNG, or a file over 8 MB.',
+    ],
+    why: 'Pollinations needs no key or account. A live check returned a 1024×1024 JPEG in about 10 seconds.',
+    returns: 'A promise of { bytes, mime }.',
+    sideEffects: ['Calls Pollinations over HTTPS.'],
+  },
+  {
+    symbol: 'backend/services/agent/src/generate/images.ts#solidPng',
+    status: 'verified',
+    summary: 'A small one-colour PNG, its colour picked from the prompt.',
+    how: [
+      'It writes a valid PNG by hand: the signature, a header, the pixels compressed with deflate, and a CRC for each chunk.',
+    ],
+    why: 'Mock mode needs a real image to store and show, with no outside service. mockImage returns it.',
+    returns: 'The PNG bytes (64×64 by default).',
+    tests: [AGENT_RENDER_TEST],
+  },
+  {
+    symbol: 'backend/services/agent/src/files/generated.ts#saveGenerated',
+    status: 'verified',
+    summary:
+      "Saves a file an agent made under the user's generated files, and returns it with a fresh link.",
+    how: [
+      'It makes a new file ID and stores the bytes at users/<user ID>/generated/<file ID> (storageKey).',
+      'It creates a File record with kind generated, the purpose (pdf, slides or image), the name, type and size, and status ready.',
+      'It signs a 5-minute download link and returns the file announced with that link and when it expires.',
+    ],
+    why: "The link goes out in the stream only; the answer keeps the file ID, so a link is made again whenever the file is needed. Saving to S3 has been tested only against an in-memory bucket: a live run needs a bucket the agent's key can use.",
+    returns: '{ file, announced }.',
+    sideEffects: ['Writes the file to storage and a file record to MongoDB.'],
+    tests: [AGENT_GENERATE_TEST],
+  },
+  {
+    symbol: 'backend/services/agent/src/files/generated.ts#fileNameFrom',
+    status: 'verified',
+    summary: 'A file name from a title: lower-case words joined by hyphens, and the extension.',
+    how: [
+      "Anything but letters and digits becomes a hyphen, at most 60 characters; an empty result becomes 'gilderai'.",
+    ],
+    why: 'Names are safe to download and readable, whatever the model wrote.',
+    returns: "A name such as 'packing-list.pdf'.",
+    tests: [AGENT_GENERATE_TEST],
+  },
+  {
+    symbol: 'backend/services/agent/src/turns.ts#resolveAttachments',
+    status: 'verified',
+    summary: 'Checks the files sent with a message, before anything is charged.',
+    how: [
+      "It reads the files by ID, owner and chat. If any is missing or not ready, it throws 404 'An attached file is missing or not uploaded yet'.",
+      "For PDFs it reads their documents: a failed one is a 409 'An attached PDF could not be read; upload it again', and one not ready yet a 409 'Still reading your PDF; try again in a moment'.",
+      'It returns each file as an Attachment.',
+    ],
+    why: 'A file from another chat or another user can never reach an agent, and a message that cannot be answered costs nothing. turns.test.ts checks a PDF still being read and files from other chats and users.',
+    returns: 'A list of Attachments; empty when none were sent.',
+    tests: [AGENT_TURNS_TEST],
+  },
+  {
+    symbol: 'backend/services/agent/src/routing.ts#routerPrompt',
+    status: 'verified',
+    summary:
+      "The router model's instructions, with pdf_qa offered only when the chat has a ready PDF.",
+    how: [
+      'It lists the agents the router may pick (chat, search, code, pdf, slides, image), each with when to use it, and asks for JSON { agent, confidence }.',
+      'When the chat has a ready PDF it adds pdf_qa, for a question about the document already uploaded. It always says the message is data and never to follow instructions in it.',
+    ],
+    why: 'Follow-up questions about a PDF reach the PDF agent without a new upload, and the router is never offered an agent that has nothing to work on.',
+    returns: 'A string.',
+    tests: [AGENT_ROUTING_TEST],
+  },
+
+  // -------------------------------------------------------------------------------------------
   // frontend: pages, the /api proxy, the login gate, theme and security headers
 
   {
@@ -3189,7 +3502,7 @@ export const notes: SymbolNote[] = [
     how: [
       'ChatCommands wraps everything, so ⌘K and ⌘⇧O work on every signed-in page and every search button opens the same dialog.',
       'The account parts of the sidebar and of the top bar (SidebarAccount) each sit in a Suspense boundary with a skeleton, because they read the session.',
-      'The page goes in <main>, which scrolls on its own.',
+      'The page goes in <main>, which scrolls on its own and is focusable (tabIndex 0, with a focus ring), so keyboard users can scroll it even on a page with nothing else to focus.',
     ],
     why: 'Everything outside those boundaries is static, so the shell can be prerendered and the account streams in. The chat list loads later, in the browser.',
     returns: 'The layout as JSX.',
@@ -3267,6 +3580,7 @@ export const notes: SymbolNote[] = [
       'searchChats is GET /api/chats?query=, getChat is GET /api/chats/:id and createChat is POST /api/chats. getAccount is GET /api/billing/account, the plan and balance, with the Account tag.',
       'getPlans is GET /api/billing/plans and getPayments GET /api/billing/payments (the Payment tag). createOrder posts { planId } to /api/billing/orders and invalidates Payment; verifyPayment posts the checkout result to /api/billing/orders/:orderId/verify and invalidates Account and Payment.',
       'getUsageSummary is GET /api/usage/summary with the number of days and the time zone, and getUsageEvents GET /api/usage/events?limit=30. Both provide the Usage tag, which the chat thread invalidates when an answer finishes.',
+      "getFile is GET /api/files/:id, a file's name and state, for attachment chips and generated files.",
       'updateChat (PATCH, to rename or pin) and deleteChat (DELETE) change the cached list straight away in onQueryStarted, and undo that change if the call fails.',
       'The list queries provide the Chat LIST tag and getChat its own Chat tag. createChat, updateChat and deleteChat invalidate LIST, and updateChat also its chat, so those are fetched again once the call is done.',
     ],
@@ -3416,9 +3730,9 @@ export const notes: SymbolNote[] = [
     summary: "A GET to the gateway from a server component, with the browser's cookies.",
     how: [
       'With no gilder_sid cookie it returns null and calls nothing.',
-      "Otherwise it fetches GATEWAY_URL plus the path, with the browser's cookies, x-gilder-client: web and cache: 'no-store'.",
+      "Otherwise it fetches GATEWAY_URL plus the path, with the browser's cookies, x-gilder-client: web, the visitor's x-forwarded-for when there is one, and cache: 'no-store'.",
     ],
-    why: 'Server components skip the /api proxy and call the gateway directly. Reading cookies makes the caller per-request, so callers sit inside a Suspense boundary. It sends no Origin, which a GET does not need, and no request ID, so the gateway makes one. getCurrentUser and getChatWithHistory use it.',
+    why: "Server components skip the /api proxy and call the gateway directly. Reading cookies makes the caller per-request, so callers sit inside a Suspense boundary. It sends no Origin, which a GET does not need, and no request ID, so the gateway makes one. Without the visitor's address, every server render counted against the Next.js server's single per-IP limit at the gateway; the end-to-end run found it. getCurrentUser and getChatWithHistory use it.",
     returns: 'A promise of the Response, or null.',
     tests: [FRONTEND_SESSION_TEST, FRONTEND_SERVER_CHATS_TEST],
   },
@@ -3632,15 +3946,99 @@ export const notes: SymbolNote[] = [
   // frontend: answers in the chat thread
 
   {
+    symbol: 'frontend/src/lib/uploads.ts#uploadFile',
+    status: 'verified',
+    summary: 'Uploads a file to a chat in three hops.',
+    how: [
+      'It asks POST /api/files/uploads for a signed form, with the chat, name, type and size.',
+      "It posts the form's fields, then the file, straight to storage. No answer is an ApiError 'The upload could not reach storage. Check your connection.'; a refusal is 'Storage refused the upload. Try again.'",
+      'It asks POST /api/files/<file ID>/complete to check what arrived, and returns the file.',
+    ],
+    why: "The file never passes through the app's servers, and the server checks it before it can be used. This has been tested only against an in-memory bucket: a live run needs a bucket the agent's key can use.",
+    returns: 'A promise of the uploaded file.',
+    tests: [FRONTEND_UPLOADS_TEST, FRONTEND_CHAT_THREAD_TEST],
+  },
+  {
+    symbol: 'frontend/src/lib/uploads.ts#uploadProblem',
+    status: 'verified',
+    summary: "A reason a file can't be attached, checked before uploading.",
+    how: [
+      "A type other than PDF, PNG, JPEG or WebP is 'Attach a PDF, or a PNG, JPEG or WebP image'; a file over its limit (20 MB for a PDF, 10 MB for an image) names the limit.",
+    ],
+    why: 'The user hears at once, without a round trip; the server checks the same limits again.',
+    returns: 'A message, or null when the file is fine.',
+    tests: [FRONTEND_UPLOADS_TEST],
+  },
+  {
+    symbol: 'frontend/src/lib/uploads.ts#ACCEPTED_TYPES',
+    status: 'verified',
+    summary: 'The types the file picker offers: PDF, PNG, JPEG and WebP.',
+    why: "The composer's file input accepts only these, the same list the agent takes.",
+    returns: 'A read-only array of four MIME types.',
+  },
+  {
+    symbol: 'frontend/src/lib/uploads.ts#pdfReadingState',
+    status: 'verified',
+    summary: 'Whether an uploaded PDF has finished being read for questions.',
+    why: 'The chat thread asks every 2 seconds, for up to 3 minutes, so the chip can say Reading… and Send can wait.',
+    returns: "'indexing', 'ready', 'failed', or null for a file that is not a PDF.",
+    tests: [FRONTEND_CHAT_THREAD_TEST],
+  },
+  {
+    symbol: 'frontend/src/lib/uploads.ts#openFile',
+    status: 'verified',
+    summary: 'Opens a fresh, short-lived download link for a file in a new tab.',
+    why: 'Links are made on request, so an attachment chip or a download button always works, even in an old chat.',
+    returns: 'A promise that resolves once the tab is opened.',
+  },
+  {
+    symbol: 'frontend/src/components/chat/generated-files.tsx#GeneratedFiles',
+    status: 'verified',
+    summary: 'The files an answer made: an image shown in place, or a download card.',
+    how: [
+      "Each file's details come from getFile (GET /api/files/<file ID>), with a skeleton meanwhile.",
+      'A PDF or deck shows a card with its name and Download, which opens a fresh link.',
+      "An image asks for its own fresh link (GeneratedImage) and shows itself, with alt text from its name and a Download button; if the link cannot be had, it says 'The image could not be loaded.'",
+    ],
+    why: 'Answers keep file IDs, never links, so each link is made when it is needed and is always valid.',
+    returns: 'The files as JSX.',
+    tests: [FRONTEND_CHAT_THREAD_TEST],
+  },
+  {
+    symbol: 'frontend/src/components/chat/message-item.tsx#AttachmentChip',
+    status: 'verified',
+    summary: 'A file sent with a message: its name, opening a fresh download link on click.',
+    why: 'The user can see and open what they sent; the name comes from getFile.',
+    returns: 'A button as JSX.',
+    tests: [FRONTEND_CHAT_THREAD_TEST],
+  },
+  {
+    symbol: 'frontend/src/components/chat/message-item.tsx#Citations',
+    status: 'verified',
+    summary: "The PDF pages an answer is based on, under 'From your documents'.",
+    why: 'Each file name and page is listed, with the quoted passage on hover, so the reader can check the answer.',
+    returns: 'A section as JSX.',
+    tests: [FRONTEND_CHAT_THREAD_TEST],
+  },
+  {
+    symbol: 'frontend/src/components/chat/composer.tsx#PendingAttachment',
+    status: 'verified',
+    summary:
+      'A file being attached to the next message, with its state: uploading, reading, ready or failed.',
+    why: 'The composer shows a chip per file with its state, and Send waits until every file is ready.',
+    tests: [FRONTEND_CHAT_THREAD_TEST],
+  },
+
+  {
     symbol: 'frontend/src/lib/turns.ts#streamTurn',
     status: 'verified',
     summary:
       'Sends a message (or a regenerate or edit) and yields the answer events as they stream.',
     how: [
-      'It posts to /api/chats/<id>/messages, or its /<message ID>/regenerate or /edit, with the JSON body each needs and Accept: text/event-stream.',
+      'It posts to /api/chats/<id>/messages, or its /<message ID>/regenerate or /edit, with the JSON body each needs (a send adds attachments when there are any) and Accept: text/event-stream.',
       "A failed fetch is an ApiError 'Could not reach GilderAi. Check your connection.', unless the caller aborted.",
       'A refusal before the stream (not 2xx) becomes an ApiError with the code, the detail and the request ID from the problem+json body or the X-Request-Id header.',
-      'Otherwise it reads the body with readServerEvents and yields each event: meta, agent, sources, artifact, token, usage, title, error and done. An abort ends it quietly.',
+      'Otherwise it reads the body with readServerEvents and yields each event: meta, agent, sources, artifact, citations, progress, file, token, usage, title, error and done. An abort ends it quietly.',
     ],
     why: 'One request sends the message and carries the answer back. Refusals stay ordinary errors, so the thread can undo its optimistic view.',
     returns: 'An async generator of TurnEvents.',
@@ -3664,9 +4062,10 @@ export const notes: SymbolNote[] = [
   {
     symbol: 'frontend/src/lib/turns.ts#BUILT_AGENTS',
     status: 'verified',
-    summary: "The agents the composer offers: 'chat', 'search' and 'code'.",
-    why: 'The menu and the / shortcut hints only show agents that are built.',
-    returns: 'A read-only array of three names.',
+    summary:
+      "The agents the composer offers: 'chat', 'search', 'code', 'pdf', 'slides' and 'image'.",
+    why: 'The menu and the / shortcut hints only show agents that are built. The question agents are not offered: an attachment picks them.',
+    returns: 'A read-only array of six names.',
   },
   {
     symbol: 'frontend/src/lib/sse.ts#readServerEvents',
@@ -3686,6 +4085,7 @@ export const notes: SymbolNote[] = [
       'A usage event writes the new balance into the cached account, and a title event the new title into the cached chat; afterwards the chat list, the chat and the usage page data (the Usage tag) are refetched.',
       'An error event marks the answer failed with its message and reference, and shows a toast.',
       "A refusal before the stream puts the thread back as it was and shows a toast ('Out of credits' for a 402); the composer gets the text back.",
+      'Citations, progress and file events go onto the answer: the cited pages, the current part of a file being made (removed when the answer ends) and the IDs of the files it made. A send can carry attachments, which show on the message at once.',
       'regenerate hides the latest answer and asks for a new one; edit replaces the latest user message and what follows. Only one answer runs at a time.',
       'stop posts the stop request (once the turn ID is known) and aborts the stream; the answer is kept as stopped.',
       "Leaving the page aborts a running answer, but only after a tick, so React's development double mount does not stop it by mistake.",
@@ -3718,25 +4118,29 @@ export const notes: SymbolNote[] = [
       'It renders each message with MessageItem, or an empty state, and the composer stuck to the bottom.',
       "A message queued by the new-chat page is cleared and sent once, as soon as the page opens; a ref keeps React's double effects in development from sending it twice.",
       'While an answer streams it keeps the bottom in view, unless the user scrolled up to read; a new answer always brings the bottom back.',
+      'Picked files are checked (uploadProblem) and uploaded at once (uploadFile), each with a chip; a PDF is then polled every 2 seconds, for up to 3 minutes, until it has been read. A failure shows a toast. Send passes the IDs of the ready files and clears the chips once the message is taken.',
+      'The scroll anchor sits after the message list, since a list may hold only list items.',
       'Regenerate is offered on the latest answer and Edit on the latest user message, only when nothing is running. Editing swaps the message for an edit box (Save and send, or Esc to cancel); ↑ in an empty composer opens it too.',
     ],
     why: "The chat page's whole conversation in one place, rendered first on the server with the history.",
     returns: 'The thread as JSX.',
-    tests: ['frontend/src/components/chat/chat-thread.test.tsx'],
+    tests: [FRONTEND_CHAT_THREAD_TEST, FRONTEND_UPLOADS_TEST],
   },
   {
     symbol: 'frontend/src/components/chat/composer.tsx#Composer',
     status: 'verified',
-    summary: 'The message box, with the agent picker, shortcut hints and the send or stop button.',
+    summary:
+      'The message box, with the paperclip, the agent picker, shortcut hints and the send or stop button.',
     how: [
       'Enter sends and Shift+Enter makes a new line; the box grows with its text up to a limit. Messages are at most 20,000 characters.',
-      'An agent menu offers Auto and the built agents (Chat, Search, Code).',
-      'Typing / shows the matching shortcuts (/search, /code) with a hint each.',
+      'In a chat, the paperclip picks PDFs and PNG, JPEG or WebP images (ACCEPTED_TYPES). Each file gets a chip with its state (Uploading…, Reading…, Failed) and a remove button, and Send waits until every file is ready.',
+      'An agent menu offers Auto and the built agents (Chat, Search, Code, PDF, Slides, Image).',
+      'Typing / shows the matching shortcuts (/search, /code, /pdf, /slides, /image) with a hint each.',
       "With no credits it says 'You are out of credits. New answers need credits.' and cannot send.",
       'While an answer runs, Send becomes Stop, and Esc stops it from anywhere on the page. ↑ in an empty box edits the latest message.',
       'The text is cleared on send and comes back if the message is refused.',
     ],
-    why: 'One composer serves the new-chat page and every chat.',
+    why: 'One composer serves the new-chat page and every chat; only a chat passes onAttach, since a file belongs to a chat.',
     returns: 'The form as JSX.',
     tests: ['frontend/src/components/chat/chat-thread.test.tsx'],
   },
@@ -3744,7 +4148,7 @@ export const notes: SymbolNote[] = [
     symbol: 'frontend/src/components/chat/composer.tsx#AGENT_OPTIONS',
     status: 'verified',
     summary: 'Every agent the composer knows, with its label, / shortcut and hint.',
-    why: 'It lists all six agents; the composer offers only those in BUILT_AGENTS, so the others appear once they are built.',
+    why: 'It lists the six agents a user can pick, all of them built now; the composer offers only those in BUILT_AGENTS.',
     returns: 'A read-only array of options.',
   },
   {
@@ -3761,7 +4165,7 @@ export const notes: SymbolNote[] = [
     summary: "One message: the user's on the right, answers on the left as Markdown.",
     how: [
       "The user's text keeps its line breaks. An answer renders as Markdown with its citations linked, three pulsing dots while it is empty, and Stopped or the failure message (with its reference) under it.",
-      'A finished code answer shows its files card, and a search answer its sources.',
+      "A finished code answer shows its files card, and a search answer its sources. A user's message shows a chip per attached file (AttachmentChip). While a file is being made, a progress bar shows the step and how far it has got; the files an answer made show under it (GeneratedFiles), and a PDF answer lists its pages (Citations).",
       'Copy is on every finished message; Regenerate and Edit only where the thread offers them.',
     ],
     why: 'Each message carries just the actions that make sense for it.',

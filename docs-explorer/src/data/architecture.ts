@@ -4,13 +4,15 @@ import type { ArchComponent, ArchLink } from './schema.ts';
  * The system map: every app, data store and outside service, and how they connect.
  *
  * Built today: the frontend (sign-in page, app shell, chat list, search, the chat thread with
- * streamed answers, the credits card, and the billing and usage pages) and its /api proxy; the
+ * streamed answers, attachments and generated files, the credits card, and the billing and usage
+ * pages) and its /api proxy; the
  * gateway, which checks each /api request and forwards the sign-in, logout, profile, chat,
  * answer, file, balance, payment and usage routes and Razorpay's webhook; auth, chat, billing and
  * the agent, which serve them; auth's call to billing for the sign-up grant; the agent's calls to
- * chat, billing, the AI providers, Tavily, S3 and Qdrant; billing's calls to Razorpay; and local
- * MongoDB, Redis and Qdrant in Docker. Everything else is marked `planned`, with the roadmap
- * feature that adds it.
+ * chat, billing, the AI providers, Tavily, Pollinations, S3 and Qdrant; billing's calls to
+ * Razorpay; the browser's uploads and downloads straight to S3; and local MongoDB, Redis and
+ * Qdrant in Docker. Anything not built yet would be marked `planned`, with the roadmap feature
+ * that adds it.
  *
  * Link kinds used here: `http` for HTTP calls between programs, `internal` for an app importing
  * the shared library (same process, no network), `data` for a connection to a data store, and
@@ -34,6 +36,7 @@ export const components: ArchComponent[] = [
       'Keeps the HttpOnly session cookie, which page scripts cannot read, and a gilder_theme cookie for the theme.',
       'Google sign-in opens a Firebase popup and sends the ID token to /api/auth/session.',
       "Buying credits opens Razorpay's checkout window (checkout.js, loaded only then): card and UPI details go to Razorpay, never to the app.",
+      'Uploads attached files straight to S3 with the signed form the agent returns, and shows generated images and opens downloads from short-lived signed links.',
     ],
   },
   {
@@ -51,14 +54,16 @@ export const components: ArchComponent[] = [
       'Chat list (ChatList): loaded in the browser with RTK Query a page at a time and grouped into Pinned, Today, Previous 7 days and Older. Each row has a menu to rename, pin or delete, which changes the list at once and undoes it if the call fails. On small screens the same list opens in a panel (MobileNav).',
       'Search (SearchDialog, ⌘K or Ctrl+K): searches titles and message text through GET /api/chats?query=, with the keyboard. ⌘⇧O or Ctrl+Shift+O goes to / for a new chat (ChatCommands).',
       "Chat page (/c/<chat ID>): the server reads the chat and its latest messages from the gateway with the browser's cookie (getChatWithHistory, gatewayGet) and renders them in the chat thread, so the history shows on first paint. A missing, deleted or someone else's chat gets one 'This chat isn't available' page.",
-      'Chat thread (ChatThread, useChatThread): the conversation and the composer. A sent message shows at once, and the answer fills in token by token from the stream; a refusal puts the thread back and says why. Stop (or Esc), Regenerate on the latest answer, Edit on the latest message (or ↑), copy on every message.',
-      'Composer: Enter to send, an agent menu (Auto, Chat, Search, Code), / shortcut hints, and an out-of-credits state. On / it is the new-chat composer: the first message creates the chat, queues the message (the pending slice) and opens the chat, which sends it.',
+      'Chat thread (ChatThread, useChatThread): the conversation and the composer. A sent message shows at once, and the answer fills in token by token from the stream; a refusal puts the thread back and says why. Stop (or Esc), Regenerate on the latest answer, Edit on the latest message (or ↑), copy on every message. Attached files are uploaded as soon as they are picked (uploadFile), and a PDF is then polled every 2 seconds until it has been read.',
+      'Composer: Enter to send, a paperclip to attach PDFs and images (a chip per file, and Send waits until all are ready; in a chat, not on the new-chat page), an agent menu (Auto, Chat, Search, Code, PDF, Slides, Image), / shortcut hints, and an out-of-credits state. On / it is the new-chat composer: the first message creates the chat, queues the message (the pending slice) and opens the chat, which sends it.',
       'Answers render as safe Markdown (react-markdown and remark-gfm): raw HTML is shown as text, images become links (SEC-10), code blocks are highlighted (highlight.js) with a copy button, and search citations link to their sources.',
       'Code answers get a files card and a side panel: highlighted read-only files, copy, downloads and a zip (fflate), and a preview in a sandboxed frame whose page cannot reach the network.',
+      "Answers with files: a chip per attached file on the user's message, 'From your documents' with the cited pages under a PDF answer, a progress bar while a file is made, and the generated files (GeneratedFiles): an image shown from a fresh link, or a download card for a PDF or deck.",
       "Credits card (CreditsCard): the balance and plan from GET /api/billing/account, in the sidebar and the small-screen panel, with a warning below 10 credits and a 'Get more' link to the billing page.",
       "Billing page (/settings/billing, BillingView): a note that only test payments are taken, the current plan and balance, the Starter and Pro plans priced in rupees, and the payment history. Buy asks billing for an order, opens Razorpay's checkout (openCheckout) and sends the signed result back to billing to check.",
       "Usage page (/settings/usage, UsageView): credits and answers over the last 30 days, a column chart per day counted in the viewer's time zone (DailyChart), a bar per agent and the latest answers with their tokens and time. A finished answer invalidates its data.",
-      'Data in the browser: a Redux store with RTK Query (makeStore, StoreProvider), whose calls all go to /api.',
+      "Data in the browser: a Redux store with RTK Query (makeStore, StoreProvider), whose calls all go to /api. Server components' calls to the gateway (gatewayGet) pass on the visitor's x-forwarded-for, so the gateway counts each visitor, not the Next.js server.",
+      'Accessibility: <main> is focusable with a focus ring, so keyboard users can scroll it, and the message list holds only list items. axe checks the main pages in the end-to-end tests.',
       'Design system: Light minimal tokens in light and dark (with --chart-bar for chart columns), Radix-based components, and a theme remembered in a cookie and applied before the first paint.',
       'Security headers on every page (next.config.ts): a Content-Security-Policy without nonces, nosniff, referrer and permissions policies, and no framing.',
       "Reads GATEWAY_URL on the server and the public NEXT_PUBLIC_FIREBASE_* values in the browser. Its .env.example also lists NEXT_PUBLIC_RAZORPAY_KEY_ID, but no code reads it: the checkout takes the key ID from billing's order answer.",
@@ -74,6 +79,7 @@ export const components: ArchComponent[] = [
       'frontend/src/app/(app)/c/[chatId]/page.tsx#ChatPage',
       'frontend/src/components/billing/billing-view.tsx#BillingView',
       'frontend/src/components/billing/usage-view.tsx#UsageView',
+      'frontend/src/lib/uploads.ts#uploadFile',
     ],
   },
   {
@@ -85,12 +91,12 @@ export const components: ArchComponent[] = [
       "The one public entry to the backend. Each /api request goes through its checks (rate limits, the route allowlist, the origin check and the session lookup) and is then forwarded to its service with a fresh signed internal token. Its route table lists the auth, chat, answer and file routes, billing's account, payment and usage routes, and Razorpay's webhook, the one route open without a session or Origin. The services also listen on their own ports, but each one answers 401 to anything without a valid token except its health checks.",
     responsibilities: [
       "Builds its Express app with createService, with parseJson: false and its /api router as its routes, after the shared middleware and GET /healthz and GET /readyz. Express's trust proxy is set to TRUST_PROXY_HOPS, so req.ip is the client's address.",
-      'Limits each IP address to 120 requests a minute (ipRateLimit), for every request that reaches the router, and each signed-in user to 60 (userRateLimit). Over the limit is a 429 with Retry-After.',
+      'Limits each IP address to 120 requests a minute (ipRateLimit), for every request that reaches the router, and each signed-in user to 60 (userRateLimit); RATE_LIMIT_PER_IP and RATE_LIMIT_PER_USER can change them. Over the limit is a 429 with Retry-After.',
       "Forwards only what its route table (PUBLIC_ROUTES) lists: POST /api/auth/session, POST /api/auth/dev-session, DELETE /api/auth/session, and GET and PATCH /api/me to auth; GET and POST /api/chats, GET, PATCH and DELETE /api/chats/:id and GET /api/chats/:id/messages to chat; POST /api/chats/:id/messages, the regenerate and edit routes under it, and POST /api/turns/:turnId/stop to the agent, with POST /api/files/uploads, POST /api/files/:fileId/complete, GET /api/files/:fileId and GET /api/files/:fileId/url; GET /api/billing/account, GET /api/billing/plans, POST /api/billing/orders, POST /api/billing/orders/:orderId/verify, GET /api/billing/payments, GET /api/usage/summary and GET /api/usage/events to billing; and POST /api/webhooks/razorpay to billing with no session. A :id must be 1 to 64 letters, digits, - or _. Anything else gets the gateway's own 404 and never reaches a service.",
       'Refuses a request that changes something (any method but GET, HEAD and OPTIONS) unless its Origin is one of FRONTEND_ORIGIN, with 403 (originCheck). A route marked webhook skips this check: it comes from a server, and its service checks the signature instead.',
       'Looks the session cookie up in Redis on every matched request, which renews it (sessionLookup), and answers 401 itself for a route that needs a session when there is none (requireSession).',
       'Forwards the request (proxyToService) with fetch: raw body up to 1 MB, a few allowed headers (plus the signature headers of a webhook route, for that route only), the cookie only to auth, X-Request-Id, and an internal token signed for that service that names the user. It passes back the status, a few headers, every Set-Cookie and the streamed body. A service that is down or does not start answering within 10 seconds gives 503.',
-      'Checks its settings at startup (rules in env-schema.ts) and refuses to start if one is missing or invalid: REDIS_URL, FRONTEND_ORIGIN (one origin or a comma-separated list), the four service URLs and INTERNAL_PRIVATE_KEY, which must parse as an Ed25519 private key. PORT, NODE_ENV, LOG_LEVEL and TRUST_PROXY_HOPS (1) have defaults.',
+      'Checks its settings at startup (rules in env-schema.ts) and refuses to start if one is missing or invalid: REDIS_URL, FRONTEND_ORIGIN (one origin or a comma-separated list), the four service URLs and INTERNAL_PRIVATE_KEY, which must parse as an Ed25519 private key. PORT, NODE_ENV, LOG_LEVEL, TRUST_PROXY_HOPS (1), RATE_LIMIT_PER_IP (120) and RATE_LIMIT_PER_USER (60) have defaults.',
       'Opens a Redis client at startup. /readyz says ready only when Redis answers PING.',
       'On SIGTERM or SIGINT, finishes in-flight requests and then closes the Redis client.',
     ],
@@ -145,7 +151,7 @@ export const components: ArchComponent[] = [
     responsibilities: [
       'Builds its Express app with createService: the shared middleware, GET /healthz and GET /readyz, then the internal-token check (audience chat; it trusts the gateway and the agent) in front of chatRouter and internalRouter. A call without a valid token gets 401 on any path except the health checks.',
       'Serves the chat routes (chatRouter): GET /chats (every pinned chat on the first page, then the others by latest activity, with a keyset cursor; or a search of titles and message text with ?query=), POST /chats, GET, PATCH (rename or pin) and DELETE (soft) /chats/:id, and GET /chats/:id/messages (pages from the newest back).',
-      "Serves the internal routes (internalRouter) for the agent service: read a chat, auto-title it while it is still 'New chat', read its recent finished messages and its last turn (for regenerate and edit), save a message once per clientMessageId, fill in an answer, and say which of a list of chats are gone for a user (for the agent's file clean-up). Answers can be long (code files), so chat takes request bodies up to 2 MB and message text up to 400,000 characters. Only tokens signed with the agent's key may use them (requireCaller), and the gateway has no route to them.",
+      "Serves the internal routes (internalRouter) for the agent service: read a chat, auto-title it while it is still 'New chat', read its recent finished messages and its last turn (for regenerate and edit), save a message once per clientMessageId, fill in an answer, and say which of a list of chats are gone for a user (for the agent's file clean-up). A user's message keeps its attachments and an answer its citations and the IDs of the files it made (fileRefs), never links. Answers can be long (code files), so chat takes request bodies up to 2 MB and message text up to 400,000 characters. Only tokens signed with the agent's key may use them (requireCaller), and the gateway has no route to them.",
       'Keeps conversations and messages in MongoDB (ConversationModel, MessageModel). findOwnedConversation reads a chat only for its owner and only if it is not deleted, and toChat and toMessage are the public shapes.',
       'Connects to MongoDB at startup and does not start serving until the connection works. /readyz pings it.',
       'Imports INTERNAL_PUBLIC_KEY and AGENT_PUBLIC_KEY with importInternalPublicKey at startup. A key it cannot read stops startup with exit code 1.',
@@ -168,19 +174,19 @@ export const components: ArchComponent[] = [
     kind: 'app',
     status: 'verified',
     summary:
-      'Writes the answers. A message, a regenerate or an edit reaches it through the gateway; it checks the chat and the credits, picks the agent (chat, search or code), holds the credits in billing, saves the messages in chat and streams the answer from an AI provider as server-sent events, then charges or releases the credits. A stop can reach the answer from any instance. It also takes uploads to S3, checks what arrived, indexes PDFs into Qdrant, and removes the files of deleted chats. Planned: questions over PDFs and images (PDF and image Q&A), and images from Pollinations (File generation).',
+      'Writes the answers. A message, a regenerate or an edit reaches it through the gateway; it checks the chat, the credits and any attached files, picks the agent (chat, search, code, questions about a PDF or an image, or making a PDF, a deck or an image), holds the credits in billing, saves the messages in chat and streams the answer from an AI provider as server-sent events, then charges or releases the credits. A stop can reach the answer from any instance. It also takes uploads to S3, checks what arrived, indexes PDFs into Qdrant, saves the files its agents make, and removes the files of deleted chats.',
     responsibilities: [
       'Builds its Express app with createService: the shared middleware, GET /healthz and GET /readyz, then the internal-token check (audience agent; only the gateway is trusted) in front of turnRouter and fileRouter.',
-      "Serves the answer routes (turnRouter): POST /chats/:chatId/turns, POST /chats/:chatId/messages/:messageId/regenerate and /edit (latest turn only), all through one runTurn core, and POST /turns/:turnId/stop. Before the stream: 404 for someone else's chat, 409 for a request already being answered, 402 before any AI call when the user has no credits (SEC-03), and 429 over the routed agent's per-minute limit. Then the streamed answer (meta, agent, sources, artifact, token, usage, title, error and done events). A finished answer is committed; a failure, or a stop before the first token, is released; a stop after text started is committed.",
+      "Serves the answer routes (turnRouter): POST /chats/:chatId/turns, POST /chats/:chatId/messages/:messageId/regenerate and /edit (latest turn only), all through one runTurn core, and POST /turns/:turnId/stop. Before the stream: 404 for someone else's chat, 409 for a request already being answered, 402 before any AI call when the user has no credits (SEC-03), 404 or 409 for an attached file that is not the user's, not ready or still being read (resolveAttachments, before any charge), and 429 over the routed agent's per-minute limit. Then the streamed answer (meta, agent, sources, artifact, citations, progress, file, token, usage, title, error and done events). A finished answer is committed; a failure, or a stop before the first token, is released; a stop after text started is committed.",
       'Stops an answer on whichever instance runs it (createStopSignals): the owner is checked in Redis, then the turn ID is published on a Redis channel every instance listens to.',
-      'Runs three agents (buildAgents): chat, code (Markdown files parsed into an artifact) and search (Tavily, or canned results in mock mode; only with a Tavily key in live mode), with sources sent before the answer.',
+      "Runs up to eight agents (buildAgents): chat and code always; search with web search (Tavily, or canned results in mock mode); and, only with storage, PDF questions (pdf_qa: the five closest passages from the user's own documents, cited as [p. N]), image questions (image_qa, with Gemini or mock mode: the image sent to the vision route as a data URL), and PDF, slides and image, which make a file from a checked outline (pdfkit, pptxgenjs, or Pollinations) and save it under the user's generated files.",
       'Records every model attempt in its llmCalls collection (llmCallRecorder), without waiting for the write.',
       "Serves the file routes (fileRouter): POST /files/uploads checks the type (PDF up to 20 MB; PNG, JPEG or WebP up to 10 MB) and the chat, records the file under a key made from IDs only (SEC-07) and returns a signed S3 form for that key, type and size; POST /files/:fileId/complete checks what arrived (type, size, first bytes, and a PDF's page count, at most 200) and deletes a file that fails; GET /files/:fileId gives the details and indexing status, and GET /files/:fileId/url a fresh 5-minute download link. Without the four S3 settings they answer 503.",
       'Indexes a PDF once its upload completes (indexPdf), in the background: text per page (unpdf), pieces of about 1,000 characters with 200 of overlap, embeddings from Gemini in live mode (a stand-in in mock mode), and points in Qdrant labelled with owner, document, chat and page; the document ends ready or failed. A live check with real Gemini embeddings and a local Qdrant ranked the right page first.',
       "Every ten minutes asks chat which of its files' chats are gone (startFileCleanup), and removes their indexed pieces, objects and records.",
       "Calls chat and billing with its own key (SERVICE_PRIVATE_KEY) through createInternalClient: chat's /internal routes to read the chat, its recent messages and its last turn, save and fill in messages, name a new chat and learn which chats are gone; billing's GET /account and /internal/credits/reserve, commit and release.",
       'Calls the AI providers through its own fetch-based layer (createLlm, createOpenAiCompatibleProvider): Groq, OpenRouter and Gemini over their OpenAI-compatible APIs, with a fallback to the next model only before the first token, a 20-second start limit and a 30-second idle limit. LLM_MODE=mock (the default) answers from a mock provider with no keys.',
-      'Picks the agent (routeMessage): a chip or /shortcut, an attachment, or a small router model asked for JSON (completeJson, with one repair); anything unclear, or an agent that is not running, becomes chat. Titles a new chat while the answer streams (generateTitle).',
+      'Picks the agent (routeMessage): a chip or /shortcut, an attachment, or a small router model asked for JSON (completeJson, with one repair); anything unclear, or an agent that is not running, becomes chat. An attached PDF picks pdf_qa and an image image_qa; the router may pick pdf_qa only when the chat has a ready PDF. Titles a new chat while the answer streams (generateTitle).',
       "Keeps each chat's last 20 messages in Redis for an hour (createMemory), a 15-minute lock per request (turn-lock:...), a stop registration per running answer (turn:...) and per-agent rate-limit counters.",
       'Connects to MongoDB at startup and does not start serving until the connection works; the llmCalls records, the files and the indexed documents live there.',
       'Opens a Redis client at startup. /readyz says ready only when both MongoDB and Redis answer.',
@@ -198,6 +204,8 @@ export const components: ArchComponent[] = [
       'backend/services/agent/src/llm/llm.ts#createLlm',
       'backend/services/agent/src/files/file-routes.ts#fileRouter',
       'backend/services/agent/src/rag/indexer.ts#indexPdf',
+      'backend/services/agent/src/agents/pdf-qa.ts#createPdfQaAgent',
+      'backend/services/agent/src/agents/generate.ts#createPdfAgent',
     ],
   },
   {
@@ -307,7 +315,7 @@ export const components: ArchComponent[] = [
     kind: 'datastore',
     status: 'verified',
     summary:
-      "A vector database, run locally in Docker. The agent stores the pieces of uploaded PDFs in it, with their embeddings, over Qdrant's REST API with fetch (no SDK). A live check with real Gemini embeddings ranked the right page first. Nothing answers questions from it yet.",
+      "A vector database, run locally in Docker. The agent stores the pieces of uploaded PDFs in it, with their embeddings, over Qdrant's REST API with fetch (no SDK). PDF questions search it, always within the user's own documents. A live check with real Gemini embeddings ranked the right page first.",
     responsibilities: [
       'Runs qdrant v1.16.0 on host port 6335, not the usual 6333. Data lives in the qdrant-data volume.',
       'The agent uses it when QDRANT_URL is set (its .env.example sets http://localhost:6335), and an in-memory store otherwise (createQdrantStore, createMemoryVectorStore).',
@@ -328,13 +336,13 @@ export const components: ArchComponent[] = [
     responsibilities: [
       'The agent uses it when AWS_REGION, S3_BUCKET, AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY are all set (createS3FileStore, with the AWS SDK); otherwise uploads answer 503.',
       'Uploads use a presigned POST that fixes the key, the Content-Type and a size range, valid for 5 minutes. Downloads use a signed GET link, also valid for 5 minutes, that saves the file under its display name.',
-      'Keys are users/<user ID>/uploads/<file ID>, built from IDs only (SEC-07). The agent reads the first bytes and a PDF whole to check them, and deletes files that fail, and the files of deleted chats.',
+      'Keys are users/<user ID>/uploads/<file ID> for uploads and users/<user ID>/generated/<file ID> for the files agents make, built from IDs only (SEC-07). The agent reads the first bytes and a PDF whole to check them, reads an attached image for an image question, and deletes files that fail, and the files of deleted chats.',
     ],
     entryPoints: ['backend/services/agent/src/files/file-store.ts#createS3FileStore'],
   },
 
   // -------------------------------------------------------------------------------------------
-  // Outside services (Firebase from auth, the AI providers and Tavily from the agent, and Razorpay from billing, are called today)
+  // Outside services (Firebase from auth, the AI providers, Tavily and Pollinations from the agent, and Razorpay from billing)
 
   {
     id: 'llm-providers',
@@ -342,11 +350,11 @@ export const components: ArchComponent[] = [
     kind: 'external',
     status: 'verified',
     summary:
-      "The language models the agent calls to write answers, all over their OpenAI-compatible chat-completions APIs with fetch, and Gemini's embedding model for PDF indexing. Each is used only when its key is set and LLM_MODE is live; the default, mock, calls none of them.",
+      "The language models the agent calls to write answers and outlines and to look at images, all over their OpenAI-compatible chat-completions APIs with fetch, and Gemini's embedding model for PDF indexing and questions. Each is used only when its key is set and LLM_MODE is live; the default, mock, calls none of them.",
     responsibilities: [
-      'Groq: chat and search answers (openai/gpt-oss-120b, then openai/gpt-oss-20b), routing, titles and search queries (openai/gpt-oss-20b), and code when OpenRouter has no key (openai/gpt-oss-120b). Live mode needs its key.',
+      'Groq: chat, search and PDF question answers and the outlines of files (openai/gpt-oss-120b, then openai/gpt-oss-20b), routing, titles and search queries (openai/gpt-oss-20b), and code when OpenRouter has no key (openai/gpt-oss-120b). Live mode needs its key. A live check: Groq wrote a document outline and the PDF was drawn in about 1.5 seconds.',
       'OpenRouter: code answers (deepseek/deepseek-chat), when OPENROUTER_API_KEY is set.',
-      'Gemini (gemini-2.5-flash) for image questions is set up in MODEL_ROUTES and buildProviders, but no running agent uses it yet.',
+      "Gemini: image questions through the vision route, gemini-3.5-flash, then gemini-3.8-flash, then gemini-flash-latest, each with low reasoning (Google retired gemini-2.5-flash for new keys). The image goes as a data URL in an image_url part. A live check: Gemini answered 'Red' for a generated red PNG.",
       'Gemini embeds the pieces of uploaded PDFs (gemini-embedding-001, 768 numbers each, 100 per call to its batchEmbedContents API), when GEMINI_API_KEY is set and LLM_MODE is live (createGeminiEmbedder). A live check with a local Qdrant ranked the right page first.',
     ],
   },
@@ -363,10 +371,13 @@ export const components: ArchComponent[] = [
     id: 'pollinations',
     name: 'Pollinations',
     kind: 'external',
-    status: 'planned',
-    plannedIn: 'File generation',
-    summary: 'An image generation API the agent will call. Not built yet.',
-    responsibilities: [],
+    status: 'verified',
+    summary:
+      'The image generation API behind the image agent: one GET with the prompt in the path for a 1024×1024 image, no key needed, called with fetch in live mode. Mock mode draws a one-colour PNG instead. A live check returned a 1024×1024 JPEG in about 10 seconds.',
+    responsibilities: [
+      'The agent asks for the image without a logo and as private, waits up to 90 seconds, and accepts only a JPEG or PNG of at most 8 MB; anything else is a 503 and the answer fails without a charge.',
+    ],
+    entryPoints: ['backend/services/agent/src/generate/images.ts#pollinationsImage'],
   },
   {
     id: 'razorpay',
@@ -716,7 +727,7 @@ export const links: ArchLink[] = [
     to: 'chat',
     kind: 'http',
     label:
-      "During a turn: reads the chat, its recent messages and its last turn, saves the user's message and the answer (superseding replaced ones), fills the answer in with its sources and files, and names a new chat; every ten minutes, asks which chats are gone (POST /internal/chats/deleted). All through chat's /internal routes with the agent's own key",
+      "During a turn: reads the chat, its recent messages and its last turn, saves the user's message and the answer (superseding replaced ones), fills the answer in with its sources, citations, code files and generated file IDs, and names a new chat; every ten minutes, asks which chats are gone (POST /internal/chats/deleted). All through chat's /internal routes with the agent's own key",
     status: 'verified',
     evidence: [
       'backend/services/agent/src/services.ts#chatService',
@@ -745,7 +756,7 @@ export const links: ArchLink[] = [
     to: 'llm-providers',
     kind: 'external',
     label:
-      'Streams answers, routing, titles and search queries from Groq, and code from OpenRouter when its key is set, over their OpenAI-compatible APIs; embeds PDF pieces with Gemini when its key is set. In live mode only',
+      'Streams answers, routing, titles, search queries and file outlines from Groq, code from OpenRouter and image answers from Gemini when their keys are set, over their OpenAI-compatible APIs; embeds PDF pieces and questions with Gemini. In live mode only',
     status: 'verified',
     evidence: [
       'backend/services/agent/src/llm/openai-compatible.ts#createOpenAiCompatibleProvider',
@@ -753,6 +764,7 @@ export const links: ArchLink[] = [
       'backend/services/agent/src/llm/llm.ts#createLlm',
       'backend/services/agent/src/llm/models.ts#MODEL_ROUTES',
       'backend/services/agent/src/rag/embeddings.ts#createGeminiEmbedder',
+      'backend/services/agent/src/agents/image-qa.ts#createImageQaAgent',
     ],
   },
 
@@ -789,12 +801,13 @@ export const links: ArchLink[] = [
     to: 's3',
     kind: 'data',
     label:
-      "Signs upload forms and download links, reads uploads to check them, and deletes refused files and those of deleted chats, with the AWS SDK. Tested only against an in-memory bucket; a live run needs a bucket the agent's key can use",
+      "Signs upload forms and download links, reads uploads to check them and images to answer about them, saves the files its agents make, and deletes refused files and those of deleted chats, with the AWS SDK. Tested only against an in-memory bucket; a live run needs a bucket the agent's key can use",
     status: 'verified',
     evidence: [
       'backend/services/agent/src/files/file-store.ts#createS3FileStore',
       'backend/services/agent/src/files/file-routes.ts#fileRouter',
       'backend/services/agent/src/rag/cleanup.ts#cleanUpDeletedChats',
+      'backend/services/agent/src/files/generated.ts#saveGenerated',
     ],
   },
   {
@@ -802,12 +815,37 @@ export const links: ArchLink[] = [
     to: 'qdrant',
     kind: 'data',
     label:
-      'Stores the pieces of uploaded PDFs with their embeddings, and deletes those of deleted chats, over the REST API with fetch, when QDRANT_URL is set',
+      "Stores the pieces of uploaded PDFs with their embeddings, searches them for PDF questions within the owner's documents, and deletes those of deleted chats, over the REST API with fetch, when QDRANT_URL is set",
     status: 'verified',
     evidence: [
       'backend/services/agent/src/rag/vector-store.ts#createQdrantStore',
       'backend/services/agent/src/rag/indexer.ts#indexPdf',
+      'backend/services/agent/src/agents/pdf-qa.ts#createPdfQaAgent',
       'backend/services/agent/src/rag/cleanup.ts#cleanUpDeletedChats',
+    ],
+  },
+  {
+    from: 'agent',
+    to: 'pollinations',
+    kind: 'external',
+    label: 'One request per image the image agent draws, in live mode (no key needed)',
+    status: 'verified',
+    evidence: [
+      'backend/services/agent/src/generate/images.ts#pollinationsImage',
+      'backend/services/agent/src/agents/generate.ts#createImageAgent',
+    ],
+  },
+  {
+    from: 'browser',
+    to: 's3',
+    kind: 'http',
+    label:
+      "Posts attached files straight to the bucket with the agent's signed form, and loads generated images and downloads from short-lived signed links. Tested only against an in-memory bucket; a live run needs a bucket the agent's key can use",
+    status: 'verified',
+    evidence: [
+      'frontend/src/lib/uploads.ts#uploadFile',
+      'frontend/src/lib/uploads.ts#openFile',
+      'frontend/src/components/chat/generated-files.tsx#GeneratedFiles',
     ],
   },
 
@@ -848,17 +886,5 @@ export const links: ArchLink[] = [
       'backend/gateway/src/route-table.ts#PUBLIC_ROUTES',
       'backend/services/billing/src/payment-routes.ts#paymentRouter',
     ],
-  },
-
-  // -------------------------------------------------------------------------------------------
-  // Planned: not built yet
-
-  {
-    from: 'agent',
-    to: 'pollinations',
-    kind: 'external',
-    label: 'Image generation requests',
-    status: 'planned',
-    plannedIn: 'File generation',
   },
 ];
