@@ -1,4 +1,12 @@
-import { AGENTS, AppError, mongoose, requireUser, validate, z } from '@gilder/shared';
+import {
+  AGENTS,
+  AppError,
+  mongoose,
+  requireCaller,
+  requireUser,
+  validate,
+  z,
+} from '@gilder/shared';
 import { Router } from 'express';
 import {
   DEFAULT_CHAT_TITLE,
@@ -11,8 +19,9 @@ import {
 } from './models.ts';
 
 /**
- * Routes for the agent service, never forwarded by the gateway (it has no /internal routes). They
- * still act for one user: the token names the user, and every lookup filters by them.
+ * Routes for the agent service, never forwarded by the gateway (it has no /internal routes), and
+ * open only to tokens signed with the agent's own key. They still act for one user: the token
+ * names the user, and every lookup filters by them.
  */
 
 const MAX_CONTENT = 100_000;
@@ -63,7 +72,7 @@ const isDuplicateKey = (error: unknown) =>
 
 export function internalRouter(): Router {
   const router = Router();
-  router.use('/internal', requireUser());
+  router.use('/internal', requireCaller('agent'), requireUser());
 
   router.get('/internal/chats/:id', validate({ params: idParams }), async (req, res) => {
     const userId = res.locals.userId as string;

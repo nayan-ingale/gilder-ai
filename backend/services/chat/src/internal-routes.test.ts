@@ -17,6 +17,8 @@ const logger = createLogger({ service: 'chat', level: 'silent' });
 let mongo: TestMongo;
 let privateKey: InternalKey;
 let publicKey: InternalKey;
+let agentKey: InternalKey;
+let agentPublicKey: InternalKey;
 
 beforeAll(async () => {
   mongo = await startTestMongo();
@@ -24,6 +26,9 @@ beforeAll(async () => {
   const pair = await generateInternalKeyPair();
   privateKey = await importInternalPrivateKey(pair.privateKey);
   publicKey = await importInternalPublicKey(pair.publicKey);
+  const agentPair = await generateInternalKeyPair();
+  agentKey = await importInternalPrivateKey(agentPair.privateKey);
+  agentPublicKey = await importInternalPublicKey(agentPair.publicKey);
 }, 120_000);
 
 afterAll(async () => {
@@ -34,15 +39,15 @@ beforeEach(async () => {
   await Promise.all([ConversationModel.deleteMany({}), MessageModel.deleteMany({})]);
 });
 
-const app = () => createApp({ logger, internalPublicKey: publicKey });
+const app = () => createApp({ logger, internalPublicKey: publicKey, agentPublicKey });
 
 /** Tokens as the gateway would sign them, fresh for each test (they last 60 seconds). */
 let tokens: Record<'u1' | 'u2' | 'none', string>;
 beforeEach(async () => {
   const [u1, u2, none] = await Promise.all([
-    signInternalToken(privateKey, 'chat', { userId: 'u1' }),
-    signInternalToken(privateKey, 'chat', { userId: 'u2' }),
-    signInternalToken(privateKey, 'chat', {}),
+    signInternalToken(agentKey, 'chat', { userId: 'u1' }, 60, 'agent'),
+    signInternalToken(agentKey, 'chat', { userId: 'u2' }, 60, 'agent'),
+    signInternalToken(agentKey, 'chat', {}, 60, 'agent'),
   ]);
   tokens = { u1, u2, none };
 });
@@ -220,5 +225,18 @@ describe('/internal/chats/:id', () => {
     expect(first.body).toMatchObject({ renamed: true, chat: { title: 'Goa trip' } });
     expect(second.body).toMatchObject({ renamed: false, chat: { title: 'Goa trip' } });
     expect((await as('u2', 'get', `/internal/chats/${chat.id}`)).status).toBe(404);
+  });
+});
+
+describe('who may call', () => {
+  it("refuses the gateway's token on internal routes: only the agent may use them", async () => {
+    const chat = await ConversationModel.create({ userId: 'u1' });
+    const fromGateway = await signInternalToken(privateKey, 'chat', { userId: 'u1' });
+
+    const response = await request(app())
+      .get(`/internal/chats/${chat.id}`)
+      .set(INTERNAL_TOKEN_HEADER, fromGateway);
+
+    expect(response.status).toBe(403);
   });
 });
