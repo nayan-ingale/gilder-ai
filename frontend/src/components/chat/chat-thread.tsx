@@ -183,9 +183,10 @@ export function ChatThread({
               />
             ),
           )}
-          <div ref={bottom} />
         </ol>
       )}
+      {/* The scroll target sits after the list: a list may only contain list items. */}
+      <div ref={bottom} aria-hidden="true" />
       <div className="sticky bottom-0 bg-gradient-to-t from-canvas from-70% to-transparent px-4 pt-6 pb-4">
         <div className="mx-auto w-full max-w-3xl">
           <Composer

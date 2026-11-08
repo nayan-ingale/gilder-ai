@@ -72,6 +72,8 @@ jobs:
           pnpm setup:env
           pnpm setup:keys
           sed -i 's/^AUTH_DEV_LOGIN=false/AUTH_DEV_LOGIN=true/' backend/services/auth/.env
+          # Every test request comes from this one machine, so its per-IP limit is raised.
+          echo 'RATE_LIMIT_PER_IP=10000' >> backend/gateway/.env
 
       - run: pnpm --filter @gilder/frontend build
 

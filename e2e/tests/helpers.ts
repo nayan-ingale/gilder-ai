@@ -22,9 +22,12 @@ export async function signIn(page: Page): Promise<string> {
  * in the thread and the Regenerate button (shown only when nothing is being written) is back.
  */
 export async function ask(page: Page, text: string): Promise<void> {
+  // Type only once the page is interactive: text typed before React takes over is not seen.
+  await page.waitForLoadState('networkidle');
   const before = await answers(page).count();
   const box = page.getByRole('textbox', { name: 'Message' });
   await box.fill(text);
+  await expect(page.getByRole('button', { name: 'Send' })).toBeEnabled();
   await box.press('Enter');
   await expect(answers(page)).toHaveCount(before + 1);
   await expect(page.getByRole('button', { name: 'Regenerate' })).toBeVisible({ timeout: 60_000 });

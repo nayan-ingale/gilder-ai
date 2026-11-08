@@ -27,7 +27,13 @@ export default function AppLayout({ children }: LayoutProps<'/'>) {
               <SidebarAccount compact />
             </Suspense>
           </MobileBar>
-          <main className="flex min-h-0 flex-1 flex-col overflow-y-auto">{children}</main>
+          {/* Focusable, so keyboard users can scroll it even on pages with no links or buttons. */}
+          <main
+            tabIndex={0}
+            className="flex min-h-0 flex-1 flex-col overflow-y-auto outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-inset"
+          >
+            {children}
+          </main>
         </div>
       </div>
     </ChatCommands>
