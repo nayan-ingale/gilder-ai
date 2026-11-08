@@ -2051,5 +2051,125 @@ export const decisionsPage: DocPage = {
         { symbol: 'backend/gateway/src/guards.ts#userRateLimit' },
       ],
     },
+    {
+      id: 'one-backend-image',
+      title: 'One backend image, run from the TypeScript sources',
+      status: 'verified',
+      blocks: [
+        {
+          kind: 'fields',
+          fields: [
+            {
+              label: 'Decision',
+              text: 'The gateway and the four services share one Docker image with the backend sources and their production packages. Node runs the TypeScript directly, and each Compose service sets its command to its own entry file.',
+            },
+            {
+              label: 'Why',
+              text: 'There is nothing to compile, as in development, and one image means one build, one push and one version for the whole backend.',
+            },
+            {
+              label: 'Trade-off',
+              text: 'Every backend container carries the code and packages of all five apps, though it runs one.',
+            },
+          ],
+        },
+        {
+          kind: 'quote',
+          file: 'backend/Dockerfile',
+          text: '# One image for the gateway and the four services. Node 22 runs the TypeScript sources',
+        },
+      ],
+      refs: [{ file: 'backend/Dockerfile' }, { file: 'deploy/compose.yml' }],
+    },
+    {
+      id: 'caddy-in-front',
+      title: 'Caddy is the only public service, and never holds the stream back',
+      status: 'verified',
+      blocks: [
+        {
+          kind: 'fields',
+          fields: [
+            {
+              label: 'Decision',
+              text: 'In production only Caddy listens on ports 80 and 443. It gets HTTPS certificates itself, sends everything to the web server, flushes each streamed piece at once and compresses only pages, scripts and data, never the event stream.',
+            },
+            {
+              label: 'Why',
+              text: 'One small proxy handles certificates with no extra tooling, and answers still arrive token by token: compressing or buffering the stream would hold tokens back. Everything else stays on the internal network.',
+            },
+            {
+              label: 'Trade-off',
+              text: 'Every request takes one more hop; checked locally, tokens still arrived unbuffered.',
+            },
+          ],
+        },
+        {
+          kind: 'quote',
+          file: 'deploy/Caddyfile',
+          text: '# Pages, scripts and data only: never the answer stream (text/event-stream), where',
+        },
+      ],
+      refs: [{ file: 'deploy/Caddyfile' }, { file: 'deploy/compose.yml' }],
+    },
+    {
+      id: 'manual-deploys',
+      title: 'Deploys run by hand, from images tagged with the commit',
+      status: 'verified',
+      blocks: [
+        {
+          kind: 'fields',
+          fields: [
+            {
+              label: 'Decision',
+              text: "The deploy workflow starts only when someone runs it. It pushes images tagged with the commit SHA, checks the server against its known host key, and signs the server in to the registry with the job's own short-lived token for one pull.",
+            },
+            {
+              label: 'Why',
+              text: 'Releasing is a choice, not a side effect of a push. A SHA tag says exactly which code runs and makes going back a matter of running an older tag; no long-lived registry password is kept on the server.',
+            },
+            {
+              label: 'Trade-off',
+              text: 'Someone has to start each deploy, and the server must be set up first.',
+            },
+          ],
+        },
+        {
+          kind: 'quote',
+          file: '.github/workflows/deploy.yml',
+          text: "# The job's own token signs the server in to the registry for this pull only.",
+        },
+      ],
+      refs: [{ file: '.github/workflows/deploy.yml' }],
+    },
+    {
+      id: 'mongo-backups-only',
+      title: 'Only MongoDB is backed up',
+      status: 'verified',
+      blocks: [
+        {
+          kind: 'fields',
+          fields: [
+            {
+              label: 'Decision',
+              text: 'A nightly script copies every MongoDB database to an S3 bucket the app cannot read or delete, and keeps seven copies on the server. Qdrant and Redis are not backed up.',
+            },
+            {
+              label: 'Why',
+              text: "MongoDB holds everything that cannot be made again. Qdrant's vectors are rebuilt from the PDFs already in S3, and Redis holds only sessions and short-lived state.",
+            },
+            {
+              label: 'Trade-off',
+              text: 'After losing Qdrant, PDFs have to be indexed again before questions work; after losing Redis, everyone signs in again.',
+            },
+          ],
+        },
+        {
+          kind: 'quote',
+          file: 'deploy/backup.sh',
+          text: "(a bucket the app's own key cannot read or delete). Qdrant is not copied: its vectors are rebuilt",
+        },
+      ],
+      refs: [{ file: 'deploy/backup.sh' }, { component: 'mongodb' }],
+    },
   ],
 };

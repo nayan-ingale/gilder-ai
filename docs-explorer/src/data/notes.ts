@@ -422,7 +422,7 @@ export const notes: SymbolNote[] = [
       'Each check is recorded as ok or failed; a failure is logged as a warning.',
       'It answers 200 "ready" if every check passed (or there are none), otherwise 503 "not_ready", with the result of each check.',
     ],
-    why: '/healthz says the process is up; it is meant to be used to restart a stuck app. /readyz says its dependencies answer; it is meant to decide whether to send the app traffic. Nothing outside the tests reads either yet: backend/docker-compose.yml runs only MongoDB, Redis and Qdrant, with no health checks for the apps. Failure reasons go to the logs only, so internal addresses are not exposed.',
+    why: '/healthz says the process is up; it is meant to be used to restart a stuck app. /readyz says its dependencies answer; it is meant to decide whether to send the app traffic. Outside the tests, only the end-to-end CI job reads /healthz, to wait until each app is up; neither Docker Compose file has health checks for the apps, only for the data stores. Failure reasons go to the logs only, so internal addresses are not exposed.',
     returns: 'An Express Router.',
     sideEffects: ['Logs a "readiness check failed" warning for each failed check.'],
     tests: [SERVICE_TEST, ...APP_TESTS],

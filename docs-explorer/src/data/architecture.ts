@@ -67,6 +67,7 @@ export const components: ArchComponent[] = [
       'Design system: Light minimal tokens in light and dark (with --chart-bar for chart columns), Radix-based components, and a theme remembered in a cookie and applied before the first paint.',
       'Security headers on every page (next.config.ts): a Content-Security-Policy without nonces, nosniff, referrer and permissions policies, and no framing.',
       "Reads GATEWAY_URL on the server and the public NEXT_PUBLIC_FIREBASE_* values in the browser. Its .env.example also lists NEXT_PUBLIC_RAZORPAY_KEY_ID, but no code reads it: the checkout takes the key ID from billing's order answer.",
+      "Builds as a standalone server for its Docker image (next.config.ts: output 'standalone'); in production Caddy sits in front of it, and it reaches the gateway on the internal network.",
     ],
     path: 'frontend',
     port: 3000,

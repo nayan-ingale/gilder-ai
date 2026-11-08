@@ -4,7 +4,7 @@ export const deploymentPage: DocPage = {
   id: 'deployment',
   title: 'Deployment',
   summary:
-    'How GilderAi runs today: local data stores in Docker, the apps started with pnpm, and checks in CI. Production hosting is not built yet.',
+    'How GilderAi runs: local data stores in Docker, the apps started with pnpm, checks in CI, and the Docker images, Compose stack, deploy workflow and backups for a server.',
   sections: [
     {
       id: 'local-infrastructure',
@@ -153,7 +153,7 @@ export const deploymentPage: DocPage = {
         },
         {
           kind: 'text',
-          text: "`pnpm dev` runs each app's own `dev` script in parallel, leaving out the docs explorer, which `pnpm docs:dev` runs on its own. The frontend runs `next dev`. Each backend app runs `node --env-file-if-exists=.env --watch src/index.ts`, which restarts it when a file changes; its `start` script is the same command without `--watch`. Only the frontend and the docs explorer have a build step.",
+          text: "`pnpm dev` runs each app's own `dev` script in parallel, leaving out the docs explorer, which `pnpm docs:dev` runs on its own. The frontend runs `next dev`. Each backend app runs `node --env-file-if-exists=.env --watch src/index.ts`, which restarts it when a file changes; its `start` script is the same command without `--watch`. Only the frontend and the docs explorer are built before they run.",
         },
         {
           kind: 'quote',
@@ -170,7 +170,7 @@ export const deploymentPage: DocPage = {
       blocks: [
         {
           kind: 'text',
-          text: "Every backend app answers `GET /healthz` (the process is up) and `GET /readyz` (its data stores answer, or 503 if one does not), without an internal token, even on the services, which need one for every other path. The gateway answers them before its rate limits, so probes are never limited. On SIGTERM or SIGINT it stops taking new connections, waits up to 10 seconds for requests in progress, closes its database connections and exits; if the cleanup hangs, it exits with code 1 after 15 seconds. Under `pnpm dev` one Ctrl+C reaches each backend app twice: from the terminal, and again from `node --watch`, which passes it on. The app logs the second as 'already shutting down' and finishes its cleanup. Nothing calls the health endpoints automatically yet: the Docker health checks cover only the data stores.",
+          text: "Every backend app answers `GET /healthz` (the process is up) and `GET /readyz` (its data stores answer, or 503 if one does not), without an internal token, even on the services, which need one for every other path. The gateway answers them before its rate limits, so probes are never limited. On SIGTERM or SIGINT it stops taking new connections, waits up to 10 seconds for requests in progress, closes its database connections and exits; if the cleanup hangs, it exits with code 1 after 15 seconds. Under `pnpm dev` one Ctrl+C reaches each backend app twice: from the terminal, and again from `node --watch`, which passes it on. The app logs the second as 'already shutting down' and finishes its cleanup. Only the end-to-end CI job calls /healthz, to wait until each app is up; the Docker health checks, in development and in the production stack, cover only the data stores.",
         },
       ],
       refs: [
@@ -242,16 +242,100 @@ export const deploymentPage: DocPage = {
       ],
     },
     {
-      id: 'production',
-      title: 'Production hosting',
-      status: 'planned',
-      plannedIn: 'Launch',
+      id: 'docker-images',
+      title: 'Docker images',
+      status: 'verified',
       blocks: [
         {
           kind: 'text',
-          text: 'Not built yet. How GilderAi runs in production will be documented here once it exists.',
+          text: "Two images, both built from the repository root. The backend image holds the gateway and all four services: it installs only the backend's production packages and copies the TypeScript sources, which Node 22 runs directly, so nothing is compiled. It starts the gateway by default, and Compose gives each container its own entry file instead. The web image builds the frontend once with Next.js's standalone output (`output: 'standalone'`, traced from the repository root so the workspace's packages are included) and copies in `.next/static` and `public/`. Both run as the `node` user.",
+        },
+        {
+          kind: 'quote',
+          file: 'backend/Dockerfile',
+          text: 'CMD ["node", "backend/gateway/src/index.ts"]',
+          caption: 'One image; each container picks its app by its entry file',
+        },
+        {
+          kind: 'text',
+          text: "The `NEXT_PUBLIC_*` values are baked into the web image when it is built, since the browser gets them anyway; `GATEWAY_URL` is read when the server starts and never reaches the browser. `.dockerignore` is an allow-list: only the root manifests and lockfile, `backend/`, `frontend/` and the docs explorer's and e2e package's manifests go in, never `node_modules`, `.next`, coverage or any `.env` file, so secrets stay on the server.",
         },
       ],
+      refs: [
+        { file: 'backend/Dockerfile' },
+        { file: 'frontend/Dockerfile' },
+        { file: '.dockerignore' },
+        { file: 'frontend/next.config.ts' },
+        { component: 'frontend' },
+        { component: 'gateway' },
+      ],
+    },
+    {
+      id: 'production-stack',
+      title: 'The production Compose stack',
+      status: 'verified',
+      blocks: [
+        {
+          kind: 'text',
+          text: '`deploy/compose.yml` (project name `gilder-prod`) runs the whole app on one server: the gateway, the four services and the web server from the two images, plus MongoDB, Redis and Qdrant, all on one internal network. Caddy is the only service reachable from outside, on ports 80 and 443. MongoDB runs as a single-node replica set, which its health check sets up on the first start, because the credits ledger uses transactions, with a 0.25 GB cache for a small server; Redis saves to disk with the `noeviction` policy, as in development. The apps wait until MongoDB and Redis are healthy, and the agent also waits for Qdrant.',
+        },
+        {
+          kind: 'text',
+          text: "Next to the Compose file, `.env` sets `DOMAIN` and the image `TAG` (latest by default), and `env/<app>.env` holds each app's secrets and settings in the format of its `.env.example`. The addresses between containers are set in the Compose file itself: the service URLs, `mongodb://mongo:27017/...`, `redis://redis:6379`, `http://qdrant:6333`, `GATEWAY_URL=http://gateway:8000` and `FRONTEND_ORIGIN=https://<DOMAIN>`. `TRUST_PROXY_HOPS` stays 1: Caddy sets the visitor's address and the web server passes it on.",
+        },
+        {
+          kind: 'text',
+          text: "Caddy gets and renews its HTTPS certificates itself and sends every request to the web server, which forwards `/api/*` to the gateway. It flushes each streamed piece at once and compresses only HTML, CSS, plain text, JavaScript, JSON and SVG, never the answer stream, where compression would hold tokens back. It also drops the Server header. Checked locally: all 9 end-to-end tests passed through Caddy, the standalone web server and the gateway, tokens streamed through unbuffered, arriving between 77 and 513 ms, and the gateway saw the client's address.",
+        },
+        {
+          kind: 'quote',
+          file: 'deploy/Caddyfile',
+          text: '\t\t# Send each streamed token on as soon as it arrives.\n\t\tflush_interval -1',
+        },
+      ],
+      refs: [
+        { file: 'deploy/compose.yml' },
+        { file: 'deploy/Caddyfile' },
+        { component: 'mongodb' },
+        { component: 'redis' },
+        { component: 'qdrant' },
+        { flow: 'run-turn' },
+      ],
+    },
+    {
+      id: 'deploy-workflow',
+      title: 'The deploy workflow',
+      status: 'verified',
+      blocks: [
+        {
+          kind: 'text',
+          text: "`.github/workflows/deploy.yml` runs only by hand, from the Actions tab, once a server is set up; two runs never overlap, and a running one is never cancelled. The first job builds both images with a build cache and pushes them to GitHub's container registry, each tagged with the commit SHA and `latest`; the web image is built with the `NEXT_PUBLIC_*` values from the repository's variables. The second job, in the production environment, sets up SSH with the deploy key from a secret and checks the server's host key against `DEPLOY_KNOWN_HOSTS`, copies `compose.yml`, the `Caddyfile` and `backup.sh` to `~/gilder-ai`, signs the server in to the registry with the job's own `GITHUB_TOKEN` for that pull only, runs `docker compose pull` and `up -d` with the new SHA as the tag, signs out and removes unused images.",
+        },
+        {
+          kind: 'quote',
+          file: '.github/workflows/deploy.yml',
+          text: 'on:\n  workflow_dispatch:',
+          caption: 'Deploys start only by hand',
+        },
+      ],
+      refs: [{ file: '.github/workflows/deploy.yml' }, { file: 'deploy/compose.yml' }],
+    },
+    {
+      id: 'backups',
+      title: 'Backups',
+      status: 'verified',
+      blocks: [
+        {
+          kind: 'text',
+          text: "`deploy/backup.sh`, meant to run nightly from cron, dumps every MongoDB database as one compressed archive, copies it to a backup bucket in S3 (one the app's own key cannot read or delete) with the AWS CLI in a container, and keeps the last seven copies on the server. Qdrant is not backed up: its vectors are rebuilt from the PDFs, which are already in S3. Redis holds only sessions and other short-lived state. The script's header gives the restore command.",
+        },
+        {
+          kind: 'quote',
+          file: 'deploy/backup.sh',
+          text: 'docker compose exec -T mongo mongodump --archive --gzip --quiet > "backups/$name"',
+        },
+      ],
+      refs: [{ file: 'deploy/backup.sh' }, { component: 'mongodb' }, { component: 's3' }],
     },
   ],
 };
