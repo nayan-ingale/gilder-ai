@@ -1,0 +1,73 @@
+/*
+ * GilderAi design tokens: the Light minimal theme and its dark twin. Components use the Tailwind
+ * names from globals.css (bg-surface, text-fg-muted...), never raw colours, so a theme change is
+ * a change here only. Every text pairing passes WCAG AA; tokens.test.ts checks it.
+ *
+ * The theme follows the system unless the user picks one: <html data-theme="light|dark">.
+ */
+
+:root {
+  --bg: #ffffff;
+  --surface: #f7f7f8;
+  --raised: #ffffff;
+  --sunken: #f1f1f3;
+  --border: #e7e7ea;
+  --border-strong: #d4d4d9;
+  --text: #111114;
+  --text-muted: #55555f;
+  --text-subtle: #64646e;
+  --accent: #2d5be3;
+  --accent-ink: #ffffff;
+  --accent-text: #2448c2;
+  --accent-soft: rgba(45, 91, 227, 0.08);
+  --danger: #c2362b;
+  --success: #1f7a45;
+  --warning: #8f6400;
+  --code-bg: #0f0f12;
+  color-scheme: light;
+}
+
+/* The same dark values twice: once for "follow the system", once for an explicit choice. */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme='light']) {
+    --bg: #0b0b0d;
+    --surface: #111114;
+    --raised: #18181c;
+    --sunken: #08080a;
+    --border: #24242a;
+    --border-strong: #34343c;
+    --text: #ededf0;
+    --text-muted: #a0a0ab;
+    --text-subtle: #8b8b96;
+    --accent: #6f8cff;
+    --accent-ink: #0b0b0d;
+    --accent-text: #8fa6ff;
+    --accent-soft: rgba(111, 140, 255, 0.12);
+    --danger: #ff7a6e;
+    --success: #5fd08f;
+    --warning: #e8b44a;
+    --code-bg: #08080a;
+    color-scheme: dark;
+  }
+}
+
+:root[data-theme='dark'] {
+  --bg: #0b0b0d;
+  --surface: #111114;
+  --raised: #18181c;
+  --sunken: #08080a;
+  --border: #24242a;
+  --border-strong: #34343c;
+  --text: #ededf0;
+  --text-muted: #a0a0ab;
+  --text-subtle: #8b8b96;
+  --accent: #6f8cff;
+  --accent-ink: #0b0b0d;
+  --accent-text: #8fa6ff;
+  --accent-soft: rgba(111, 140, 255, 0.12);
+  --danger: #ff7a6e;
+  --success: #5fd08f;
+  --warning: #e8b44a;
+  --code-bg: #08080a;
+  color-scheme: dark;
+}
