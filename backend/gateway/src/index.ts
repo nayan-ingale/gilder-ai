@@ -1,4 +1,10 @@
-import { createLogger, createRedis, pingRedis, startService } from '@gilder/shared';
+import {
+  createLogger,
+  createRedis,
+  importInternalPrivateKey,
+  pingRedis,
+  startService,
+} from '@gilder/shared';
 import { createApp } from './app.ts';
 import { env } from './env.ts';
 
@@ -10,7 +16,20 @@ const logger = createLogger({
 
 const redis = createRedis(env.REDIS_URL, logger);
 
-const app = createApp({ logger, readinessChecks: { redis: () => pingRedis(redis) } });
+const app = createApp({
+  logger,
+  readinessChecks: { redis: () => pingRedis(redis) },
+  redis,
+  privateKey: await importInternalPrivateKey(env.INTERNAL_PRIVATE_KEY),
+  serviceUrls: {
+    auth: env.AUTH_SERVICE_URL,
+    chat: env.CHAT_SERVICE_URL,
+    agent: env.AGENT_SERVICE_URL,
+    billing: env.BILLING_SERVICE_URL,
+  },
+  allowedOrigins: env.FRONTEND_ORIGIN,
+  trustProxyHops: env.TRUST_PROXY_HOPS,
+});
 
 await startService(app, {
   port: env.PORT,
