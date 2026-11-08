@@ -59,5 +59,5 @@ export function displayName(raw: string, mime: UploadType): string {
 
 /** The storage key: built from IDs only, so a file name can never choose or change it. */
 export function storageKey(userId: string, kind: 'upload' | 'generated', fileId: string): string {
-  return `users/${userId}/${kind}s/${fileId}`;
+  return `users/${userId}/${kind === 'upload' ? 'uploads' : 'generated'}/${fileId}`;
 }

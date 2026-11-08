@@ -115,6 +115,8 @@ export interface MessageView {
   status: (typeof MESSAGE_STATUSES)[number];
   clientMessageId: string | null;
   attachments: string[];
+  /** Files the answer made (PDFs, slides, images), by ID. */
+  fileRefs: string[];
   artifacts: unknown[];
   sources: unknown[];
   citations: unknown[];
@@ -130,6 +132,7 @@ export function toMessage(message: MessageDocument): MessageView {
     status: message.status,
     clientMessageId: message.clientMessageId ?? null,
     attachments: message.attachments,
+    fileRefs: message.fileRefs,
     artifacts: message.artifacts,
     sources: message.sources,
     citations: message.citations,

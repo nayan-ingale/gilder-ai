@@ -44,6 +44,8 @@ export interface MessageUpdate {
   artifacts?: Record<string, unknown>[];
   sources?: Record<string, unknown>[];
   citations?: Record<string, unknown>[];
+  /** Files the answer made, by ID. */
+  fileRefs?: string[];
 }
 
 /** A finished message from history, with its ID. */

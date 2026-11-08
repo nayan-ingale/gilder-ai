@@ -56,6 +56,7 @@ const updateMessageBody = z
     status: z.enum(MESSAGE_STATUSES).optional(),
     agent: z.enum(AGENTS).optional(),
     attachments: fileIds.optional(),
+    fileRefs: fileIds.optional(),
     artifacts: records.optional(),
     sources: records.optional(),
     citations: records.optional(),

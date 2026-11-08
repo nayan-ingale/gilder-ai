@@ -17,6 +17,7 @@ import { createLlm } from './llm/llm.ts';
 import { buildProviders } from './llm/providers.ts';
 import { readyDocuments } from './files/documents.ts';
 import { createS3FileStore } from './files/file-store.ts';
+import { mockImage, pollinationsImage } from './generate/images.ts';
 import { FileModel } from './files/models.ts';
 import { startFileCleanup } from './rag/cleanup.ts';
 import { createGeminiEmbedder, mockEmbedder } from './rag/embeddings.ts';
@@ -104,6 +105,11 @@ const agents = buildAgents({
   ...(fileStore
     ? {
         pdfQa: { embedder, vectors, documentsFor: readyDocuments },
+        generate: {
+          store: fileStore,
+          drawImage: env.LLM_MODE === 'mock' ? mockImage : pollinationsImage,
+          mode: env.LLM_MODE,
+        },
         ...(env.LLM_MODE === 'mock' || env.GEMINI_API_KEY
           ? {
               imageQa: {

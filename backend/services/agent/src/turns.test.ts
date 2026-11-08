@@ -24,6 +24,9 @@ import request from 'supertest';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { chatAgent } from './agents/chat.ts';
 import { codeAgent } from './agents/code.ts';
+import { createPdfAgent } from './agents/generate.ts';
+import { createMemoryFileStore } from './files/file-store.ts';
+import { mockImage } from './generate/images.ts';
 import { createPdfQaAgent } from './agents/pdf-qa.ts';
 import { createSearchAgent } from './agents/search.ts';
 import { readyDocuments } from './files/documents.ts';
@@ -148,8 +151,9 @@ function agentApp() {
         search: createSearchAgent(mockWebSearch),
         code: codeAgent,
         pdf_qa: createPdfQaAgent({ embedder: mockEmbedder, vectors, documentsFor: readyDocuments }),
+        pdf: createPdfAgent({ store: createMemoryFileStore(), drawImage: mockImage, mode: 'mock' }),
       },
-      available: new Set(['chat', 'search', 'code', 'pdf_qa']),
+      available: new Set(['chat', 'search', 'code', 'pdf_qa', 'pdf']),
       stops,
     },
   });
@@ -596,6 +600,32 @@ describe('attachments', () => {
     expect((await send(elsewhere, 2)).status).toBe(404);
     expect((await send(theirs, 3)).status).toBe(404);
     expect(await balanceOf(me)).toBe(100);
+  });
+});
+
+describe('file generation in a turn', () => {
+  it('streams progress and the file, saves it on the answer and charges 10 credits', async () => {
+    const chatId = await newChat(me);
+    await grantCredits(me);
+
+    const { events } = await turnEvents(`/chats/${chatId}/turns`, me, {
+      content: '/pdf a packing list for Goa',
+      clientMessageId: 'client-0001',
+    });
+
+    expect(events.filter((event) => event.event === 'progress')).toHaveLength(3);
+    const file = events.find((event) => event.event === 'file')?.data as {
+      fileId: string;
+      kind: string;
+      url: string;
+    };
+    expect(file).toMatchObject({ kind: 'pdf' });
+    expect(file.url).toContain('signed=1');
+    const history = await request(`http://localhost:${chatApp.port}`)
+      .get(`/chats/${chatId}/messages`)
+      .set(INTERNAL_TOKEN_HEADER, await gatewayToken(me, 'chat'));
+    expect(history.body.items[1].fileRefs).toEqual([file.fileId]);
+    expect(await balanceOf(me)).toBe(90);
   });
 });
 

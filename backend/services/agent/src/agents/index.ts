@@ -2,6 +2,12 @@ import type { Agent } from '@gilder/shared';
 import type { WebSearch } from '../search/web-search.ts';
 import { chatAgent } from './chat.ts';
 import { codeAgent } from './code.ts';
+import {
+  createImageAgent,
+  createPdfAgent,
+  createSlidesAgent,
+  type GenerateTools,
+} from './generate.ts';
 import { createImageQaAgent, type ImageQaTools } from './image-qa.ts';
 import { createPdfQaAgent, type PdfQaTools } from './pdf-qa.ts';
 import { createSearchAgent } from './search.ts';
@@ -14,6 +20,8 @@ export interface AgentTools {
   pdfQa?: PdfQaTools | undefined;
   /** Reading attached images; without it image questions are off. */
   imageQa?: ImageQaTools | undefined;
+  /** Storage and drawing for files the agents make; without it PDF, slides and images are off. */
+  generate?: GenerateTools | undefined;
 }
 
 /** The agents this server runs. The router only picks from these; anything else becomes chat. */
@@ -24,6 +32,13 @@ export function buildAgents(tools: AgentTools): Partial<Record<Agent, AgentRunne
     ...(tools.webSearch ? { search: createSearchAgent(tools.webSearch) } : {}),
     ...(tools.pdfQa ? { pdf_qa: createPdfQaAgent(tools.pdfQa) } : {}),
     ...(tools.imageQa ? { image_qa: createImageQaAgent(tools.imageQa) } : {}),
+    ...(tools.generate
+      ? {
+          pdf: createPdfAgent(tools.generate),
+          slides: createSlidesAgent(tools.generate),
+          image: createImageAgent(tools.generate),
+        }
+      : {}),
   };
 }
 

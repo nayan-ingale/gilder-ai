@@ -2,6 +2,7 @@ import type { Agent } from '@gilder/shared';
 import type { Llm, LlmEvent } from '../llm/llm.ts';
 import type { LlmMessage } from '../llm/types.ts';
 import type { Source } from '../search/web-search.ts';
+import type { GeneratedFile } from '../files/generated.ts';
 import type { CodeFile } from './code-files.ts';
 
 /** A file sent with the message, already checked: the user's, ready, and from this chat. */
@@ -41,7 +42,9 @@ export type AgentEvent =
   | LlmEvent
   | { type: 'sources'; items: Source[] }
   | { type: 'artifact'; files: CodeFile[] }
-  | { type: 'citations'; items: Citation[] };
+  | { type: 'citations'; items: Citation[] }
+  | { type: 'progress'; step: string; current: number; total: number }
+  | { type: 'file'; file: GeneratedFile };
 
 export interface AgentRunner {
   name: Agent;
