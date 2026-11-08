@@ -1,8 +1,17 @@
-import { type Agent, AppError, CREDIT_COSTS, mongoose, SIGNUP_CREDITS } from '@gilder/shared';
+import {
+  type Agent,
+  AppError,
+  CREDIT_COSTS,
+  mongoose,
+  PLANS,
+  type PlanId,
+  SIGNUP_CREDITS,
+} from '@gilder/shared';
 import {
   type AccountDocument,
   AccountModel,
   LedgerModel,
+  PaymentModel,
   type ReservationDocument,
   ReservationModel,
 } from './models.ts';
@@ -259,4 +268,78 @@ function assertReservationId(reservationId: string): void {
 async function balanceOf(userId: string, session?: mongoose.ClientSession): Promise<number> {
   const account = await AccountModel.findById(userId).session(session ?? null);
   return account?.balance ?? 0;
+}
+
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+export interface PurchaseResult {
+  account: AccountDocument;
+  /** False when this payment had already been granted: the call changed nothing. */
+  granted: boolean;
+}
+
+/**
+ * Grants a paid order's credits, once, whoever reports the payment first: the browser's verify
+ * call or Razorpay's webhook. One transaction marks the payment paid, appends the purchase
+ * entry and raises the balance; the plan badge runs 30 days from now (or from its current end).
+ * A replay finds the payment already paid and grants nothing.
+ */
+export async function grantPurchase(input: {
+  orderId: string;
+  paymentId: string;
+  /** When the browser reports it: the payment must belong to this user. */
+  userId?: string;
+}): Promise<PurchaseResult> {
+  const existing = await PaymentModel.findOne({ orderId: input.orderId });
+  if (!existing || (input.userId !== undefined && existing.userId !== input.userId)) {
+    throw new AppError('not_found', 'No such order');
+  }
+  const ownerId = existing.userId;
+
+  let granted = false;
+  try {
+    granted = await inTransaction(async (session) => {
+      const payment = await PaymentModel.findOneAndUpdate(
+        { orderId: input.orderId, status: 'created' },
+        { status: 'paid', paymentId: input.paymentId, paidAt: new Date() },
+        { returnDocument: 'after', session },
+      );
+      if (!payment) {
+        return false;
+      }
+      const plan = PLANS[payment.plan as PlanId];
+      await LedgerModel.create(
+        [
+          {
+            userId: ownerId,
+            delta: payment.credits,
+            kind: 'purchase',
+            paymentId: input.paymentId,
+            metadata: { orderId: input.orderId, plan: payment.plan },
+          },
+        ],
+        { session },
+      );
+      const account = await AccountModel.findById(ownerId).session(session);
+      const badgeFrom = Math.max(Date.now(), account?.planExpiresAt?.getTime() ?? 0);
+      await AccountModel.updateOne(
+        { _id: ownerId },
+        {
+          $inc: { balance: payment.credits },
+          $set: {
+            plan: payment.plan,
+            planExpiresAt: new Date(badgeFrom + plan.validityDays * DAY_MS),
+          },
+        },
+        { upsert: true, session },
+      );
+      return true;
+    });
+  } catch (error) {
+    // The same payment reported twice at once: the unique payment ID kept one grant.
+    if (!isDuplicateKey(error)) {
+      throw error;
+    }
+  }
+  return { account: await findAccount(ownerId), granted };
 }

@@ -1,5 +1,12 @@
 import { baseEnvSchema, internalPublicKeySchema, loadEnv, portSchema, z } from '@gilder/shared';
 
+/** A setting that may be left out. Empty counts as unset, as in a fresh copy of .env.example. */
+const optionalSetting = z
+  .string()
+  .trim()
+  .transform((value) => (value === '' ? undefined : value))
+  .optional();
+
 /** Validated at startup: the app refuses to start if anything is missing or invalid. */
 export const env = loadEnv(
   baseEnvSchema.extend({
@@ -11,5 +18,9 @@ export const env = loadEnv(
     AUTH_PUBLIC_KEY: internalPublicKeySchema,
     /** The agent's public key: the agent reserves, commits and releases credits. */
     AGENT_PUBLIC_KEY: internalPublicKeySchema,
+    /** Razorpay test-mode keys and webhook secret. All three, or payments stay off. */
+    RAZORPAY_KEY_ID: optionalSetting,
+    RAZORPAY_KEY_SECRET: optionalSetting,
+    RAZORPAY_WEBHOOK_SECRET: optionalSetting,
   }),
 );

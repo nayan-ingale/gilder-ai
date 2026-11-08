@@ -20,6 +20,7 @@ const { Schema } = mongoose;
 export const PLAN_IDS = Object.keys(PLANS) as PlanId[];
 export const RESERVATION_STATUSES = ['held', 'committed', 'released'] as const;
 export const LEDGER_KINDS = ['signup_grant', 'purchase', 'usage', 'adjustment'] as const;
+export const PAYMENT_STATUSES = ['created', 'paid'] as const;
 
 const wholeCredits = {
   validator: Number.isInteger,
@@ -86,6 +87,44 @@ ledgerSchema.index(
   { unique: true, partialFilterExpression: { kind: 'usage' }, name: 'one_usage_per_reservation' },
 );
 
+// One purchase entry per payment, so a payment verified twice (by the browser and the webhook)
+// grants its credits once.
+ledgerSchema.index(
+  { paymentId: 1 },
+  { unique: true, partialFilterExpression: { kind: 'purchase' }, name: 'one_purchase_per_payment' },
+);
+
+const paymentSchema = new Schema(
+  {
+    userId: { type: String, required: true },
+    /** Razorpay's order, made by the server with the price from the plan config. */
+    orderId: { type: String, required: true },
+    /** Set once paid. Unique, so a payment can't be used twice. */
+    paymentId: { type: String },
+    plan: { type: String, enum: PLAN_IDS, required: true },
+    amountPaise: { type: Number, required: true, min: 1, validate: wholeCredits },
+    credits: { type: Number, required: true, min: 1, validate: wholeCredits },
+    status: { type: String, enum: PAYMENT_STATUSES, required: true, default: 'created' },
+    paidAt: { type: Date, default: null },
+  },
+  { timestamps: true },
+);
+paymentSchema.index({ orderId: 1 }, { unique: true });
+paymentSchema.index(
+  { paymentId: 1 },
+  { unique: true, partialFilterExpression: { paymentId: { $type: 'string' } } },
+);
+paymentSchema.index({ userId: 1, createdAt: -1 });
+
+/** Webhook deliveries already handled, by Razorpay's event ID, so a redelivery does nothing. */
+const webhookEventSchema = new Schema(
+  {
+    _id: { type: String, required: true },
+    type: { type: String, required: true },
+  },
+  { timestamps: { createdAt: 'receivedAt', updatedAt: false }, collection: 'webhookEvents' },
+);
+
 export type Account = InferSchemaType<typeof accountSchema>;
 export type AccountDocument = HydratedDocument<Account>;
 export type Reservation = InferSchemaType<typeof reservationSchema>;
@@ -95,6 +134,34 @@ export type LedgerEntry = InferSchemaType<typeof ledgerSchema>;
 export const AccountModel = mongoose.model('Account', accountSchema);
 export const ReservationModel = mongoose.model('Reservation', reservationSchema);
 export const LedgerModel = mongoose.model('LedgerEntry', ledgerSchema);
+export const PaymentModel = mongoose.model('Payment', paymentSchema);
+export const WebhookEventModel = mongoose.model('WebhookEvent', webhookEventSchema);
+
+export type Payment = InferSchemaType<typeof paymentSchema>;
+export type PaymentDocument = HydratedDocument<Payment>;
+
+/** What the API shows of a payment. */
+export interface PaymentView {
+  orderId: string;
+  plan: PlanId;
+  amountPaise: number;
+  credits: number;
+  status: (typeof PAYMENT_STATUSES)[number];
+  createdAt: string;
+  paidAt: string | null;
+}
+
+export function toPayment(payment: PaymentDocument): PaymentView {
+  return {
+    orderId: payment.orderId,
+    plan: payment.plan as PlanId,
+    amountPaise: payment.amountPaise,
+    credits: payment.credits,
+    status: payment.status,
+    createdAt: payment.createdAt.toISOString(),
+    paidAt: payment.paidAt ? payment.paidAt.toISOString() : null,
+  };
+}
 
 /** What the API shows of an account. */
 export interface AccountView {

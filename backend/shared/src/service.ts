@@ -1,5 +1,5 @@
 import type { AddressInfo } from 'node:net';
-import express, { type Express } from 'express';
+import express, { type Express, type Request } from 'express';
 import helmet from 'helmet';
 import { pinoHttp } from 'pino-http';
 import { errorHandler, notFoundHandler } from './errors.ts';
@@ -38,6 +38,14 @@ export interface ServiceOptions {
  * Builds an Express app with the shared middleware in the right order: request ID → request
  * logging → security headers → JSON body → health → internal token → routes → 404 → errors.
  */
+/** A request whose JSON body bytes were kept as they arrived. */
+export type RawBodyRequest = Request & { rawBody?: Buffer };
+
+/** The JSON body exactly as it arrived, before parsing; undefined when there was none. */
+export function rawBodyOf(req: Request): Buffer | undefined {
+  return (req as RawBodyRequest).rawBody;
+}
+
 export function createService({
   name,
   logger,
@@ -66,7 +74,15 @@ export function createService({
   );
   app.use(helmet());
   if (parseJson) {
-    app.use(express.json({ limit: bodyLimit }));
+    // The exact bytes are kept too, for checks that sign the raw body, such as webhooks.
+    app.use(
+      express.json({
+        limit: bodyLimit,
+        verify: (req, _res, buffer) => {
+          (req as RawBodyRequest).rawBody = buffer;
+        },
+      }),
+    );
   }
   app.use(healthRouter(name, readinessChecks, logger));
   // After health, so probes need no token; before the routes, so an unknown path without a token

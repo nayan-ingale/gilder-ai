@@ -8,6 +8,9 @@ import {
 import type { Express } from 'express';
 import { accountRouter } from './account-routes.ts';
 import { internalRouter } from './internal-routes.ts';
+import { paymentRouter } from './payment-routes.ts';
+import type { PaymentGateway } from './razorpay.ts';
+import { usageRouter } from './usage-routes.ts';
 
 export interface AppDeps {
   logger: Logger;
@@ -16,6 +19,8 @@ export interface AppDeps {
   internalPublicKey: InternalKey;
   /** Public keys of the services that call billing directly: auth and the agent. */
   callerKeys: Partial<Record<ServiceCaller, InternalKey>>;
+  /** Razorpay; left out, the payment routes answer 503. */
+  payments?: PaymentGateway | undefined;
 }
 
 export function createApp({
@@ -23,6 +28,7 @@ export function createApp({
   readinessChecks,
   internalPublicKey,
   callerKeys,
+  payments,
 }: AppDeps): Express {
   return createService({
     name: 'billing',
@@ -31,6 +37,8 @@ export function createApp({
     internalAuth: { publicKey: internalPublicKey, audience: 'billing', callers: callerKeys },
     routes: (app) => {
       app.use(accountRouter());
+      app.use(paymentRouter({ payments, logger }));
+      app.use(usageRouter());
       app.use(internalRouter());
     },
   });
