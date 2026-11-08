@@ -37,6 +37,12 @@ export const agentEnvSchema = baseEnvSchema
     GEMINI_API_KEY: optionalSetting,
     /** Web search for the search agent. Without it, search is off in live mode. */
     TAVILY_API_KEY: optionalSetting,
+    /** File storage: an S3 bucket and an IAM user limited to it. All four, or uploads stay off. */
+    AWS_REGION: optionalSetting,
+    S3_BUCKET: optionalSetting,
+    AWS_ACCESS_KEY_ID: optionalSetting,
+    AWS_SECRET_ACCESS_KEY: optionalSetting,
+    QDRANT_URL: optionalSetting,
   })
   .superRefine((env, ctx) => {
     // Chat and routing run on Groq, so live mode can't work without it. The other keys only turn

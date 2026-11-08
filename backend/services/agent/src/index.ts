@@ -15,6 +15,7 @@ import { createApp } from './app.ts';
 import { env } from './env.ts';
 import { createLlm } from './llm/llm.ts';
 import { buildProviders } from './llm/providers.ts';
+import { createS3FileStore } from './files/file-store.ts';
 import { createMemory } from './memory.ts';
 import { createTavilySearch, mockWebSearch } from './search/web-search.ts';
 import { billingService, chatService } from './services.ts';
@@ -75,6 +76,18 @@ const agents = buildAgents({
 });
 logger.info({ agents: [...availableAgents(agents)] }, 'agents ready');
 
+const { AWS_REGION: region, S3_BUCKET: bucket, AWS_ACCESS_KEY_ID: accessKeyId } = env;
+const secretAccessKey = env.AWS_SECRET_ACCESS_KEY;
+const fileStore =
+  region && bucket && accessKeyId && secretAccessKey
+    ? createS3FileStore({ region, bucket, accessKeyId, secretAccessKey })
+    : undefined;
+if (!fileStore) {
+  logger.warn(
+    'uploads are off: set AWS_REGION, S3_BUCKET, AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY',
+  );
+}
+
 const app = createApp({
   logger,
   readinessChecks: { mongo: pingMongo, redis: () => pingRedis(redis) },
@@ -91,6 +104,7 @@ const app = createApp({
     available: availableAgents(agents),
     stops,
   },
+  files: { store: fileStore, chat },
 });
 
 await startService(app, {

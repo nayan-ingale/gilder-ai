@@ -98,6 +98,21 @@ describe('matchRoute', () => {
     expect(PUBLIC_ROUTES.filter((route) => route.webhook)).toHaveLength(1);
   });
 
+  it('maps the file routes to the agent, behind a session', () => {
+    const file = '65f0c0ffee1234567890abcd';
+    for (const [method, path, target] of [
+      ['POST', '/api/files/uploads', '/files/uploads'],
+      ['POST', `/api/files/${file}/complete`, `/files/${file}/complete`],
+      ['GET', `/api/files/${file}`, `/files/${file}`],
+      ['GET', `/api/files/${file}/url`, `/files/${file}/url`],
+    ] as const) {
+      expect(matchRoute(method, path), path).toMatchObject({
+        route: { service: 'agent', session: 'required' },
+        targetPath: target,
+      });
+    }
+  });
+
   it('finds nothing for an unknown path or a method the route does not have', () => {
     expect(matchRoute('GET', '/api/nothing-here')).toBeUndefined();
     expect(matchRoute('DELETE', '/api/me')).toBeUndefined();

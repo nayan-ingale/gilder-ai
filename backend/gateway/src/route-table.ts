@@ -113,6 +113,36 @@ export const PUBLIC_ROUTES: readonly PublicRoute[] = [
     session: 'required',
   },
 
+  // Files: start and complete an upload, read a file's details, get a fresh download link.
+  {
+    method: 'POST',
+    path: '/api/files/uploads',
+    service: 'agent',
+    target: '/files/uploads',
+    session: 'required',
+  },
+  {
+    method: 'POST',
+    path: '/api/files/:fileId/complete',
+    service: 'agent',
+    target: '/files/:fileId/complete',
+    session: 'required',
+  },
+  {
+    method: 'GET',
+    path: '/api/files/:fileId',
+    service: 'agent',
+    target: '/files/:fileId',
+    session: 'required',
+  },
+  {
+    method: 'GET',
+    path: '/api/files/:fileId/url',
+    service: 'agent',
+    target: '/files/:fileId/url',
+    session: 'required',
+  },
+
   // Buying credits and the usage page.
   {
     method: 'GET',
