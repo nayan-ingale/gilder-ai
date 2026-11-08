@@ -240,3 +240,67 @@ describe('who may call', () => {
     expect(response.status).toBe(403);
   });
 });
+
+describe('GET /internal/chats/:id/last-turn', () => {
+  it('returns the latest user message and its answer, of any status, skipping replaced ones', async () => {
+    const chat = await ConversationModel.create({ userId: 'u1' });
+    const start = Date.now() - 60_000;
+    const at = (seconds: number) => new Date(start + seconds * 1000);
+    const [, , lastUser, oldAnswer, newAnswer] = await MessageModel.create([
+      { conversationId: chat._id, userId: 'u1', role: 'user', content: 'q1', createdAt: at(1) },
+      {
+        conversationId: chat._id,
+        userId: 'u1',
+        role: 'assistant',
+        content: 'a1',
+        createdAt: at(2),
+      },
+      { conversationId: chat._id, userId: 'u1', role: 'user', content: 'q2', createdAt: at(3) },
+      {
+        conversationId: chat._id,
+        userId: 'u1',
+        role: 'assistant',
+        content: 'a2 old',
+        status: 'failed',
+        createdAt: at(4),
+      },
+      {
+        conversationId: chat._id,
+        userId: 'u1',
+        role: 'assistant',
+        content: 'a2 new',
+        status: 'failed',
+        createdAt: at(5),
+      },
+    ]);
+    await MessageModel.updateOne({ _id: oldAnswer?._id }, { supersededBy: newAnswer?._id });
+
+    const response = await as('u1', 'get', `/internal/chats/${chat.id}/last-turn`);
+
+    expect(response.body).toMatchObject({
+      user: { id: lastUser?.id, content: 'q2' },
+      answer: { id: newAnswer?.id, content: 'a2 new', status: 'failed' },
+    });
+    expect((await as('u2', 'get', `/internal/chats/${chat.id}/last-turn`)).status).toBe(404);
+  });
+
+  it('has no answer while the latest message is unanswered, and nothing in an empty chat', async () => {
+    const empty = await ConversationModel.create({ userId: 'u1' });
+    const chat = await ConversationModel.create({ userId: 'u1' });
+    await MessageModel.create({
+      conversationId: chat._id,
+      userId: 'u1',
+      role: 'user',
+      content: 'q',
+    });
+
+    expect((await as('u1', 'get', `/internal/chats/${empty.id}/last-turn`)).body).toEqual({
+      user: null,
+      answer: null,
+    });
+    expect((await as('u1', 'get', `/internal/chats/${chat.id}/last-turn`)).body).toMatchObject({
+      user: { content: 'q' },
+      answer: null,
+    });
+  });
+});

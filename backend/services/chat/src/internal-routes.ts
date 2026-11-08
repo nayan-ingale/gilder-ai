@@ -130,6 +130,34 @@ export function internalRouter(): Router {
     },
   );
 
+  // The latest user message and the answer after it, whatever their status: what regenerate
+  // and edit act on.
+  router.get('/internal/chats/:id/last-turn', validate({ params: idParams }), async (req, res) => {
+    const userId = res.locals.userId as string;
+    const chat = await findOwnedConversation(userId, (req.params as z.output<typeof idParams>).id);
+    if (!chat) {
+      throw chatNotFound();
+    }
+    const user = await MessageModel.findOne({
+      conversationId: chat._id,
+      role: 'user',
+      supersededBy: null,
+    }).sort({ createdAt: -1, _id: -1 });
+    const answer = user
+      ? await MessageModel.findOne({
+          conversationId: chat._id,
+          role: 'assistant',
+          supersededBy: null,
+          createdAt: { $gte: user.createdAt },
+          _id: { $gt: user._id },
+        }).sort({ createdAt: -1, _id: -1 })
+      : null;
+    res.json({
+      user: user ? toMessage(user) : null,
+      answer: answer ? toMessage(answer) : null,
+    });
+  });
+
   // Save a message. A retried send with the same client ID returns the first copy (200, not 201).
   router.post('/internal/messages', validate({ body: createMessageBody }), async (req, res) => {
     const userId = res.locals.userId as string;
