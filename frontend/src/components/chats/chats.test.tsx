@@ -6,6 +6,7 @@ import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vite
 import { ToastProvider } from '@/components/ui/toast';
 import type { ChatSummary } from '@/lib/chats';
 import { StoreProvider } from '@/store/store';
+import { type ApiAnswer, type ApiCall, json, mockApi } from '@/test/mock-api';
 import { ChatCommands } from './chat-commands';
 import { ChatList } from './chat-list';
 import { MessageList } from './message-list';
@@ -22,16 +23,8 @@ function chat(id: string, title: string, pinned = false): ChatSummary {
   return { id, title, pinned, lastMessageAt: at, createdAt: at };
 }
 
-interface Call {
-  method: string;
-  path: string;
-  body: unknown;
-}
-let calls: Call[];
-let answer: (call: Call) => Response;
-
-const json = (body: unknown, status = 200) =>
-  new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } });
+let calls: ApiCall[];
+let answer: ApiAnswer;
 
 beforeAll(() => {
   globalThis.ResizeObserver ??= class {
@@ -44,32 +37,8 @@ beforeAll(() => {
 });
 
 beforeEach(() => {
-  calls = [];
   pathname.value = '/';
-  // Node's Request needs an absolute URL; the browser resolves '/api/...' against the page.
-  const NodeRequest = globalThis.Request;
-  vi.stubGlobal(
-    'Request',
-    class extends NodeRequest {
-      constructor(input: RequestInfo | URL, init?: RequestInit) {
-        super(typeof input === 'string' ? new URL(input, 'http://localhost:3000') : input, init);
-      }
-    },
-  );
-  vi.stubGlobal(
-    'fetch',
-    vi.fn(async (request: Request) => {
-      const url = new URL(request.url);
-      const text = await request.text();
-      const call = {
-        method: request.method,
-        path: `${url.pathname}${url.search}`,
-        body: text ? JSON.parse(text) : undefined,
-      };
-      calls.push(call);
-      return answer(call);
-    }),
-  );
+  calls = mockApi(() => answer);
 });
 
 afterEach(() => {

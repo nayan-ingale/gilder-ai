@@ -1,5 +1,6 @@
 import type { FetchBaseQueryError } from '@reduxjs/toolkit/query';
 import { createApi, fetchBaseQuery } from '@reduxjs/toolkit/query/react';
+import type { Account } from '@/lib/billing';
 import type { ChatSummary, Page } from '@/lib/chats';
 
 /**
@@ -19,7 +20,7 @@ export interface UpdateChatArgs {
 export const api = createApi({
   reducerPath: 'api',
   baseQuery: fetchBaseQuery({ baseUrl: '/api' }),
-  tagTypes: ['Chat'],
+  tagTypes: ['Chat', 'Account'],
   endpoints: (build) => ({
     /** The sidebar list: pinned chats, then the rest by latest activity, a page at a time. */
     listChats: build.infiniteQuery<Page<ChatSummary>, void, string | null>({
@@ -40,6 +41,12 @@ export const api = createApi({
     getChat: build.query<{ chat: ChatSummary }, string>({
       query: (id) => `/chats/${id}`,
       providesTags: (_result, _error, id) => [{ type: 'Chat', id }],
+    }),
+
+    /** The plan and balance for the credits card. */
+    getAccount: build.query<{ account: Account }, void>({
+      query: () => '/billing/account',
+      providesTags: ['Account'],
     }),
 
     createChat: build.mutation<{ chat: ChatSummary }, { title?: string }>({
@@ -96,6 +103,7 @@ export const {
   useListChatsInfiniteQuery,
   useSearchChatsQuery,
   useGetChatQuery,
+  useGetAccountQuery,
   useCreateChatMutation,
   useUpdateChatMutation,
   useDeleteChatMutation,

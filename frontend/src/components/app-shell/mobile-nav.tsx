@@ -4,6 +4,7 @@ import { Menu, Plus } from 'lucide-react';
 import Link from 'next/link';
 import { Dialog as DialogPrimitive } from 'radix-ui';
 import { type MouseEvent, useState } from 'react';
+import { CreditsCard } from '@/components/billing/credits-card';
 import { SearchButton } from '@/components/chats/chat-commands';
 import { ChatList } from '@/components/chats/chat-list';
 import { IconButton } from '@/components/ui/button';
@@ -51,6 +52,7 @@ export function MobileNav() {
           <nav aria-label="Chats" className="mt-4 flex-1 overflow-y-auto px-3">
             <ChatList />
           </nav>
+          <CreditsCard />
         </DialogPrimitive.Content>
       </DialogPrimitive.Portal>
     </DialogPrimitive.Root>

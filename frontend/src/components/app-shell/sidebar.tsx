@@ -1,6 +1,7 @@
 import { Plus } from 'lucide-react';
 import Link from 'next/link';
 import { redirect } from 'next/navigation';
+import { CreditsCard } from '@/components/billing/credits-card';
 import { SearchButton, SearchIconButton } from '@/components/chats/chat-commands';
 import { ChatList } from '@/components/chats/chat-list';
 import { Skeleton } from '@/components/ui/skeleton';
@@ -34,6 +35,7 @@ export function SidebarFrame({ children }: { children: React.ReactNode }) {
       <nav aria-label="Chats" className="mt-4 flex-1 overflow-y-auto px-3">
         <ChatList />
       </nav>
+      <CreditsCard />
       <div className="border-t border-line p-2">{children}</div>
     </aside>
   );
