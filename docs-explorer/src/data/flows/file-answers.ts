@@ -522,7 +522,7 @@ const e2eRun: Flow = {
       title: 'Run Playwright on a desktop and a phone',
       kind: 'function',
       status: 'verified',
-      what: 'Playwright 1.57 installs Chromium and runs the tests one at a time, with one retry in CI: the desktop project (Desktop Chrome) runs everything not tagged @phone, and the phone project (Pixel 7) runs the @phone tests. Locally it uses the installed Chrome against http://localhost:3000, or E2E_BASE_URL.',
+      what: 'On a fixed ubuntu-24.04 runner (Playwright ships browsers only for the Ubuntu versions it supports, and ubuntu-latest moved past them), Playwright 1.57 installs Chromium and runs the tests one at a time, with one retry in CI: the desktop project (Desktop Chrome) runs everything not tagged @phone, and the phone project (Pixel 7) runs the @phone tests. Locally it uses the installed Chrome against http://localhost:3000, or E2E_BASE_URL.',
       why: 'Both screen sizes the app is designed for are checked.',
     },
     {

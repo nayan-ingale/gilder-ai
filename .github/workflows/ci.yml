@@ -48,7 +48,9 @@ jobs:
 
   e2e:
     name: End-to-end tests (mock mode)
-    runs-on: ubuntu-latest
+    # A fixed image: Playwright ships browsers only for the Ubuntu versions it supports, and
+    # ubuntu-latest moved to one it doesn't yet.
+    runs-on: ubuntu-24.04
     timeout-minutes: 25
     steps:
       - uses: actions/checkout@v5
