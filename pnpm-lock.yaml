@@ -39,6 +39,9 @@ importers:
         specifier: ^5.3.0
         version: 5.3.0
     devDependencies:
+      '@gilder/auth':
+        specifier: workspace:*
+        version: link:../services/auth
       '@types/express':
         specifier: ^5.0.6
         version: 5.0.6
