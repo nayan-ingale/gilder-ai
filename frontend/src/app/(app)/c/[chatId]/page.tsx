@@ -2,7 +2,7 @@ import type { Metadata } from 'next';
 import { notFound } from 'next/navigation';
 import { Suspense } from 'react';
 import { ChatHeader } from '@/components/chats/chat-header';
-import { MessageList } from '@/components/chats/message-list';
+import { ChatThread } from '@/components/chat/chat-thread';
 import { Skeleton } from '@/components/ui/skeleton';
 import { getChatWithHistory } from '@/server/chats';
 
@@ -31,7 +31,7 @@ async function ChatView({ params }: { params: Promise<{ chatId: string }> }) {
   return (
     <div className="flex min-h-0 flex-1 flex-col">
       <ChatHeader chat={loaded.chat} />
-      <MessageList messages={loaded.messages.items} />
+      <ChatThread chatId={loaded.chat.id} initialMessages={loaded.messages.items} />
     </div>
   );
 }

@@ -9,7 +9,6 @@ import { StoreProvider } from '@/store/store';
 import { type ApiAnswer, type ApiCall, json, mockApi } from '@/test/mock-api';
 import { ChatCommands } from './chat-commands';
 import { ChatList } from './chat-list';
-import { MessageList } from './message-list';
 
 const router = { push: vi.fn() };
 const pathname = { value: '/' };
@@ -190,37 +189,5 @@ describe('search (⌘K)', () => {
     await userEvent.keyboard('{Meta>}{Shift>}o{/Shift}{/Meta}');
 
     expect(router.push).toHaveBeenCalledWith('/');
-  });
-});
-
-describe('MessageList', () => {
-  it('shows the conversation in order with who said what, and an empty state', () => {
-    const base = {
-      agent: null,
-      clientMessageId: null,
-      attachments: [],
-      artifacts: [],
-      sources: [],
-      citations: [],
-      createdAt: new Date().toISOString(),
-    };
-    render(
-      <MessageList
-        messages={[
-          { ...base, id: 'm1', role: 'user', content: 'Plan a Goa trip', status: 'complete' },
-          { ...base, id: 'm2', role: 'assistant', content: 'Day 1: beaches', status: 'stopped' },
-        ]}
-      />,
-    );
-
-    const items = within(screen.getByRole('list', { name: 'Messages' })).getAllByRole('listitem');
-    expect(items.map((item) => item.textContent)).toEqual([
-      'You: Plan a Goa trip',
-      'GilderAi: Day 1: beachesStopped',
-    ]);
-    cleanup();
-
-    render(<MessageList messages={[]} />);
-    expect(screen.getByText('No messages yet')).toBeTruthy();
   });
 });

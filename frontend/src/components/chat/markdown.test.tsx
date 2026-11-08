@@ -1,0 +1,53 @@
+// @vitest-environment jsdom
+import { cleanup, render, screen } from '@testing-library/react';
+import { afterEach, describe, expect, it } from 'vitest';
+import { Markdown } from './markdown';
+
+afterEach(() => {
+  cleanup();
+});
+
+describe('Markdown', () => {
+  it('shows a model-written image as a link, never loading it (SEC-10)', () => {
+    const { container } = render(
+      <Markdown>{'Look: ![a cat](https://evil.example/pixel.png)'}</Markdown>,
+    );
+
+    expect(container.querySelector('img')).toBeNull();
+    const link = screen.getByRole('link', { name: 'Image: a cat' });
+    expect(link.getAttribute('href')).toBe('https://evil.example/pixel.png');
+    expect(link.getAttribute('rel')).toBe('noopener noreferrer nofollow');
+  });
+
+  it('shows raw HTML as text and drops javascript links', () => {
+    const { container } = render(
+      <Markdown>{'<script>alert(1)</script> <b>bold?</b> [click](javascript:alert(1))'}</Markdown>,
+    );
+
+    expect(container.querySelector('script')).toBeNull();
+    expect(container.querySelector('b')).toBeNull();
+    expect(container.querySelector('a')?.getAttribute('href') ?? '').not.toContain('javascript');
+  });
+
+  it('renders lists, tables and code blocks with a copy button', () => {
+    const { container } = render(
+      <Markdown>
+        {'- one\n- two\n\n| a | b |\n|---|---|\n| 1 | 2 |\n\n```ts\nconst x = 1;\n```'}
+      </Markdown>,
+    );
+
+    expect(container.querySelectorAll('li')).toHaveLength(2);
+    expect(container.querySelector('table td')?.textContent).toBe('1');
+    expect(screen.getByText('ts')).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Copy code' })).toBeTruthy();
+    expect(container.querySelector('a[href^="https://"]')).toBeNull();
+  });
+
+  it('opens links in a new tab without access to this page', () => {
+    render(<Markdown>{'[docs](https://example.com)'}</Markdown>);
+
+    const link = screen.getByRole('link', { name: 'docs' });
+    expect(link.getAttribute('target')).toBe('_blank');
+    expect(link.getAttribute('rel')).toContain('noopener');
+  });
+});
