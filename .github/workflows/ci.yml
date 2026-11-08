@@ -99,11 +99,17 @@ jobs:
       - name: Start the app
         run: |
           mkdir -p logs
+          logs="$PWD/logs"
           for app in gateway services/auth services/chat services/agent services/billing; do
             name=$(basename "$app")
-            (cd "backend/$app" && nohup node --env-file=.env src/index.ts > "../../../logs/$name.log" 2>&1 &)
+            (cd "backend/$app" && nohup node --env-file=.env src/index.ts > "$logs/$name.log" 2>&1 &)
           done
-          (cd frontend && nohup pnpm start > ../logs/frontend.log 2>&1 &)
+          # The same server as the Docker image: the standalone output plus its static files.
+          standalone=frontend/.next/standalone/frontend
+          cp -r frontend/.next/static "$standalone/.next/static"
+          cp -r frontend/public "$standalone/public"
+          (cd frontend && PORT=3000 HOSTNAME=0.0.0.0 nohup node --env-file=.env.local \
+            .next/standalone/frontend/server.js > "$logs/frontend.log" 2>&1 &)
           for port in 8000 8001 8002 8003 8004 3000; do
             for attempt in $(seq 1 60); do
               if curl -fs "http://localhost:$port/$([ "$port" = 3000 ] && echo login || echo healthz)" > /dev/null; then
