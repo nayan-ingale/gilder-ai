@@ -63,10 +63,13 @@ jobs:
       - run: pnpm install --frozen-lockfile
 
       # MongoDB (a replica set, for the credits transactions), Redis and Qdrant, as in development.
-      # Waits for the health checks here rather than with `up --wait`, which gave up on MongoDB
-      # while it was still starting, and shows the logs if one never becomes healthy.
+      # Waits for the health checks in the job and shows the logs if one never becomes healthy.
       - name: Start MongoDB, Redis and Qdrant
+        env:
+          # The version the unit tests use; newer 8.x images refuse to start on this kernel.
+          MONGO_IMAGE: mongo:8.2.6
         run: |
+          echo "kernel $(uname -r)"
           compose="docker compose -f backend/docker-compose.yml"
           $compose up -d
           for attempt in $(seq 1 60); do

@@ -6,7 +6,10 @@ name: gilder-ai
 
 services:
   mongo:
-    image: mongo:8
+    # MONGO_IMAGE pins a version where needed: CI uses mongo:8.2.6, because newer 8.x images refuse
+    # to start on Linux 6.19+ kernels (MongoDB SERVER-121912). A database made by a newer version
+    # can't be opened by an older one, so local data keeps the version that created it.
+    image: ${MONGO_IMAGE:-mongo:8}
     restart: unless-stopped
     # A single-node replica set: MongoDB transactions (used by the credits ledger) need one.
     command: ['--replSet', 'rs0', '--bind_ip_all']

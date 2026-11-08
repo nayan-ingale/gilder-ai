@@ -103,7 +103,9 @@ services:
     depends_on: [frontend]
 
   mongo:
-    image: mongo:8
+    # A fixed version, so a pull never upgrades the database by surprise. 8.2.6 is also what the
+    # tests run; newer 8.x images refuse to start on Linux 6.19+ kernels (MongoDB SERVER-121912).
+    image: mongo:8.2.6
     restart: unless-stopped
     networks: [internal]
     # A single-node replica set (the credits ledger uses transactions), with a small cache for a
