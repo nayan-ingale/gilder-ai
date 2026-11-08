@@ -3,6 +3,7 @@ import {
   createLogger,
   createRedis,
   disconnectMongo,
+  importInternalPublicKey,
   pingMongo,
   pingRedis,
   startService,
@@ -22,6 +23,7 @@ const redis = createRedis(env.REDIS_URL, logger);
 const app = createApp({
   logger,
   readinessChecks: { mongo: pingMongo, redis: () => pingRedis(redis) },
+  internalPublicKey: await importInternalPublicKey(env.INTERNAL_PUBLIC_KEY),
 });
 
 await startService(app, {

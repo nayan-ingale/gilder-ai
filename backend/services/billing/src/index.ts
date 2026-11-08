@@ -2,6 +2,7 @@ import {
   connectMongo,
   createLogger,
   disconnectMongo,
+  importInternalPublicKey,
   pingMongo,
   startService,
 } from '@gilder/shared';
@@ -16,7 +17,11 @@ const logger = createLogger({
 
 await connectMongo(env.MONGODB_URI, logger);
 
-const app = createApp({ logger, readinessChecks: { mongo: pingMongo } });
+const app = createApp({
+  logger,
+  readinessChecks: { mongo: pingMongo },
+  internalPublicKey: await importInternalPublicKey(env.INTERNAL_PUBLIC_KEY),
+});
 
 await startService(app, {
   port: env.PORT,

@@ -6,6 +6,20 @@ export const baseEnvSchema = z.object({
   LOG_LEVEL: z.enum(['fatal', 'error', 'warn', 'info', 'debug', 'trace', 'silent']).default('info'),
 });
 
+/**
+ * The gateway's public key, which every service needs to check internal tokens. Written by
+ * `pnpm setup:keys`. Escaped \n line breaks are turned back into real ones. The messages say how
+ * to fix it and never repeat the value.
+ */
+export const internalPublicKeySchema = z
+  .string({ error: 'is missing: run pnpm setup:keys' })
+  .transform((value) => value.replaceAll('\\n', '\n'))
+  .pipe(
+    z
+      .string()
+      .startsWith('-----BEGIN PUBLIC KEY-----', 'is not a PEM public key: run pnpm setup:keys'),
+  );
+
 /** A TCP port, with the app's default when the variable is not set. */
 export function portSchema(defaultPort: number) {
   return z.coerce.number().int().min(1).max(65_535).default(defaultPort);

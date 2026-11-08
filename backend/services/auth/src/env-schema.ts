@@ -1,4 +1,4 @@
-import { baseEnvSchema, portSchema, z } from '@gilder/shared';
+import { baseEnvSchema, internalPublicKeySchema, portSchema, z } from '@gilder/shared';
 
 /**
  * The auth service's settings and the rules between them. env.ts loads them at startup; they live
@@ -24,9 +24,7 @@ export const authEnvSchema = baseEnvSchema
     MONGODB_URI: z.string().min(1),
     REDIS_URL: z.string().min(1),
     /** The gateway's public key, for checking internal tokens. Written by `pnpm setup:keys`. */
-    INTERNAL_PUBLIC_KEY: z
-      .string({ error: 'is missing: run pnpm setup:keys' })
-      .startsWith('-----BEGIN PUBLIC KEY-----', 'is not a PEM public key: run pnpm setup:keys'),
+    INTERNAL_PUBLIC_KEY: internalPublicKeySchema,
     /** Sign-in with just an email, for local development and tests. Never allowed in production. */
     AUTH_DEV_LOGIN: z.stringbool({ error: 'must be true or false' }).default(false),
     /** Google sign-in: a service account of your own Firebase project. All three, or none. */
