@@ -1,6 +1,6 @@
 'use client';
 
-import { Check, LogOut, Monitor, Moon, Sun } from 'lucide-react';
+import { BarChart3, Check, CreditCard, LogOut, Monitor, Moon, Sun } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import { useState } from 'react';
 import { Avatar } from '@/components/ui/avatar';
@@ -93,6 +93,19 @@ export function AccountMenu({ user, compact = false }: AccountMenuProps) {
             ) : null}
           </DropdownMenuItem>
         ))}
+        <DropdownMenuSeparator />
+        <DropdownMenuItem
+          icon={<CreditCard size={15} />}
+          onSelect={() => router.push('/settings/billing')}
+        >
+          Billing and credits
+        </DropdownMenuItem>
+        <DropdownMenuItem
+          icon={<BarChart3 size={15} />}
+          onSelect={() => router.push('/settings/usage')}
+        >
+          Usage
+        </DropdownMenuItem>
         <DropdownMenuSeparator />
         <DropdownMenuItem icon={<LogOut size={15} />} onSelect={() => void signOut()}>
           Sign out

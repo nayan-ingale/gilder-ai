@@ -1,6 +1,7 @@
 'use client';
 
 import { Coins } from 'lucide-react';
+import Link from 'next/link';
 import { Badge } from '@/components/ui/badge';
 import { Skeleton } from '@/components/ui/skeleton';
 import { LOW_BALANCE, PLAN_NAMES } from '@/lib/billing';
@@ -34,6 +35,12 @@ export function CreditsCard() {
         {low ? <p className="text-xs text-warning">Running low</p> : null}
       </div>
       <Badge tone={plan === 'free' ? 'neutral' : 'accent'}>{PLAN_NAMES[plan]}</Badge>
+      <Link
+        href="/settings/billing"
+        className="text-xs font-medium text-accent-text underline-offset-2 hover:underline"
+      >
+        Get more
+      </Link>
     </section>
   );
 }

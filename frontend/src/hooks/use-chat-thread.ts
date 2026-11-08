@@ -198,6 +198,8 @@ export function useChatThread(chatId: string, initial: ChatMessage[]): ChatThrea
           api.util.invalidateTags([
             { type: 'Chat', id: 'LIST' },
             { type: 'Chat', id: chatId },
+            // The answer was charged: the usage page's numbers changed.
+            'Usage',
           ]),
         );
       }

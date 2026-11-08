@@ -1,6 +1,6 @@
 import type { FetchBaseQueryError } from '@reduxjs/toolkit/query';
 import { createApi, fetchBaseQuery } from '@reduxjs/toolkit/query/react';
-import type { Account } from '@/lib/billing';
+import type { Account, Payment, Plan, UsageEvent, UsageSummary } from '@/lib/billing';
 import type { ChatSummary, Page } from '@/lib/chats';
 
 /**
@@ -20,7 +20,7 @@ export interface UpdateChatArgs {
 export const api = createApi({
   reducerPath: 'api',
   baseQuery: fetchBaseQuery({ baseUrl: '/api' }),
-  tagTypes: ['Chat', 'Account'],
+  tagTypes: ['Chat', 'Account', 'Payment', 'Usage'],
   endpoints: (build) => ({
     /** The sidebar list: pinned chats, then the rest by latest activity, a page at a time. */
     listChats: build.infiniteQuery<Page<ChatSummary>, void, string | null>({
@@ -47,6 +47,51 @@ export const api = createApi({
     getAccount: build.query<{ account: Account }, void>({
       query: () => '/billing/account',
       providesTags: ['Account'],
+    }),
+
+    getPlans: build.query<{ plans: Plan[]; currency: string; testMode: boolean }, void>({
+      query: () => '/billing/plans',
+    }),
+
+    getPayments: build.query<{ items: Payment[] }, void>({
+      query: () => '/billing/payments',
+      providesTags: ['Payment'],
+    }),
+
+    /** An order priced by the server; the browser only names the plan. */
+    createOrder: build.mutation<
+      {
+        order: { id: string; amountPaise: number; currency: string; planId: string };
+        keyId: string;
+      },
+      { planId: Plan['id'] }
+    >({
+      query: (body) => ({ url: '/billing/orders', method: 'POST', body }),
+      invalidatesTags: ['Payment'],
+    }),
+
+    /** The checkout's result, checked by the server before credits are added. */
+    verifyPayment: build.mutation<
+      { account: Account; granted: boolean },
+      { orderId: string; paymentId: string; signature: string }
+    >({
+      query: ({ orderId, ...body }) => ({
+        url: `/billing/orders/${encodeURIComponent(orderId)}/verify`,
+        method: 'POST',
+        body,
+      }),
+      invalidatesTags: ['Account', 'Payment'],
+    }),
+
+    getUsageSummary: build.query<UsageSummary, { days: number; timeZone: string }>({
+      query: ({ days, timeZone }) =>
+        `/usage/summary?days=${days}&tz=${encodeURIComponent(timeZone)}`,
+      providesTags: ['Usage'],
+    }),
+
+    getUsageEvents: build.query<{ items: UsageEvent[] }, void>({
+      query: () => '/usage/events?limit=30',
+      providesTags: ['Usage'],
     }),
 
     createChat: build.mutation<{ chat: ChatSummary }, { title?: string }>({
@@ -104,6 +149,12 @@ export const {
   useSearchChatsQuery,
   useGetChatQuery,
   useGetAccountQuery,
+  useGetPlansQuery,
+  useGetPaymentsQuery,
+  useCreateOrderMutation,
+  useVerifyPaymentMutation,
+  useGetUsageSummaryQuery,
+  useGetUsageEventsQuery,
   useCreateChatMutation,
   useUpdateChatMutation,
   useDeleteChatMutation,

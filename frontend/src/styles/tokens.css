@@ -17,6 +17,8 @@
   --text-muted: #55555f;
   --text-subtle: #64646e;
   --accent: #2d5be3;
+  /* Chart bars: the accent, a step darker in dark mode to stay in the data-colour lightness band. */
+  --chart-bar: #2d5be3;
   --accent-ink: #ffffff;
   --accent-text: #2448c2;
   --accent-soft: rgba(45, 91, 227, 0.08);
@@ -40,6 +42,8 @@
     --text-muted: #a0a0ab;
     --text-subtle: #8b8b96;
     --accent: #6f8cff;
+    /* Chart bars: the accent, a step darker in dark mode to stay in the data-colour lightness band. */
+    --chart-bar: #6886fa;
     --accent-ink: #0b0b0d;
     --accent-text: #8fa6ff;
     --accent-soft: rgba(111, 140, 255, 0.12);
@@ -62,6 +66,8 @@
   --text-muted: #a0a0ab;
   --text-subtle: #8b8b96;
   --accent: #6f8cff;
+  /* Chart bars: the accent, a step darker in dark mode to stay in the data-colour lightness band. */
+  --chart-bar: #6886fa;
   --accent-ink: #0b0b0d;
   --accent-text: #8fa6ff;
   --accent-soft: rgba(111, 140, 255, 0.12);
