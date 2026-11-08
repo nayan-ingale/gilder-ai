@@ -13,15 +13,15 @@ export const stackPage: DocPage = {
       blocks: [
         {
           kind: 'text',
-          text: 'A request goes from the browser to the Next.js server, then to the gateway, then to one service, which reads and writes its data stores. Today that path carries sign-in, logout and the profile, end to end; chat, agent and billing have no routes yet.',
+          text: "A request goes from the browser to the Next.js server, then to the gateway, then to one service, which reads and writes its data stores. Today that path carries sign-in, logout, the profile and chats (the list and search, renaming, pinning and deleting, and each chat's history), end to end; agent and billing have no routes yet.",
         },
         {
           kind: 'list',
           items: [
-            'Browser → Next.js server (port 3000): the browser only ever talks to the frontend app.',
-            'Next.js server → gateway (port 8000): the Next.js server forwards every `/api/*` call to the gateway (`forwardToGateway`), so backend addresses and secrets never reach the browser.',
-            'Gateway → services: the gateway checks the rate limits, its route table, the Origin and the session, then calls the service with fetch and a short-lived signed token: today auth (8001), for the routes in its table. Chat (8002), agent (8003) and billing (8004) already refuse any call without a valid token; their routes come with their own features.',
-            'Services → data stores: auth, chat, agent and billing connect to MongoDB at startup, and the gateway, auth and agent open a Redis client. Auth keeps its users in MongoDB and its sessions in Redis. Qdrant runs in Docker, but nothing connects to it yet. AWS S3 will hold files.',
+            'Browser → Next.js server (port 3000): the browser only ever talks to the frontend app. Its chat data lives in a Redux store, fetched and cached with RTK Query.',
+            "Next.js server → gateway (port 8000): the Next.js server forwards every `/api/*` call to the gateway (`forwardToGateway`), so backend addresses and secrets never reach the browser. Server components also call the gateway directly with the browser's cookie (`gatewayGet`), for the signed-in user and for a chat page.",
+            'Gateway → services: the gateway checks the rate limits, its route table, the Origin and the session, then calls the service with fetch and a short-lived signed token: today auth (8001) and chat (8002), for the routes in its table. Agent (8003) and billing (8004) already refuse any call without a valid token; their routes come with their own features.',
+            'Services → data stores: auth, chat, agent and billing connect to MongoDB at startup, and the gateway, auth and agent open a Redis client. Auth keeps its users in MongoDB and its sessions in Redis; chat keeps conversations and messages in MongoDB. Qdrant runs in Docker, but nothing connects to it yet. AWS S3 will hold files.',
             'Every backend app is built from the shared library, `@gilder/shared`, so they all start, log and fail in the same way.',
           ],
         },
@@ -95,7 +95,7 @@ export const packageNotes: PackageNote[] = [
   {
     name: 'next',
     layer: 'frontend',
-    why: 'The frontend framework (App Router) on port 3000: the sign-in page, the app shell, the /api proxy route and the login gate (`proxy.ts`).',
+    why: 'The frontend framework (App Router) on port 3000: the sign-in page, the app shell, the chat page (rendered on the server), the /api proxy route and the login gate (`proxy.ts`).',
   },
   { name: 'react', layer: 'frontend', why: 'The UI library the frontend is written in.' },
   {
@@ -124,6 +124,16 @@ export const packageNotes: PackageNote[] = [
     why: 'Google sign-in in the browser: a popup that returns the Firebase ID token the app exchanges for a session. Loaded only when the Google button is clicked.',
   },
   {
+    name: '@reduxjs/toolkit',
+    layer: 'frontend',
+    why: "Redux Toolkit and RTK Query: the browser's store (`makeStore`) and the chat data layer (`api`), with cached, paged chat lists, search, and rename, pin and delete that change the list at once and undo it on failure.",
+  },
+  {
+    name: 'react-redux',
+    layer: 'frontend',
+    why: 'Connects React to the store: `StoreProvider` gives every page one store, and the RTK Query hooks read from it.',
+  },
+  {
     name: '@tailwindcss/turbopack',
     layer: 'frontend',
     why: 'Builds Tailwind CSS inside Turbopack: `next.config.ts` sends every `.css` file through it.',
@@ -143,7 +153,7 @@ export const packageNotes: PackageNote[] = [
   {
     name: 'zod',
     layer: 'backend',
-    why: "Checks data against schemas: each app's settings at startup (`loadEnv`), and request input with `validate`, which auth's routes use.",
+    why: "Checks data against schemas: each app's settings at startup (`loadEnv`), and request input with `validate`, which auth's and chat's routes use.",
   },
   {
     name: 'jose',
@@ -180,7 +190,7 @@ export const packageNotes: PackageNote[] = [
   {
     name: 'mongoose',
     layer: 'data',
-    why: 'Connects the services to MongoDB (`connectMongo`) and checks the connection for `/readyz` (`pingMongo`). Auth defines its users model with it. The shared library re-exports it, so every app uses one copy and the connection `connectMongo` opens.',
+    why: 'Connects the services to MongoDB (`connectMongo`) and checks the connection for `/readyz` (`pingMongo`). Auth defines its users model with it, and chat its conversations and messages models. The shared library re-exports it, so every app uses one copy and the connection `connectMongo` opens.',
   },
   {
     name: 'ioredis',
@@ -222,7 +232,7 @@ export const packageNotes: PackageNote[] = [
   {
     name: 'mongodb-memory-server',
     layer: 'quality',
-    why: "Starts a real MongoDB replica set in memory for the shared library's MongoDB tests, so those need no Docker. Its Redis tests use the Redis container, or the CI service.",
+    why: "Starts a real MongoDB in memory, so tests need no Docker: a replica set for the shared library's MongoDB tests, and a single server for each test file that uses `startTestMongo` (auth's and chat's tests, and the gateway's journey test). Redis tests use the Redis container, or the CI service.",
   },
   {
     name: 'eslint',
@@ -262,15 +272,6 @@ export const packageNotes: PackageNote[] = [
 ];
 
 export const plannedTools: PlannedTool[] = [
-  // Frontend
-  {
-    name: 'Redux Toolkit + RTK Query',
-    package: '@reduxjs/toolkit',
-    layer: 'frontend',
-    why: 'Client state and data fetching for chats, messages, the account and usage.',
-    plannedIn: 'Chats',
-  },
-
   // AI
   {
     name: 'LangGraph',

@@ -30,7 +30,7 @@ export const decisionsPage: DocPage = {
         },
         {
           kind: 'text',
-          text: 'Built today: the gateway checks every /api request (rate limits, its route table, the Origin and the session) and forwards the sign-in, logout and /me routes to auth with a signed internal token. Every service turns on the internal-token check, so a direct call to any service path except the health checks gets 401, even though each service listens on its own port. The route table has no routes for chat, agent or billing yet: each comes with its own feature (Chats, AI answers, Credits).',
+          text: 'Built today: the gateway checks every /api request (rate limits, its route table, the Origin and the session) and forwards the sign-in, logout and /me routes to auth and the chat routes to chat, each with a signed internal token. Every service turns on the internal-token check, so a direct call to any service path except the health checks gets 401, even though each service listens on its own port. The route table has no routes for agent or billing yet: each comes with its own feature (AI answers, Credits).',
         },
         {
           kind: 'quote',
@@ -48,6 +48,7 @@ export const decisionsPage: DocPage = {
         { symbol: 'backend/gateway/src/app.ts#createApp' },
         { symbol: 'backend/gateway/src/route-table.ts#PUBLIC_ROUTES' },
         { flow: 'read-profile' },
+        { flow: 'list-chats' },
         { flow: 'direct-service-call' },
       ],
     },
@@ -65,7 +66,7 @@ export const decisionsPage: DocPage = {
             },
             {
               label: 'Why',
-              text: "All five apps start, log, check health and fail in the same way, and a fix in one place reaches every app. Each app's own code stays small: chat, agent and billing are just `env.ts`, `app.ts` and `index.ts`; auth adds its settings rules (`env-schema.ts`), its users model, its Google sign-in check and its routes; and the gateway adds its settings rules, its route table, its checks and its proxy.",
+              text: "All five apps start, log, check health and fail in the same way, and a fix in one place reaches every app. Each app's own code stays small: agent and billing are just `env.ts`, `app.ts` and `index.ts`; auth adds its settings rules (`env-schema.ts`), its users model, its Google sign-in check and its routes; chat adds its models and its two routers; and the gateway adds its settings rules, its route table, its checks and its proxy.",
             },
             {
               label: 'Trade-off',
@@ -112,7 +113,7 @@ export const decisionsPage: DocPage = {
         },
         {
           kind: 'text',
-          text: "Both sides are wired. The gateway imports `INTERNAL_PRIVATE_KEY` with `importInternalPrivateKey` (its settings check makes sure it is an Ed25519 key), and `proxyToService` calls `signInternalToken` for every request it forwards: the audience is the service, the subject is the user from the session, and `rid` is the request ID. Auth, chat, agent and billing import `INTERNAL_PUBLIC_KEY` with `importInternalPublicKey` and pass `createService` the `internalAuth` option, which puts `requireInternalToken` (with `verifyInternalToken`) in front of every route except `/healthz` and `/readyz`. Auth's routes that act for a user add `requireUser`. A missing, garbage, forged, misaddressed or expired token gets 401 (SEC-02).",
+          text: "Both sides are wired. The gateway imports `INTERNAL_PRIVATE_KEY` with `importInternalPrivateKey` (its settings check makes sure it is an Ed25519 key), and `proxyToService` calls `signInternalToken` for every request it forwards: the audience is the service, the subject is the user from the session, and `rid` is the request ID. Auth, chat, agent and billing import `INTERNAL_PUBLIC_KEY` with `importInternalPublicKey` and pass `createService` the `internalAuth` option, which puts `requireInternalToken` (with `verifyInternalToken`) in front of every route except `/healthz` and `/readyz`. Auth's routes that act for a user, and every chat route, add `requireUser`. A missing, garbage, forged, misaddressed or expired token gets 401 (SEC-02).",
         },
         {
           kind: 'quote',
@@ -148,7 +149,7 @@ export const decisionsPage: DocPage = {
             },
             {
               label: 'Why',
-              text: "Services have routes meant only for other services, such as auth's `GET /internal/users/:id`. With an allowlist, a new service route is unreachable from outside until someone adds it to the table on purpose. Route params must be 1 to 64 letters, digits, `-` or `_`, so `..` or an encoded slash cannot change the service path.",
+              text: "Services have routes meant only for other services, such as auth's `GET /internal/users/:id` and chat's `/internal` routes for the agent service. With an allowlist, a new service route is unreachable from outside until someone adds it to the table on purpose. Route params must be 1 to 64 letters, digits, `-` or `_`, so `..` or an encoded slash cannot change the service path.",
             },
             {
               label: 'Trade-off',
@@ -158,7 +159,7 @@ export const decisionsPage: DocPage = {
         },
         {
           kind: 'text',
-          text: 'The table lists only the auth routes today. The gateway tests and journey.test.ts check that internal paths, such as `/api/internal/users/<id>`, get 404 without reaching a service (SEC-01).',
+          text: 'The table lists the auth and chat routes today; every chat route needs a session, and `/api/chats/:id` becomes `/chats/<id>` on chat. The gateway tests and journey.test.ts check that internal paths, such as `/api/internal/users/<id>` and `/api/internal/messages`, get 404 without reaching a service (SEC-01).',
         },
         {
           kind: 'quote',
@@ -392,7 +393,7 @@ export const decisionsPage: DocPage = {
         },
         {
           kind: 'text',
-          text: "The gateway passes its ID on: `proxyToService` sends it in `X-Request-Id` and in the internal token's `rid`, and the service's `requestId` middleware reuses it, so the gateway and auth log the same ID for one request. The frontend does not send one yet.",
+          text: "The gateway passes its ID on: `proxyToService` sends it in `X-Request-Id` and in the internal token's `rid`, and the service's `requestId` middleware reuses it, so the gateway and the service log the same ID for one request. The Next.js proxy (`forwardToGateway`) sends one with every `/api` call it forwards and passes it back to the browser, where a failed chat change shows it in a toast. Server components' own calls (`gatewayGet`) send none, so the gateway makes one.",
         },
         {
           kind: 'quote',
@@ -468,7 +469,7 @@ export const decisionsPage: DocPage = {
         },
         {
           kind: 'text',
-          text: "Both are wired. Every app's `env.ts` calls `loadEnv`, and a bad setting stops the app at startup. Auth's routes check their input with `validate`: the sign-in bodies, the `PATCH /me` body and the user ID in `GET /internal/users/:id`.",
+          text: "Both are wired. Every app's `env.ts` calls `loadEnv`, and a bad setting stops the app at startup. Auth's routes check their input with `validate`: the sign-in bodies, the `PATCH /me` body and the user ID in `GET /internal/users/:id`. So do chat's: the chat ID, the list's query, cursor and limit, and bodies that refuse any field they do not list.",
         },
         {
           kind: 'quote',
@@ -484,6 +485,7 @@ export const decisionsPage: DocPage = {
         { symbol: 'backend/gateway/src/env-schema.ts#gatewayEnvSchema' },
         { symbol: 'backend/shared/src/validate.ts#validate' },
         { symbol: 'backend/services/auth/src/session-routes.ts#sessionRouter' },
+        { symbol: 'backend/services/chat/src/chat-routes.ts#chatRouter' },
         { flow: 'app-startup' },
       ],
     },
@@ -511,7 +513,7 @@ export const decisionsPage: DocPage = {
         },
         {
           kind: 'text',
-          text: 'The `/api/[...path]` route forwards with `forwardToGateway`, and `getCurrentUser` asks the gateway for `/api/me` on the server. `GATEWAY_URL` is a server-only setting; the browser gets only `NEXT_PUBLIC_*` values, which are public by design.',
+          text: "The `/api/[...path]` route forwards with `forwardToGateway`. On the server, `gatewayGet` calls the gateway with the browser's cookie: `getCurrentUser` asks for `/api/me`, and `getChatWithHistory` for a chat and its messages, so the chat page renders its history on the server. `GATEWAY_URL` is a server-only setting; the browser gets only `NEXT_PUBLIC_*` values, which are public by design.",
         },
       ],
       refs: [
@@ -520,6 +522,283 @@ export const decisionsPage: DocPage = {
         { component: 'gateway' },
         { symbol: 'frontend/src/server/gateway-proxy.ts#forwardToGateway' },
         { symbol: 'frontend/src/server/session.ts#getCurrentUser' },
+        { symbol: 'frontend/src/server/gateway-fetch.ts#gatewayGet' },
+        { symbol: 'frontend/src/server/chats.ts#getChatWithHistory' },
+        { flow: 'open-chat' },
+      ],
+    },
+    {
+      id: 'chat-list-cursor',
+      title: 'Chat lists page with a cursor, not page numbers',
+      status: 'verified',
+      blocks: [
+        {
+          kind: 'fields',
+          fields: [
+            {
+              label: 'Decision',
+              text: "`GET /chats` returns every pinned chat (latest pin first) on the first page, then the others by `lastMessageAt`, newest first, with `_id` as the tie-break. The next page starts after a cursor: base64url JSON of the last chat's time and ID. A chat's history pages the same way, newest first, each page returned oldest first. Search (`?query=`) matches titles and message text through MongoDB text indexes that start with `userId`, and returns one page with no cursor.",
+            },
+            {
+              label: 'Why',
+              text: 'A cursor stays right while chats move: a new message moves a chat to the top, which would shift page numbers and repeat or skip chats. Two chats can have the same `lastMessageAt`; the `_id` tie-break makes the order total, so none is skipped or shown twice. The cursor is opaque, and the service refuses one it did not make.',
+            },
+            {
+              label: 'Trade-off',
+              text: 'A client cannot jump to a page, only go on from where it is. Pinned chats all come on the first page (up to 50). Search returns at most one page and finds whole words, not parts of words.',
+            },
+          ],
+        },
+        {
+          kind: 'text',
+          text: 'The `{ userId, pinnedAt, lastMessageAt }` index serves the list. chat-routes.test.ts pages through chats with equal times and checks that each comes once, and that a cursor the service did not make gets 400.',
+        },
+        {
+          kind: 'quote',
+          file: 'backend/services/chat/src/chat-routes.ts',
+          text: '{ lastMessageAt: new Date(after.at), _id: { $lt: after.id } },',
+          caption: 'The next page: an older time, or the same time and a smaller ID',
+        },
+      ],
+      refs: [
+        { component: 'chat' },
+        { symbol: 'backend/services/chat/src/chat-routes.ts#chatRouter' },
+        { symbol: 'backend/services/chat/src/chat-routes.ts#encodeCursor' },
+        { symbol: 'backend/services/chat/src/chat-routes.ts#decodeCursor' },
+        { symbol: 'backend/services/chat/src/models.ts#conversationSchema' },
+        { flow: 'list-chats' },
+      ],
+    },
+    {
+      id: 'soft-delete',
+      title: 'Deleting a chat is a soft delete',
+      status: 'verified',
+      blocks: [
+        {
+          kind: 'fields',
+          fields: [
+            {
+              label: 'Decision',
+              text: '`DELETE /chats/:id` sets `deletedAt` on the chat; nothing is removed. Every chat query filters on `deletedAt: null`.',
+            },
+            {
+              label: 'Why',
+              text: 'One write, and the chat leaves every list, search and read at once. Its messages stay for a later clean-up job instead of a slow delete during the request.',
+            },
+            {
+              label: 'Trade-off',
+              text: 'Deleted chats stay in the database until that clean-up exists, and it is not built yet. Every new query must keep the `deletedAt: null` filter: findOwnedConversation has it for every route about one chat, and message search loads the chats again to drop deleted ones.',
+            },
+          ],
+        },
+        {
+          kind: 'quote',
+          file: 'backend/services/chat/src/chat-routes.ts',
+          text: 'chat.deletedAt = new Date();',
+          caption: 'DELETE /chats/:id',
+        },
+      ],
+      refs: [
+        { symbol: 'backend/services/chat/src/chat-routes.ts#chatRouter' },
+        { symbol: 'backend/services/chat/src/models.ts#findOwnedConversation' },
+        { flow: 'delete-chat' },
+      ],
+    },
+    {
+      id: 'not-yours-404',
+      title: "Another user's chat gets the same 404 as a missing one",
+      status: 'verified',
+      blocks: [
+        {
+          kind: 'fields',
+          fields: [
+            {
+              label: 'Decision',
+              text: "Every lookup of a chat or a message filters by the user in the internal token. Someone else's chat, a deleted chat, an unknown ID and an ID that is not an ObjectId all get the same 404 'No such chat'. The chat page shows one 'This chat isn't available' page for all of them.",
+            },
+            {
+              label: 'Why',
+              text: "A 403 for someone else's chat would confirm that the ID exists. With the owner in the query itself, no route can read a chat first and forget to check it.",
+            },
+            {
+              label: 'Trade-off',
+              text: "A user who opens a link to someone else's chat is not told why it is not available, and finding out means reading the logs by request ID.",
+            },
+          ],
+        },
+        {
+          kind: 'text',
+          text: "chat-routes.test.ts checks GET, PATCH and DELETE `/chats/:id` and the history with another user's chat, a missing ID and `not-an-id`, and journey.test.ts checks every route again through the real gateway (SEC-04).",
+        },
+        {
+          kind: 'quote',
+          file: 'backend/services/chat/src/models.ts',
+          text: 'return ConversationModel.findOne({ _id: conversationId, userId, deletedAt: null });',
+          caption: 'findOwnedConversation: the owner is part of the query',
+        },
+      ],
+      refs: [
+        { symbol: 'backend/services/chat/src/models.ts#findOwnedConversation' },
+        { symbol: 'backend/services/chat/src/chat-routes.ts#ownedOr404' },
+        { symbol: 'frontend/src/app/(app)/c/[chatId]/not-found.tsx#ChatNotFound' },
+        { flow: 'chat-not-yours' },
+      ],
+    },
+    {
+      id: 'idempotent-messages',
+      title: 'Saving the same message twice keeps one copy',
+      status: 'verified',
+      blocks: [
+        {
+          kind: 'fields',
+          fields: [
+            {
+              label: 'Decision',
+              text: 'A message can carry an ID chosen by its sender (`clientMessageId`). `POST /internal/messages` saves a message once per chat and client ID: the first call answers 201, and a repeat answers 200 with the same message and `created: false`. A unique index on `{ conversationId, clientMessageId }` holds even when two copies arrive at the same moment.',
+            },
+            {
+              label: 'Why',
+              text: 'A send can be retried after a timeout or a dropped connection without saving the message twice. A read before the insert handles the usual retry; the unique index handles a race, where the losing insert fails and returns the winner.',
+            },
+            {
+              label: 'Trade-off',
+              text: 'One extra read before each save, and a sender must keep the same ID across retries. Messages without a client ID, such as answers, are not limited.',
+            },
+          ],
+        },
+        {
+          kind: 'text',
+          text: 'internal-routes.test.ts sends the same message three times at once and gets one 201, two 200s and one stored message. Nothing calls the route yet: the agent service will, when it saves the messages of a turn.',
+        },
+        {
+          kind: 'quote',
+          file: 'backend/services/chat/src/models.ts',
+          text: "{ unique: true, partialFilterExpression: { clientMessageId: { $type: 'string' } } },",
+          caption: 'The unique index covers only messages that have a client ID',
+        },
+      ],
+      refs: [
+        { symbol: 'backend/services/chat/src/internal-routes.ts#internalRouter' },
+        { symbol: 'backend/services/chat/src/models.ts#messageSchema' },
+      ],
+    },
+    {
+      id: 'auto-title',
+      title: "A chat is auto-titled only while it is still 'New chat'",
+      status: 'verified',
+      blocks: [
+        {
+          kind: 'fields',
+          fields: [
+            {
+              label: 'Decision',
+              text: "`PATCH /internal/chats/:id` sets a chat's title only while the title is still 'New chat' (`DEFAULT_CHAT_TITLE`), and answers whether it renamed it.",
+            },
+            {
+              label: 'Why',
+              text: 'The title is to be written after the first answer, which can arrive after the user has already renamed the chat. Checking the current title means a rename by the user always wins.',
+            },
+            {
+              label: 'Trade-off',
+              text: "A chat the user renamed to exactly 'New chat' can still be auto-titled.",
+            },
+          ],
+        },
+        {
+          kind: 'text',
+          text: 'internal-routes.test.ts checks that a second auto-title leaves the first one in place. Nothing calls the route yet: the agent service will, after the first answer.',
+        },
+        {
+          kind: 'quote',
+          file: 'backend/services/chat/src/internal-routes.ts',
+          text: 'const renamed = chat.title === DEFAULT_CHAT_TITLE;',
+        },
+      ],
+      refs: [
+        { symbol: 'backend/services/chat/src/internal-routes.ts#internalRouter' },
+        { symbol: 'backend/services/chat/src/models.ts#DEFAULT_CHAT_TITLE' },
+      ],
+    },
+    {
+      id: 'new-chat-first-message',
+      title: 'A new chat is created by its first message',
+      status: 'partial',
+      blocks: [
+        {
+          kind: 'fields',
+          fields: [
+            {
+              label: 'Decision',
+              text: 'New chat (the sidebar button, the + in the small-screen bar and ⌘⇧O) opens `/` and creates nothing. The chat is created when its first message is sent; `POST /api/chats` is in place for that.',
+            },
+            {
+              label: 'Why',
+              text: "Opening New chat and leaving again does not leave an empty 'New chat' behind, so the list holds only chats with something in them.",
+            },
+            {
+              label: 'Trade-off',
+              text: 'The page at `/` has no chat ID until the first message, so the first send has to create the chat and then move to its address.',
+            },
+          ],
+        },
+        {
+          kind: 'text',
+          text: 'Built: every New chat link and the shortcut go to `/`, and `POST /chats` creates a chat (tested, and forwarded by the gateway). Not built yet: the composer that sends the first message, which comes with AI answers; nothing in the frontend calls `createChat` yet.',
+        },
+        {
+          kind: 'quote',
+          file: 'frontend/src/components/chats/chat-commands.tsx',
+          text: "        setSearchOpen(false);\n        router.push('/');",
+          caption: '⌘⇧O: a new chat is just the page at /',
+        },
+      ],
+      refs: [
+        { symbol: 'frontend/src/components/app-shell/sidebar.tsx#SidebarFrame' },
+        { symbol: 'frontend/src/components/chats/chat-commands.tsx#ChatCommands' },
+        { symbol: 'frontend/src/app/(app)/page.tsx#NewChatPage' },
+        { symbol: 'backend/services/chat/src/chat-routes.ts#chatRouter' },
+      ],
+    },
+    {
+      id: 'client-data',
+      title: 'RTK Query holds the chat data, and changes show at once',
+      status: 'verified',
+      blocks: [
+        {
+          kind: 'fields',
+          fields: [
+            {
+              label: 'Decision',
+              text: "The browser's chat data goes through RTK Query: an infinite query for the sidebar list, a separate query for search, and rename, pin and delete that change the cached list before the server answers and undo the change if the call fails.",
+            },
+            {
+              label: 'Why',
+              text: 'One cache feeds the sidebar, the small-screen panel and search, and lists refresh themselves after a change (tags). Optimistic changes make the menu feel instant, and the undo with a toast keeps the list true when the server refuses.',
+            },
+            {
+              label: 'Trade-off',
+              text: "Redux Toolkit adds weight to the browser bundle, and for a moment the list can show a change the server then refuses. The store needs care in Next.js: the root reducer is written by hand, because `combineReducers` calls `Math.random()`, which Next.js refuses while it prerenders, and Redux Toolkit's development checks run only in the browser.",
+            },
+          ],
+        },
+        {
+          kind: 'text',
+          text: "chats.test.tsx checks a rename, a delete of the open chat that goes back to a new chat, and a pin the server refuses: the chat leaves Pinned again and the toast shows 'No such chat'.",
+        },
+        {
+          kind: 'quote',
+          file: 'frontend/src/store/api.ts',
+          text: "api.util.updateQueryData('listChats', undefined, (draft) => {",
+          caption: 'updateChat and deleteChat change the cached list first',
+        },
+      ],
+      refs: [
+        { component: 'frontend' },
+        { symbol: 'frontend/src/store/api.ts#api' },
+        { symbol: 'frontend/src/store/store.tsx#makeStore' },
+        { symbol: 'frontend/src/components/chats/chat-row.tsx#ChatRow' },
+        { flow: 'update-chat' },
+        { flow: 'delete-chat' },
       ],
     },
   ],

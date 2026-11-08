@@ -26,7 +26,7 @@ export const errorHandlingPage: DocPage = {
         },
         {
           kind: 'text',
-          text: "Auth, chat, agent and billing raise 401 from their internal-token check, and auth also raises errors from its routes. The gateway raises errors from its checks (429, 403, 401), from its body reader (413) and from its proxy (503), and passes each service's own error replies back unchanged: status, Content-Type and body.",
+          text: "Auth, chat, agent and billing raise 401 from their internal-token check, and auth and chat also raise errors from their routes. The gateway raises errors from its checks (429, 403, 401), from its body reader (413) and from its proxy (503), and passes each service's own error replies back unchanged: status, Content-Type and body.",
         },
         {
           kind: 'quote',
@@ -72,7 +72,7 @@ export const errorHandlingPage: DocPage = {
         },
         {
           kind: 'text',
-          text: 'Every app can produce `not_found`, `payload_too_large`, `unsupported_media_type` and `internal_error`, and the services also `bad_request` from their JSON body parser, which the gateway does not use. The services produce `unauthorized` from `requireInternalToken`. Auth also produces `validation_failed` (from `validate`), `unauthorized` (from `requireUser` and its own sign-in and `/me` checks) and `service_unavailable` (Google sign-in without the Firebase settings). The gateway produces `rate_limited` (its rate limits), `forbidden` (`originCheck`), `unauthorized` (`requireSession`) and `service_unavailable` (a service that is down or slow). `insufficient_credits` and `conflict` are ready for later features.',
+          text: "Every app can produce `not_found`, `payload_too_large`, `unsupported_media_type` and `internal_error`, and the services also `bad_request` from their JSON body parser, which the gateway does not use. The services produce `unauthorized` from `requireInternalToken`. Auth also produces `validation_failed` (from `validate`), `unauthorized` (from `requireUser` and its own sign-in and `/me` checks) and `service_unavailable` (Google sign-in without the Firebase settings). Chat produces `validation_failed` (from `validate`), `unauthorized` (from `requireUser`), `bad_request` (a cursor it did not make) and `not_found` ('No such chat' or 'No such message', the same for another user's as for a missing one). The gateway produces `rate_limited` (its rate limits), `forbidden` (`originCheck`), `unauthorized` (`requireSession`) and `service_unavailable` (a service that is down or slow). `insufficient_credits` and `conflict` are ready for later features.",
         },
       ],
       refs: [

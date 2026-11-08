@@ -242,7 +242,7 @@ const directServiceCall: Flow = {
       title: 'A request skips the gateway',
       kind: 'trigger',
       status: 'verified',
-      what: "Something sends a request straight to a service's port: auth 8001, chat 8002, agent 8003 or billing 8004. Every service listens on all network interfaces, so anything that can reach the port can try, for example GET /me or POST /sessions/dev on auth. journey.test.ts tries both against the real auth app.",
+      what: "Something sends a request straight to a service's port: auth 8001, chat 8002, agent 8003 or billing 8004. Every service listens on all network interfaces, so anything that can reach the port can try, for example GET /me or POST /sessions/dev on auth, or GET /chats on chat. journey.test.ts tries all three against the real auth and chat apps.",
       why: 'The gateway is meant to be the only way in, but the services are reachable on their own ports, so they must refuse anything that did not come through it.',
       input: 'Any method and path, with no x-internal-token header or with one that is not valid.',
     },

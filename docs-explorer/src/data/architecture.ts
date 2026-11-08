@@ -3,11 +3,11 @@ import type { ArchComponent, ArchLink } from './schema.ts';
 /**
  * The system map: every app, data store and outside service, and how they connect.
  *
- * Built today: the gateway, which checks each /api request and forwards the sign-in, logout and
- * profile routes to auth; auth, which serves them; chat, agent and billing, locked behind the
- * internal-token check but with no routes yet; a starter frontend page; and local MongoDB, Redis
- * and Qdrant in Docker. Everything else is marked `planned`, with the roadmap feature that adds
- * it.
+ * Built today: the frontend (sign-in page, app shell, chat list, search and chat page) and its
+ * /api proxy; the gateway, which checks each /api request and forwards the sign-in, logout,
+ * profile and chat routes; auth and chat, which serve them; agent and billing, locked behind the
+ * internal-token check but with no routes yet; and local MongoDB, Redis and Qdrant in Docker.
+ * Everything else is marked `planned`, with the roadmap feature that adds it.
  *
  * Link kinds used here: `http` for HTTP calls between programs, `internal` for an app importing
  * the shared library (same process, no network), `data` for a connection to a data store, and
@@ -26,8 +26,8 @@ export const components: ArchComponent[] = [
     summary:
       "The user's web browser. It loads the GilderAi pages from the frontend and calls only the frontend's own /api routes, so it never sees a backend address. Google sign-in opens a Firebase popup.",
     responsibilities: [
-      'Loads the pages from the frontend on port 3000: /login, and the signed-in app at /, which the login gate sends to /login when there is no session cookie.',
-      'Calls /api/* on the frontend itself (apiFetch), which turns problem+json errors into ApiError with the code and request ID.',
+      'Loads the pages from the frontend on port 3000: /login, and the signed-in app at / (a new chat) and /c/<chat ID>, which the login gate sends to /login when there is no session cookie.',
+      "Calls /api/* on the frontend itself: the chat list, search, rename, pin and delete through RTK Query (the store's api), and sign-in and the account through apiFetch, which turns problem+json errors into ApiError with the code and request ID.",
       'Keeps the HttpOnly session cookie, which page scripts cannot read, and a gilder_theme cookie for the theme.',
       'Google sign-in opens a Firebase popup and sends the ID token to /api/auth/session.',
     ],
@@ -38,12 +38,16 @@ export const components: ArchComponent[] = [
     kind: 'app',
     status: 'verified',
     summary:
-      'The Next.js app the user opens. Its server forwards every /api/* call to the gateway, so backend addresses and secrets never reach the browser. It has the sign-in page and the signed-in app shell.',
+      'The Next.js app the user opens. Its server forwards every /api/* call to the gateway, so backend addresses and secrets never reach the browser. It has the sign-in page, the signed-in app shell with the chat list and search, and a page for each chat.',
     responsibilities: [
       'Forwards /api/* to GATEWAY_URL (forwardToGateway, in the api/[...path] route): it passes the cookie, Origin and forwarded address, adds a request ID and x-gilder-client: web, streams the answer and its Set-Cookie headers back, answers 503 when the gateway is down, and cancels the call when the browser goes away.',
       'Login gate (proxy.ts): a visitor without a session cookie who opens /, /c/... or /settings/... goes to /login.',
       'Sign-in page (/login): Google sign-in through a Firebase popup, disabled until the NEXT_PUBLIC_FIREBASE_* settings are set, and dev sign-in by email in development builds only.',
-      "App shell (the (app) layout): a sidebar (a top bar on small screens) with New chat and the account menu (theme, sign out). Server components confirm the session with the gateway's /api/me (getCurrentUser) inside a Suspense boundary, so the shell is prerendered.",
+      "App shell (the (app) layout): a sidebar (a top bar on small screens) with New chat, Search chats, the chat list and the account menu (theme, sign out). Server components confirm the session with the gateway's /api/me (getCurrentUser) inside a Suspense boundary, so the shell is prerendered.",
+      'Chat list (ChatList): loaded in the browser with RTK Query a page at a time and grouped into Pinned, Today, Previous 7 days and Older. Each row has a menu to rename, pin or delete, which changes the list at once and undoes it if the call fails. On small screens the same list opens in a panel (MobileNav).',
+      'Search (SearchDialog, ⌘K or Ctrl+K): searches titles and message text through GET /api/chats?query=, with the keyboard. ⌘⇧O or Ctrl+Shift+O goes to / for a new chat (ChatCommands).',
+      "Chat page (/c/<chat ID>): the server reads the chat and its latest messages from the gateway with the browser's cookie (getChatWithHistory, gatewayGet) and renders them, so the history shows on first paint. A missing, deleted or someone else's chat gets one 'This chat isn't available' page.",
+      'Data in the browser: a Redux store with RTK Query (makeStore, StoreProvider), whose calls all go to /api.',
       'Design system: Light minimal tokens in light and dark, Radix-based components, and a theme remembered in a cookie and applied before the first paint.',
       'Security headers on every page (next.config.ts): a Content-Security-Policy without nonces, nosniff, referrer and permissions policies, and no framing.',
       'Reads GATEWAY_URL on the server and the public NEXT_PUBLIC_FIREBASE_* values in the browser. NEXT_PUBLIC_RAZORPAY_KEY_ID is listed for payments, but no code reads it yet.',
@@ -55,6 +59,8 @@ export const components: ArchComponent[] = [
       'frontend/src/app/(app)/layout.tsx#AppLayout',
       'frontend/src/server/gateway-proxy.ts#forwardToGateway',
       'frontend/src/proxy.ts#proxy',
+      'frontend/src/store/api.ts#api',
+      'frontend/src/app/(app)/c/[chatId]/page.tsx#ChatPage',
     ],
   },
   {
@@ -63,11 +69,11 @@ export const components: ArchComponent[] = [
     kind: 'app',
     status: 'verified',
     summary:
-      'The one public entry to the backend. Each /api request goes through its checks (rate limits, the route allowlist, the origin check and the session lookup) and is then forwarded to its service with a fresh signed internal token. Its route table lists only the auth routes so far. The services also listen on their own ports, but each one answers 401 to anything without a valid token except its health checks.',
+      'The one public entry to the backend. Each /api request goes through its checks (rate limits, the route allowlist, the origin check and the session lookup) and is then forwarded to its service with a fresh signed internal token. Its route table lists the auth and chat routes so far. The services also listen on their own ports, but each one answers 401 to anything without a valid token except its health checks.',
     responsibilities: [
       "Builds its Express app with createService, with parseJson: false and its /api router as its routes, after the shared middleware and GET /healthz and GET /readyz. Express's trust proxy is set to TRUST_PROXY_HOPS, so req.ip is the client's address.",
       'Limits each IP address to 120 requests a minute (ipRateLimit), for every request that reaches the router, and each signed-in user to 60 (userRateLimit). Over the limit is a 429 with Retry-After.',
-      "Forwards only what its route table (PUBLIC_ROUTES) lists: POST /api/auth/session, POST /api/auth/dev-session, DELETE /api/auth/session, and GET and PATCH /api/me, all to auth. Anything else gets the gateway's own 404 and never reaches a service.",
+      "Forwards only what its route table (PUBLIC_ROUTES) lists: POST /api/auth/session, POST /api/auth/dev-session, DELETE /api/auth/session, and GET and PATCH /api/me to auth; GET and POST /api/chats, GET, PATCH and DELETE /api/chats/:id and GET /api/chats/:id/messages to chat. A :id must be 1 to 64 letters, digits, - or _. Anything else gets the gateway's own 404 and never reaches a service.",
       'Refuses a request that changes something (any method but GET, HEAD and OPTIONS) unless its Origin is one of FRONTEND_ORIGIN, with 403 (originCheck).',
       'Looks the session cookie up in Redis on every matched request, which renews it (sessionLookup), and answers 401 itself for a route that needs a session when there is none (requireSession).',
       'Forwards the request (proxyToService) with fetch: raw body up to 1 MB, a few allowed headers, the cookie only to auth, X-Request-Id, and an internal token signed for that service that names the user. It passes back the status, a few headers, every Set-Cookie and the streamed body. A service that is down or does not start answering within 10 seconds gives 503.',
@@ -119,9 +125,12 @@ export const components: ArchComponent[] = [
     kind: 'app',
     status: 'verified',
     summary:
-      'Will own chats and their messages. Today it answers health checks, and 401 to anything else without a valid internal token. Planned: its chat routes, reached through the gateway (Chats).',
+      "Owns chats and their messages, in its own database. The gateway forwards the six /api/chats routes to it: list and search, create, read, rename or pin, delete, and the history. Its /internal routes for the agent service are built but not called yet. Every lookup filters by the user in the internal token, so another user's chat gets the same 404 as a missing one.",
     responsibilities: [
-      'Builds its Express app with createService: the shared middleware, GET /healthz and GET /readyz, then the internal-token check (audience chat). It has no routes of its own yet, so a request with a valid token gets 404.',
+      'Builds its Express app with createService: the shared middleware, GET /healthz and GET /readyz, then the internal-token check (audience chat) in front of chatRouter and internalRouter. A call without a valid token gets 401 on any path except the health checks.',
+      'Serves the chat routes (chatRouter): GET /chats (every pinned chat on the first page, then the others by latest activity, with a keyset cursor; or a search of titles and message text with ?query=), POST /chats, GET, PATCH (rename or pin) and DELETE (soft) /chats/:id, and GET /chats/:id/messages (pages from the newest back).',
+      "Serves the internal routes (internalRouter) for the agent service: read a chat, auto-title it while it is still 'New chat', read its recent finished messages, save a message once per clientMessageId, and fill in an answer. The gateway has no route to them, and no service calls them yet.",
+      'Keeps conversations and messages in MongoDB (ConversationModel, MessageModel). findOwnedConversation reads a chat only for its owner and only if it is not deleted, and toChat and toMessage are the public shapes.',
       'Connects to MongoDB at startup and does not start serving until the connection works. /readyz pings it.',
       'Imports INTERNAL_PUBLIC_KEY with importInternalPublicKey at startup. A key it cannot read stops startup with exit code 1.',
       'Checks its settings at startup and refuses to start if a required variable (MONGODB_URI, INTERNAL_PUBLIC_KEY) is missing, or if any value is invalid. PORT, NODE_ENV and LOG_LEVEL have defaults.',
@@ -132,6 +141,9 @@ export const components: ArchComponent[] = [
     entryPoints: [
       'backend/services/chat/src/index.ts#(module)',
       'backend/services/chat/src/app.ts#createApp',
+      'backend/services/chat/src/chat-routes.ts#chatRouter',
+      'backend/services/chat/src/internal-routes.ts#internalRouter',
+      'backend/services/chat/src/models.ts#findOwnedConversation',
     ],
   },
   {
@@ -191,10 +203,11 @@ export const components: ArchComponent[] = [
       'createLogger makes a pino logger that hides secrets such as tokens, cookies and passwords.',
       'connectMongo, pingMongo, createRedis and pingRedis open the database connections and provide the checks behind /readyz.',
       "Its setup:keys script (pnpm setup:keys) writes the gateway's private key and each service's matching public key into their .env files, without printing them.",
-      "Internal tokens: the gateway imports its private key and signs a token for each forwarded request (importInternalPrivateKey, signInternalToken); auth, chat, agent and billing import the public key (internalPublicKeySchema, importInternalPublicKey) and check every token (createService's internalAuth option, requireInternalToken). Auth's user routes add requireUser.",
+      "Internal tokens: the gateway imports its private key and signs a token for each forwarded request (importInternalPrivateKey, signInternalToken); auth, chat, agent and billing import the public key (internalPublicKeySchema, importInternalPublicKey) and check every token (createService's internalAuth option, requireInternalToken). Auth's user routes and every chat route add requireUser.",
       'Sessions: auth creates and deletes them (createSession, deleteSession); the gateway looks them up on each request (sessionIdFromCookies, resolveSession).',
-      "Rate limits: the gateway's per-IP and per-user limits (rateLimit, hitRateLimit, GATEWAY_RATE_LIMITS). The validate request middleware checks auth's request bodies and params.",
-      'Built and tested, but not used by any app yet: shared constants such as agents, credit costs, per-agent rate limits and plans.',
+      "Rate limits: the gateway's per-IP and per-user limits (rateLimit, hitRateLimit, GATEWAY_RATE_LIMITS). The validate request middleware checks the params, query and bodies of auth's and chat's routes.",
+      "Shared constants: chat uses the agent list (AGENTS) for a message's agent. Credit costs, per-agent rate limits and plans are built and tested, but not used by any app yet.",
+      'It re-exports mongoose, so every model uses the connection connectMongo opens: auth its users, chat its conversations and messages.',
       'createTestRedis gives each test a client on a real Redis (database 15) with its own random key prefix, and deletes its keys afterwards.',
     ],
     path: 'backend/shared',
@@ -219,6 +232,7 @@ export const components: ArchComponent[] = [
       'The Docker health check creates the rs0 replica set on the first run.',
       'auth, chat, agent and billing connect at startup. Each .env.example points the app at its own database: gilder_auth, gilder_chat, gilder_agent and gilder_billing.',
       'Auth keeps its users here (a unique Firebase ID and email each): its sign-in routes create or update them, and the /me routes read and save them.',
+      "Chat keeps conversations and messages in gilder_chat. The indexes serve the chat list (userId, pinnedAt, lastMessageAt), a chat's messages in order, one message per clientMessageId, and text search of titles and message text, each behind userId.",
     ],
     port: 27018,
     entryPoints: ['backend/shared/src/mongo.ts#connectMongo'],
@@ -328,7 +342,9 @@ export const links: ArchLink[] = [
     evidence: [
       'frontend/src/app/layout.tsx#RootLayout',
       'frontend/src/app/login/page.tsx#LoginPage',
+      'frontend/src/app/(app)/c/[chatId]/page.tsx#ChatPage',
       'frontend/src/lib/api.ts#apiFetch',
+      'frontend/src/store/api.ts#api',
     ],
   },
 
@@ -412,13 +428,19 @@ export const links: ArchLink[] = [
     from: 'chat',
     to: 'mongodb',
     kind: 'data',
-    label: 'Connects at startup; /readyz pings it',
+    label:
+      'Connects at startup; /readyz pings it. Reads and writes conversations and messages in gilder_chat, always filtered by the user, and soft-deletes chats',
     status: 'verified',
     evidence: [
       'backend/services/chat/src/index.ts#(module)',
       'backend/services/chat/src/index.ts#app',
       'backend/shared/src/mongo.ts#connectMongo',
       'backend/shared/src/mongo.ts#pingMongo',
+      'backend/services/chat/src/models.ts#ConversationModel',
+      'backend/services/chat/src/models.ts#MessageModel',
+      'backend/services/chat/src/models.ts#findOwnedConversation',
+      'backend/services/chat/src/chat-routes.ts#chatRouter',
+      'backend/services/chat/src/internal-routes.ts#internalRouter',
     ],
   },
   {
@@ -532,9 +554,24 @@ export const links: ArchLink[] = [
     ],
   },
 
-  // -------------------------------------------------------------------------------------------
-  // Planned: not built yet
+  // Gateway → chat: the six /api/chats routes, forwarded with a token that names the user.
+  {
+    from: 'gateway',
+    to: 'chat',
+    kind: 'http',
+    label:
+      'Chat list, search, create, read, rename or pin, delete and history requests from the route table, each with a fresh internal token for chat that names the user; no cookie goes along',
+    status: 'verified',
+    evidence: [
+      'backend/gateway/src/route-table.ts#PUBLIC_ROUTES',
+      'backend/gateway/src/app.ts#createApp',
+      'backend/gateway/src/proxy.ts#proxyToService',
+      'backend/shared/src/internalToken.ts#signInternalToken',
+      'backend/services/chat/src/chat-routes.ts#chatRouter',
+    ],
+  },
 
+  // The frontend: the browser's Google popup, and the Next.js server's calls to the gateway.
   {
     from: 'browser',
     to: 'firebase',
@@ -548,22 +585,20 @@ export const links: ArchLink[] = [
     to: 'gateway',
     kind: 'http',
     label:
-      'Every /api/* call, forwarded by the Next.js server, plus /api/me from server components',
+      'Every /api/* call, forwarded by the Next.js server, plus /api/me and a chat with its messages from server components',
     status: 'verified',
     evidence: [
       'frontend/src/server/gateway-proxy.ts#forwardToGateway',
       'frontend/src/app/api/[...path]/route.ts#handler',
+      'frontend/src/server/gateway-fetch.ts#gatewayGet',
       'frontend/src/server/session.ts#fetchCurrentUser',
+      'frontend/src/server/chats.ts#loadChatWithHistory',
     ],
   },
-  {
-    from: 'gateway',
-    to: 'chat',
-    kind: 'http',
-    label: 'Chat requests, each with a short-lived signed internal token',
-    status: 'planned',
-    plannedIn: 'Chats',
-  },
+
+  // -------------------------------------------------------------------------------------------
+  // Planned: not built yet
+
   {
     from: 'gateway',
     to: 'billing',
@@ -584,7 +619,8 @@ export const links: ArchLink[] = [
     from: 'agent',
     to: 'chat',
     kind: 'http',
-    label: "Service-to-service calls (CHAT_SERVICE_URL is already in the agent's .env.example)",
+    label:
+      "Calls to chat's /internal routes, which chat already serves (CHAT_SERVICE_URL is already in the agent's .env.example)",
     status: 'planned',
     plannedIn: 'AI answers',
   },

@@ -19,7 +19,10 @@ const GATEWAY_ENV_SCHEMA_TEST = 'backend/gateway/src/env-schema.test.ts';
 const GATEWAY_ROUTE_TABLE_TEST = 'backend/gateway/src/route-table.test.ts';
 const GATEWAY_GUARDS_TEST = 'backend/gateway/src/guards.test.ts';
 const GATEWAY_PROXY_TEST = 'backend/gateway/src/proxy.test.ts';
-/** The real auth app on a port behind the real gateway: sign-in, profile, logout, SEC-01/02/06. */
+/**
+ * The real auth and chat apps on their own ports behind the real gateway: sign-in, profile,
+ * logout, chats, SEC-01/02/04/06.
+ */
 const JOURNEY_TEST = 'backend/gateway/src/journey.test.ts';
 const AUTH_TEST = 'backend/services/auth/src/app.test.ts';
 const AUTH_ENV_SCHEMA_TEST = 'backend/services/auth/src/env-schema.test.ts';
@@ -28,11 +31,19 @@ const AUTH_FIREBASE_TEST = 'backend/services/auth/src/firebase.test.ts';
 const AUTH_SESSION_ROUTES_TEST = 'backend/services/auth/src/session-routes.test.ts';
 const AUTH_ME_ROUTES_TEST = 'backend/services/auth/src/me-routes.test.ts';
 const CHAT_TEST = 'backend/services/chat/src/app.test.ts';
+const CHAT_MODELS_TEST = 'backend/services/chat/src/models.test.ts';
+const CHAT_ROUTES_TEST = 'backend/services/chat/src/chat-routes.test.ts';
+const CHAT_INTERNAL_ROUTES_TEST = 'backend/services/chat/src/internal-routes.test.ts';
 const AGENT_TEST = 'backend/services/agent/src/app.test.ts';
 const BILLING_TEST = 'backend/services/billing/src/app.test.ts';
 
 /** Each app's test sends /healthz, /readyz and an unknown route through the shared middleware. */
 const APP_TESTS = [GATEWAY_TEST, AUTH_TEST, CHAT_TEST, AGENT_TEST, BILLING_TEST];
+
+const FRONTEND_CHATS_TEST = 'frontend/src/components/chats/chats.test.tsx';
+const FRONTEND_CHATS_LIB_TEST = 'frontend/src/lib/chats.test.ts';
+const FRONTEND_SERVER_CHATS_TEST = 'frontend/src/server/chats.test.ts';
+const FRONTEND_SESSION_TEST = 'frontend/src/server/session.test.ts';
 
 export const notes: SymbolNote[] = [
   // -------------------------------------------------------------------------------------------
@@ -40,12 +51,12 @@ export const notes: SymbolNote[] = [
 
   {
     symbol: 'backend/shared/src/constants.ts#AGENTS',
-    status: 'not-wired',
+    status: 'verified',
     summary: 'The list of every agent a chat turn can run.',
-    why: 'One list that the rest of the code shares, so agent names are spelled the same everywhere. The `Agent` type is built from it, so code typed with Agent cannot use a misspelled name. Nothing outside the tests reads it yet.',
+    why: "One list that the rest of the code shares, so agent names are spelled the same everywhere. The `Agent` type is built from it, so code typed with Agent cannot use a misspelled name. Chat reads it: a message's agent field accepts only these names, both in the messages model and in POST /internal/messages.",
     returns:
       'A read-only array of eight names: chat, search, code, pdf, slides, image, pdf_qa and image_qa.',
-    tests: [CONSTANTS_TEST],
+    tests: [CONSTANTS_TEST, CHAT_MODELS_TEST],
   },
   {
     symbol: 'backend/shared/src/constants.ts#CREDIT_COSTS',
@@ -489,9 +500,9 @@ export const notes: SymbolNote[] = [
       "Without `res.locals.userId`, it passes AppError('unauthorized', 'This route needs a signed-in user') to the error handler, which answers 401.",
       'Otherwise it calls next().',
     ],
-    why: 'A valid internal token only proves that a request came through the gateway; requests with no session, such as a sign-in, carry one too. Routes that must know the user add this check on top: in auth, DELETE /sessions/current, GET and PATCH /me and GET /internal/users/:id.',
+    why: 'A valid internal token only proves that a request came through the gateway; requests with no session, such as a sign-in, carry one too. Routes that must know the user add this check on top: in auth, DELETE /sessions/current, GET and PATCH /me and GET /internal/users/:id; in chat, every /chats and /internal route.',
     returns: 'An Express middleware function.',
-    tests: [INTERNAL_TOKEN_TEST],
+    tests: [INTERNAL_TOKEN_TEST, CHAT_ROUTES_TEST, CHAT_INTERNAL_ROUTES_TEST],
   },
 
   // -------------------------------------------------------------------------------------------
@@ -689,7 +700,7 @@ export const notes: SymbolNote[] = [
       "The app's own `routes` come next.",
       'notFoundHandler() and errorHandler() come last, to catch whatever is left.',
     ],
-    why: 'Middleware order matters: the request ID must exist before anything logs, health probes must not need a token, and the error handler must come last. The token check runs before the routes, so a call without a token cannot learn from a 404 which paths exist. Writing the order once means all five apps get it right. The gateway turns `parseJson` off, so it forwards bodies to the services untouched, and passes its /api router as its routes. Auth, chat, agent and billing pass `internalAuth`, and auth also its own routes.',
+    why: 'Middleware order matters: the request ID must exist before anything logs, health probes must not need a token, and the error handler must come last. The token check runs before the routes, so a call without a token cannot learn from a 404 which paths exist. Writing the order once means all five apps get it right. The gateway turns `parseJson` off, so it forwards bodies to the services untouched, and passes its /api router as its routes. Auth, chat, agent and billing pass `internalAuth`, and auth and chat also their own routes.',
     returns: 'The Express app, not listening yet.',
     sideEffects: [
       'For each request once the app listens: sets security headers and X-Request-Id, and writes a request log line (not for GET or HEAD health probes).',
@@ -885,10 +896,18 @@ export const notes: SymbolNote[] = [
       'connectMongo connects the shared Mongoose to its gilder_test database, with a silent logger.',
       '`stop()` disconnects Mongoose and stops the server.',
     ],
-    why: "For tests only: an app's tests import it from `@gilder/shared/testing`, a separate entry that the running apps never load. Each call starts its own server, so test files running at the same time never share data. auth's users.test.ts, session-routes.test.ts and me-routes.test.ts and the gateway's journey.test.ts use it.",
+    why: "For tests only: an app's tests import it from `@gilder/shared/testing`, a separate entry that the running apps never load. Each call starts its own server, so test files running at the same time never share data. auth's users.test.ts, session-routes.test.ts and me-routes.test.ts, chat's models.test.ts, chat-routes.test.ts and internal-routes.test.ts, and the gateway's journey.test.ts use it.",
     returns: 'A promise of { stop }.',
     sideEffects: ['Starts a mongod process and connects Mongoose to it.'],
-    tests: [AUTH_USERS_TEST, AUTH_SESSION_ROUTES_TEST, AUTH_ME_ROUTES_TEST, JOURNEY_TEST],
+    tests: [
+      AUTH_USERS_TEST,
+      AUTH_SESSION_ROUTES_TEST,
+      AUTH_ME_ROUTES_TEST,
+      CHAT_MODELS_TEST,
+      CHAT_ROUTES_TEST,
+      CHAT_INTERNAL_ROUTES_TEST,
+      JOURNEY_TEST,
+    ],
   },
 
   // -------------------------------------------------------------------------------------------
@@ -905,10 +924,16 @@ export const notes: SymbolNote[] = [
       'Otherwise it replaces each part with the parsed value, so handlers get typed, converted data (for example the number 5, not the text "5").',
       'It redefines req.query instead of assigning it, because Express 5 exposes req.query through a getter.',
     ],
-    why: "Handlers can trust their input, and clients learn about every bad field in one response instead of one at a time. Auth's routes use it: POST /sessions, POST /sessions/dev and PATCH /me check their body, and GET /internal/users/:id its params.",
+    why: "Handlers can trust their input, and clients learn about every bad field in one response instead of one at a time. Auth's routes use it: POST /sessions, POST /sessions/dev and PATCH /me check their body, and GET /internal/users/:id its params. Every chat route uses it too, for the chat ID, the list's query, cursor and limit, and the bodies, which are strict, so an unknown field such as userId is a 400.",
     returns: 'An Express middleware function.',
     sideEffects: ['Replaces req.params, req.query and req.body with the parsed values.'],
-    tests: [SERVICE_TEST, AUTH_SESSION_ROUTES_TEST, AUTH_ME_ROUTES_TEST],
+    tests: [
+      SERVICE_TEST,
+      AUTH_SESSION_ROUTES_TEST,
+      AUTH_ME_ROUTES_TEST,
+      CHAT_ROUTES_TEST,
+      CHAT_INTERNAL_ROUTES_TEST,
+    ],
   },
 
   // -------------------------------------------------------------------------------------------
@@ -925,7 +950,7 @@ export const notes: SymbolNote[] = [
       'A request that leaves the router reaches the shared 404 handler and never reaches a service. /healthz and /readyz are answered before the router, so they are not rate-limited.',
       'At startup, index.ts passes one readiness check (redis), the Redis client, the imported INTERNAL_PRIVATE_KEY, the four service URLs, FRONTEND_ORIGIN as allowedOrigins and TRUST_PROXY_HOPS.',
     ],
-    why: "Every check every request needs lives in one place, cheapest first, and the route table decides what may reach a service at all, so a service's internal routes cannot be called from outside. Building the app apart from starting it lets tests pass a test Redis, a key pair made for the test and a stand-in service, or the real auth app (journey.test.ts). The optional `headersTimeoutMs` can shorten the proxy's 10-second wait for a service; index.ts does not set it.",
+    why: "Every check every request needs lives in one place, cheapest first, and the route table decides what may reach a service at all, so a service's internal routes cannot be called from outside. Building the app apart from starting it lets tests pass a test Redis, a key pair made for the test and a stand-in service, or the real auth and chat apps (journey.test.ts). The optional `headersTimeoutMs` can shorten the proxy's 10-second wait for a service; index.ts does not set it.",
     returns:
       'An Express app with /healthz and /readyz, the /api router in front of the services, and the shared 404 and error handling.',
     tests: [GATEWAY_TEST, JOURNEY_TEST],
@@ -1007,16 +1032,19 @@ export const notes: SymbolNote[] = [
       "POST /api/auth/dev-session goes to auth's POST /sessions/dev (dev sign-in); no session needed.",
       "DELETE /api/auth/session goes to auth's DELETE /sessions/current (logout); a session is required.",
       "GET /api/me and PATCH /api/me go to auth's GET and PATCH /me; a session is required.",
+      "GET and POST /api/chats go to chat's GET and POST /chats (list or search, and create).",
+      "GET, PATCH and DELETE /api/chats/:id go to chat's /chats/:id (read, rename or pin, delete), and GET /api/chats/:id/messages to /chats/:id/messages (history).",
+      'Every chat route requires a session.',
     ],
-    why: "It is an allowlist: anything not listed gets the gateway's own 404 and never reaches a service, so auth's GET /internal/users/:id cannot be called from outside. Chat, agent and billing have no entries yet, so nothing reaches them through the gateway.",
-    returns: 'A read-only array of five PublicRoute entries.',
+    why: "It is an allowlist: anything not listed gets the gateway's own 404 and never reaches a service, so auth's GET /internal/users/:id and chat's /internal routes cannot be called from outside (journey.test.ts checks both, SEC-01). Agent and billing have no entries yet, so nothing reaches them through the gateway.",
+    returns: 'A read-only array of eleven PublicRoute entries.',
     tests: [GATEWAY_ROUTE_TABLE_TEST, JOURNEY_TEST],
   },
   {
     symbol: 'backend/gateway/src/route-table.ts#SAFE_PARAM',
     status: 'verified',
     summary: 'The pattern a :param in a public path must match: 1 to 64 letters, digits, - or _.',
-    why: "Route params are IDs. Refusing everything else means a dot segment or an encoded slash can never be smuggled into the service's path. No route in PUBLIC_ROUTES has a param yet; the tests check it with a route of their own.",
+    why: "Route params are IDs. Refusing everything else means a dot segment or an encoded slash can never be smuggled into the service's path. The chat routes' :id uses it; a chat ID is a 24-character ObjectId, which fits. An ID with any other character matches no route and gets the gateway's own 404.",
     returns: 'A regular expression.',
     tests: [GATEWAY_ROUTE_TABLE_TEST],
   },
@@ -1035,7 +1063,7 @@ export const notes: SymbolNote[] = [
     how: [
       'It goes through the routes in order, skipping any with another method or another number of path parts.',
       'A plain part must be equal. A :param part takes the value at that place, which must match SAFE_PARAM.',
-      "On a match it fills the route's params into its target, giving the service path, and throws if the target names a param the public path does not have.",
+      "On a match it fills the route's params into its target, giving the service path (/api/chats/<id> becomes /chats/<id>), and throws if the target names a param the public path does not have.",
       'It returns undefined when nothing matches.',
     ],
     why: "The gateway's app calls it for every request that reaches the /api router; undefined means the gateway answers 404 itself. A path with `..` in it does not match any entry, so it never reaches a service either.",
@@ -1383,16 +1411,17 @@ export const notes: SymbolNote[] = [
     symbol: 'backend/services/chat/src/app.ts#createApp',
     status: 'verified',
     summary:
-      "Builds the chat service's Express app: no routes of its own yet, but locked behind the internal-token check.",
+      "Builds the chat service's Express app: the chat routes and the internal routes, behind the internal-token check.",
     how: [
-      "It calls createService with the name 'chat', the given logger and readiness checks, and `internalAuth: { publicKey: internalPublicKey, audience: 'chat' }`.",
-      "Its comment says it has no routes of its own yet, but is locked already: only the gateway's token gets past the health checks, so a direct call gets 401 on any path. A request with a valid token gets 404, since there are no routes.",
-      'At startup, index.ts passes one readiness check: mongo, and the imported INTERNAL_PUBLIC_KEY.',
+      "It calls createService with the name 'chat', the given logger and readiness checks, `internalAuth: { publicKey: internalPublicKey, audience: 'chat' }`, and routes that add chatRouter, then internalRouter.",
+      'So it serves GET and POST /chats, GET, PATCH and DELETE /chats/:id, GET /chats/:id/messages, and the five /internal routes for the agent service.',
+      "Per its comment, only the gateway's token gets past the health checks, so a direct call gets 401 on any path. An unknown path with a valid token gets 404.",
+      'At startup, index.ts passes one readiness check, mongo, and the imported INTERNAL_PUBLIC_KEY.',
     ],
-    why: "Building the app apart from starting it lets tests get the app without startService, a fixed port or real databases; supertest serves it on a temporary port. Its app.test.ts sends missing, garbage, forged, misaddressed and expired tokens and checks each gets 401 (SEC-02). The gateway's route table has no chat routes yet, so nothing reaches it through the gateway.",
+    why: 'Building the app apart from starting it lets tests get the app without startService or a fixed port; supertest serves it on a temporary port, and the route tests start a MongoDB of their own (startTestMongo) and sign their own tokens. Its app.test.ts sends missing, garbage, forged, misaddressed and expired tokens and checks each gets 401 (SEC-02). The package exports it as @gilder/chat/app, so journey.test.ts runs this app on a port behind the real gateway, which forwards the six /api/chats routes to it.',
     returns:
-      'An Express app with /healthz and /readyz open to all, the internal-token check in front of everything else, and the shared 404 and error handling.',
-    tests: [CHAT_TEST],
+      'An Express app with /healthz and /readyz open to all, the chat and internal routes behind the internal-token check, and the shared 404 and error handling.',
+    tests: [CHAT_TEST, CHAT_ROUTES_TEST, CHAT_INTERNAL_ROUTES_TEST, JOURNEY_TEST],
   },
   {
     symbol: 'backend/services/chat/src/env.ts#env',
@@ -1409,6 +1438,191 @@ export const notes: SymbolNote[] = [
       'Reads process.env.',
       'Throws an EnvError on import if anything is invalid, which stops the app.',
     ],
+  },
+
+  // -------------------------------------------------------------------------------------------
+  // backend/services/chat: conversations, messages and their routes
+
+  {
+    symbol: 'backend/services/chat/src/models.ts#DEFAULT_CHAT_TITLE',
+    status: 'verified',
+    summary: "The title a chat starts with: 'New chat'.",
+    why: "conversationSchema uses it as the title's default. The auto-title route (PATCH /internal/chats/:id) renames a chat only while its title is still this, so a title the user chose is never overwritten.",
+    returns: "The string 'New chat'.",
+    tests: [CHAT_MODELS_TEST, CHAT_INTERNAL_ROUTES_TEST],
+  },
+  {
+    symbol: 'backend/services/chat/src/models.ts#MESSAGE_ROLES',
+    status: 'verified',
+    summary: "Who can write a message: 'user' or 'assistant'.",
+    why: "The messages model accepts only these roles, and POST /internal/messages checks the role against the same list, so a 'system' message is refused in both places. `as const` keeps the exact names for the MessageView type.",
+    returns: "A read-only array: 'user', 'assistant'.",
+    tests: [CHAT_MODELS_TEST, CHAT_INTERNAL_ROUTES_TEST],
+  },
+  {
+    symbol: 'backend/services/chat/src/models.ts#MESSAGE_STATUSES',
+    status: 'verified',
+    summary: "The states of a message: 'streaming', 'complete', 'stopped' or 'failed'.",
+    why: "A message saved as 'streaming' is filled in later with PATCH /internal/messages/:id. Only 'complete' and 'stopped' messages count as an agent's memory (recent-messages), and the chat page shows 'Stopped' or 'This answer failed.' under such answers. A message is 'complete' unless told otherwise.",
+    returns: 'A read-only array of the four statuses.',
+    tests: [CHAT_MODELS_TEST, CHAT_INTERNAL_ROUTES_TEST],
+  },
+  {
+    symbol: 'backend/services/chat/src/models.ts#conversationSchema',
+    status: 'verified',
+    summary: 'The shape and rules of a document in the conversations collection.',
+    how: [
+      'userId (the owner) is required.',
+      "title is trimmed, at most 120 characters, and starts as 'New chat'.",
+      'pinnedAt is null unless the chat is pinned; lastMessageAt is set to now when the chat is made and moves with each new message; deletedAt is null unless the chat was deleted.',
+      'timestamps adds createdAt and updatedAt.',
+      'Two indexes come with it: { userId, pinnedAt: -1, lastMessageAt: -1 } for the chat list, and a text index on title after userId for search. With userId first, MongoDB needs an exact userId in every text search, so a search cannot run across users.',
+    ],
+    why: "Everything the list, search and soft delete need is on the chat itself, so the list is two simple queries. Every query filters by userId and deletedAt: null, so other users' chats and deleted ones never come back.",
+    tests: [CHAT_MODELS_TEST],
+  },
+  {
+    symbol: 'backend/services/chat/src/models.ts#messageSchema',
+    status: 'verified',
+    summary: 'The shape and rules of a document in the messages collection.',
+    how: [
+      'conversationId and userId are required: each message carries its owner too.',
+      'role is one of MESSAGE_ROLES, status one of MESSAGE_STATUSES (default complete), and agent, when set, one of AGENTS.',
+      'clientMessageId (at most 64 characters) is chosen by the browser for each send.',
+      'supersededBy is set when an edit or a regenerate replaces the message; such messages stay, hidden.',
+      'attachments and fileRefs hold file IDs, never URLs. artifacts, sources and citations are filled in by the agents.',
+      'Indexes: { conversationId, createdAt } for a chat in order; { conversationId, clientMessageId }, unique only where clientMessageId is set, so one send is saved once; and a text index on content after userId for search.',
+    ],
+    why: 'With the owner on each message, message search and PATCH /internal/messages/:id filter by user without reading the chat first. The unique index is what makes a retried send safe even when two copies arrive at once.',
+    tests: [CHAT_MODELS_TEST, CHAT_INTERNAL_ROUTES_TEST],
+  },
+  {
+    symbol: 'backend/services/chat/src/models.ts#ConversationModel',
+    status: 'verified',
+    summary:
+      "The Mongoose model for the conversations collection in chat's database (gilder_chat).",
+    why: 'Only chat reads or writes chats. It is built from the mongoose that @gilder/shared re-exports, so it uses the connection connectMongo opens; Mongoose builds the indexes when the model first connects (the tests wait for that with init()). chatRouter lists, searches, creates, renames, pins and soft-deletes chats with it, and findOwnedConversation reads one.',
+    returns: 'A Mongoose model of Conversation documents.',
+    tests: [CHAT_MODELS_TEST, CHAT_ROUTES_TEST],
+  },
+  {
+    symbol: 'backend/services/chat/src/models.ts#MessageModel',
+    status: 'verified',
+    summary: "The Mongoose model for the messages collection in chat's database.",
+    why: 'chatRouter reads the history and searches message text with it; internalRouter saves, replaces and fills in messages. Mongoose builds the unique and text indexes when the model first connects.',
+    returns: 'A Mongoose model of Message documents.',
+    tests: [CHAT_MODELS_TEST, CHAT_ROUTES_TEST, CHAT_INTERNAL_ROUTES_TEST],
+  },
+  {
+    symbol: 'backend/services/chat/src/models.ts#findOwnedConversation',
+    status: 'verified',
+    summary:
+      "The chat with this ID, only if it belongs to the user and isn't deleted; otherwise null.",
+    how: [
+      'An ID that is not a valid ObjectId gives null without a query.',
+      'Otherwise one findOne filters by _id, userId and deletedAt: null.',
+    ],
+    why: "Every route that reads or changes one chat goes through it, so someone else's chat, a deleted one, a missing one and a malformed ID all look the same: null, which the routes turn into the same 404 'No such chat' (SEC-04). The owner check is part of the query, so no route can read a chat and forget to check it.",
+    returns: 'A promise of the conversation document, or null.',
+    tests: [CHAT_MODELS_TEST, CHAT_ROUTES_TEST, CHAT_INTERNAL_ROUTES_TEST],
+  },
+  {
+    symbol: 'backend/services/chat/src/models.ts#toChat',
+    status: 'verified',
+    summary: 'Turns a conversation document into what the API shows of a chat.',
+    how: [
+      'It returns id, title, pinned, lastMessageAt and createdAt.',
+      'pinned is true when pinnedAt is set; the pin time itself is not sent.',
+      'Dates go out as ISO strings.',
+    ],
+    why: "One function decides what leaves the service: userId and deletedAt never do. The frontend's ChatSummary type has the same shape.",
+    returns: '{ id, title, pinned, lastMessageAt, createdAt }',
+    tests: [CHAT_MODELS_TEST, CHAT_ROUTES_TEST],
+  },
+  {
+    symbol: 'backend/services/chat/src/models.ts#toMessage',
+    status: 'verified',
+    summary: 'Turns a message document into what the API shows of a message.',
+    how: [
+      'It returns id, role, content, agent, status, clientMessageId, attachments, artifacts, sources, citations and createdAt.',
+      'An agent or clientMessageId that is not set becomes null, so the shape is always the same.',
+      'userId, conversationId, supersededBy and fileRefs stay inside the service.',
+    ],
+    why: "As with toChat, what leaves the service is chosen in one place. The frontend's ChatMessage type has the same shape.",
+    returns:
+      '{ id, role, content, agent, status, clientMessageId, attachments, artifacts, sources, citations, createdAt }',
+    tests: [CHAT_MODELS_TEST, CHAT_ROUTES_TEST],
+  },
+  {
+    symbol: 'backend/services/chat/src/chat-routes.ts#encodeCursor',
+    status: 'verified',
+    summary: 'Packs a page position into an opaque cursor.',
+    why: 'A cursor is the sort value (at, an ISO time) and the ID of the last item on a page, as JSON in base64url, so it is safe in a URL. The next page starts right after that item, so chats added in the meantime do not shift the pages. GET /chats uses lastMessageAt and GET /chats/:id/messages uses createdAt.',
+    returns: 'A base64url string.',
+    tests: [CHAT_ROUTES_TEST],
+  },
+  {
+    symbol: 'backend/services/chat/src/chat-routes.ts#decodeCursor',
+    status: 'verified',
+    summary: 'Reads a cursor back, or refuses it with 400.',
+    how: [
+      'No cursor gives undefined: the first page.',
+      'Otherwise it decodes base64url and parses the JSON, and accepts only { at, id } where at is a date and id a valid ObjectId.',
+      "Anything else, text that is not JSON included, throws AppError('bad_request', 'The cursor is not valid').",
+    ],
+    why: "The cursor's values go straight into a MongoDB query, so a cursor the service did not make is refused before it can shape one.",
+    returns: '{ at, id }, or undefined.',
+    tests: [CHAT_ROUTES_TEST],
+  },
+  {
+    symbol: 'backend/services/chat/src/chat-routes.ts#ownedOr404',
+    status: 'verified',
+    summary: "The user's own chat, or the 404 'No such chat'.",
+    why: "chatRouter's routes for one chat start with it, passing the user from the internal token. When findOwnedConversation finds nothing it throws AppError('not_found', 'No such chat'), so a chat that is someone else's answers exactly like one that never existed.",
+    returns: 'A promise of the conversation document.',
+    tests: [CHAT_ROUTES_TEST],
+  },
+  {
+    symbol: 'backend/services/chat/src/chat-routes.ts#chatRouter',
+    status: 'verified',
+    summary:
+      "The signed-in user's chats: list, search, create, rename, pin, delete and read the history.",
+    how: [
+      'Every /chats route needs a user in the internal token (requireUser), and checks its params, query and body with validate.',
+      'GET /chats without a query: the first page holds every pinned chat (latest pin first, up to 50), then up to `limit` others (default 30, at most 50), newest lastMessageAt first with _id as the tie-break. nextCursor points after the last of those, or is null. A page with a cursor holds no pinned chats.',
+      "GET /chats?query= searches titles and the text of the user's messages that are not superseded, at the same time, up to 50 chats each. It merges them without repeats, leaves out deleted chats, sorts by lastMessageAt and returns up to `limit`, with nextCursor null.",
+      "POST /chats makes a chat, titled 'New chat' unless a title is given, and answers 201 { chat }.",
+      'GET /chats/:id answers { chat }. PATCH /chats/:id takes a title, pinned or both; pinning keeps an existing pin time. DELETE /chats/:id sets deletedAt and answers 204.',
+      'GET /chats/:id/messages pages from the newest message back, skipping superseded ones; each page comes back oldest first, with a cursor for the older page.',
+      "The routes for one chat go through ownedOr404, so another user's chat gets the same 404 'No such chat' as a missing one.",
+    ],
+    why: 'Each user only ever sees and changes their own chats. createApp mounts it behind the internal-token check, and the gateway forwards its six routes from /api/chats. The sidebar list, search, rename, pin and delete call it through RTK Query, and the chat page reads GET /chats/:id and its messages on the server. POST /chats is in place for the first message to create a chat; nothing in the frontend calls it yet.',
+    returns: 'An Express Router.',
+    sideEffects: [
+      'POST creates a conversation, PATCH changes its title or pinnedAt, and DELETE sets its deletedAt, in MongoDB.',
+    ],
+    tests: [CHAT_ROUTES_TEST, JOURNEY_TEST],
+  },
+  {
+    symbol: 'backend/services/chat/src/internal-routes.ts#internalRouter',
+    status: 'not-wired',
+    summary:
+      'Routes for the agent service: read a chat, auto-title it, read its recent messages, and save and fill in messages.',
+    how: [
+      "Every /internal route needs a user in the internal token (requireUser), and every lookup filters by that user, so another user's chat or message gets a 404.",
+      'GET /internal/chats/:id answers { chat }.',
+      "PATCH /internal/chats/:id takes { title } and renames the chat only while its title is still 'New chat'. It answers { chat, renamed }.",
+      'GET /internal/chats/:id/recent-messages returns the latest complete or stopped messages that are not superseded, oldest first: 20 by default, at most 50.',
+      'POST /internal/messages saves a message, with up to 100,000 characters of text. If the chat already has a message with the same clientMessageId, it answers 200 with that message and created: false. If two copies race past that check, the unique index keeps one and the other answers with it.',
+      "A new message answers 201 with created: true. It hides the messages listed in supersedes (valid IDs in the same chat only) and moves the chat's lastMessageAt to it.",
+      "PATCH /internal/messages/:id fills in content, status, agent, attachments, artifacts, sources or citations; at least one, and nothing else. Once the status is no longer 'streaming', the chat's lastMessageAt moves to now.",
+    ],
+    why: "These are the calls the agent service is to make while it answers: check the chat, read its memory, save the user's message and the answer, and name the chat. The gateway's route table has no /internal entries, so they cannot be reached from outside (journey.test.ts, SEC-01). Nothing calls them yet.",
+    returns: 'An Express Router.',
+    sideEffects: [
+      "Creates and updates messages, and changes a chat's title and lastMessageAt, in MongoDB.",
+    ],
+    tests: [CHAT_INTERNAL_ROUTES_TEST, JOURNEY_TEST],
   },
   {
     symbol: 'backend/services/agent/src/app.ts#createApp',
@@ -1487,7 +1701,7 @@ export const notes: SymbolNote[] = [
       'The same file imports globals.css and exports metadata: the title GilderAi (pages add their own, as in "Sign in · GilderAi").',
       'suppressHydrationWarning on <html>, because the theme script may set data-theme before React loads.',
     ],
-    why: "Next.js's App Router needs a root layout that renders <html> and <body>. This one also adds the theme script in <head> and the toast and tooltip providers around every page.",
+    why: "Next.js's App Router needs a root layout that renders <html> and <body>. This one also adds the theme script in <head> and Providers (the Redux store, tooltips and toasts) around every page.",
     returns: 'The <html> element that wraps every page.',
   },
   {
@@ -1526,14 +1740,14 @@ export const notes: SymbolNote[] = [
     status: 'verified',
     summary: 'The signed-in user for server components, or null.',
     how: [
-      'With no gilder_sid cookie it returns null without calling the gateway.',
-      "Otherwise it calls the gateway's /api/me directly with the browser's cookies.",
+      "It asks gatewayGet for /api/me, which calls the gateway directly with the browser's cookies.",
+      'With no gilder_sid cookie gatewayGet returns null without calling the gateway, and so does this.',
       'A 401 means the session ended: null. Any other failure throws.',
       "React's cache() runs it at most once per request, so the sidebar and the small-screen bar share one call.",
     ],
-    why: 'Reading cookies makes rendering per-request, so callers sit inside a Suspense boundary and the rest of the page stays prerendered.',
+    why: 'Reading cookies makes rendering per-request, so callers sit inside a Suspense boundary and the rest of the page stays prerendered. SidebarAccount calls it and sends a visitor without a valid session to /login.',
     returns: 'A promise of the profile or null.',
-    tests: ['frontend/src/server/session.test.ts'],
+    tests: [FRONTEND_SESSION_TEST],
   },
   {
     symbol: 'frontend/src/server/security-headers.ts#contentSecurityPolicy',
@@ -1568,5 +1782,296 @@ export const notes: SymbolNote[] = [
     why: 'One form for both ways in, so sessions start the same way whichever is used.',
     returns: 'The form as JSX.',
     tests: ['frontend/src/app/login/login-form.test.tsx'],
+  },
+
+  // -------------------------------------------------------------------------------------------
+  // frontend: the app shell, providers and dialog
+
+  {
+    symbol: 'frontend/src/app/providers.tsx#Providers',
+    status: 'verified',
+    summary: 'The client-side providers around every page: the Redux store, tooltips and toasts.',
+    why: 'RootLayout wraps every page in it. StoreProvider is outermost, so every client component can use the RTK Query hooks; TooltipProvider sets the tooltip timing; ToastProvider lets any component show a toast.',
+    returns: 'The providers as JSX.',
+  },
+  {
+    symbol: 'frontend/src/app/(app)/layout.tsx#AppLayout',
+    status: 'verified',
+    summary:
+      'The signed-in app: the sidebar (a top bar on small screens) and the page, inside ChatCommands.',
+    how: [
+      'ChatCommands wraps everything, so ⌘K and ⌘⇧O work on every signed-in page and every search button opens the same dialog.',
+      'The account parts of the sidebar and of the top bar (SidebarAccount) each sit in a Suspense boundary with a skeleton, because they read the session.',
+      'The page goes in <main>, which scrolls on its own.',
+    ],
+    why: 'Everything outside those boundaries is static, so the shell can be prerendered and the account streams in. The chat list loads later, in the browser.',
+    returns: 'The layout as JSX.',
+  },
+  {
+    symbol: 'frontend/src/components/app-shell/sidebar.tsx#SidebarFrame',
+    status: 'verified',
+    summary:
+      'The sidebar on medium and larger screens: brand, New chat, Search chats, the chat list and the account part.',
+    why: 'New chat is a link to /, which creates nothing: an empty new chat. SearchButton opens the search dialog and ChatList loads the chats in the browser. The account part comes in as children, because it needs the session and sits in a Suspense boundary. Below the md breakpoint the sidebar is hidden and MobileBar takes over.',
+    returns: 'The <aside> as JSX.',
+  },
+  {
+    symbol: 'frontend/src/components/app-shell/sidebar.tsx#MobileBar',
+    status: 'verified',
+    summary:
+      'The top bar on small screens: the chat list menu, brand, search, new chat and the account.',
+    why: 'It stands in for the sidebar below the md breakpoint: MobileNav opens the chat list, SearchIconButton opens search and the + link goes to / for a new chat. The account part comes in as children.',
+    returns: 'The <header> as JSX.',
+  },
+  {
+    symbol: 'frontend/src/components/app-shell/mobile-nav.tsx#MobileNav',
+    status: 'verified',
+    summary:
+      'The chat list on small screens: a panel along the left edge, opened from the top bar.',
+    how: [
+      'The menu button opens it. It is a Radix dialog, so focus stays inside and Escape closes it.',
+      'It holds New chat, Search chats and the same ChatList as the sidebar.',
+      'A click on a link, or on an element marked data-closes-nav such as the search button, closes it.',
+    ],
+    why: 'Below the md breakpoint the sidebar is hidden, so the chats need another way in. Using the same ChatList means the same cached list.',
+    returns: 'The menu button and the panel as JSX.',
+  },
+  {
+    symbol: 'frontend/src/components/ui/dialog.tsx#Dialog',
+    status: 'verified',
+    summary: 'A modal dialog with a title, an optional description and a close button.',
+    how: [
+      'Radix keeps focus inside it and closes it on Escape; the title and description are wired to it for screen readers.',
+      'On open it remembers what had focus, and on close gives focus back to it, even a plain button or a menu item.',
+      'A field marked data-autofocus gets focus first, with its text selected, instead of the close button.',
+    ],
+    why: 'The rename dialog opens with the current title selected, and search starts in its field. Radix alone gives focus back only to its own Trigger, and these dialogs open from menus and shortcuts.',
+    returns: 'The dialog as JSX.',
+    tests: ['frontend/src/components/ui/overlays.test.tsx', FRONTEND_CHATS_TEST],
+  },
+
+  // -------------------------------------------------------------------------------------------
+  // frontend: chat data in the browser
+
+  {
+    symbol: 'frontend/src/store/api.ts#api',
+    status: 'verified',
+    summary:
+      "The browser's data layer for chats: an RTK Query API whose calls all go to the app's own /api.",
+    how: [
+      'fetchBaseQuery uses the base URL /api, so every call goes to the Next.js proxy, which forwards it to the gateway with the session cookie.',
+      'listChats is an infinite query for the sidebar: the first page is GET /api/chats, later pages add ?cursor=, and getNextPageParam reads nextCursor (null ends the list).',
+      'searchChats is GET /api/chats?query=, getChat is GET /api/chats/:id and createChat is POST /api/chats.',
+      'updateChat (PATCH, to rename or pin) and deleteChat (DELETE) change the cached list straight away in onQueryStarted, and undo that change if the call fails.',
+      'The list queries provide the Chat LIST tag and getChat its own Chat tag. createChat, updateChat and deleteChat invalidate LIST, and updateChat also its chat, so those are fetched again once the call is done.',
+    ],
+    why: 'The sidebar, the small-screen panel and the recent chats in search use the same listChats cache, so one fetch serves them all. The optimistic changes make rename, pin and delete feel instant, and the undo keeps the list true when the server refuses. Nothing calls createChat yet.',
+    returns:
+      'The API object: its reducer, middleware, endpoints and hooks such as useListChatsInfiniteQuery and useUpdateChatMutation.',
+    tests: [FRONTEND_CHATS_TEST],
+  },
+  {
+    symbol: 'frontend/src/store/api.ts#errorMessage',
+    status: 'verified',
+    summary: "A message for a failed call: the service's own detail when it sent problem+json.",
+    how: [
+      'An HTTP error whose body is an object gives its detail, or its title, and its requestId.',
+      "A network failure (FETCH_ERROR) gives 'Could not reach GilderAi. Check your connection.'",
+      "Anything else gives 'Something went wrong'.",
+    ],
+    why: 'ChatRow shows it in a toast when a rename, pin or delete fails, with the request ID as a reference for the logs.',
+    returns: '{ message, requestId? }',
+    tests: [FRONTEND_CHATS_TEST],
+  },
+  {
+    symbol: 'frontend/src/store/store.tsx#makeStore',
+    status: 'verified',
+    summary: "Makes the Redux store: RTK Query's reducer and middleware.",
+    how: [
+      'The root reducer is written by hand (rootReducer): it runs api.reducer and keeps the same state object when nothing changed.',
+      "Redux Toolkit's immutable and serializable checks, which run only in development, are turned on only in the browser.",
+      'api.middleware comes after the default middleware; it runs the queries, the cache and the refetches.',
+    ],
+    why: "Handing configureStore an object of reducers would go through combineReducers, which calls Math.random(), and Next.js refuses random values while it prerenders the static shell. The development checks time each dispatch with Date.now(), which Next.js refuses there too. The server's store never holds data, because queries only run in the browser.",
+    returns: 'A configured Redux store.',
+    tests: [FRONTEND_CHATS_TEST],
+  },
+  {
+    symbol: 'frontend/src/store/store.tsx#StoreProvider',
+    status: 'verified',
+    summary: 'Gives the component tree one Redux store.',
+    why: 'useState(makeStore) makes the store on the first render and keeps it, so each browser tab has its own and server renders never share one. Providers puts it around every page.',
+    returns: 'The react-redux Provider as JSX.',
+    tests: [FRONTEND_CHATS_TEST],
+  },
+  {
+    symbol: 'frontend/src/lib/chats.ts#groupChats',
+    status: 'verified',
+    summary: 'Splits the sidebar list into Pinned, Today, Previous 7 days and Older.',
+    how: [
+      'Pinned chats go to Pinned, however old they are.',
+      'The others go by lastMessageAt: Today from local midnight, Previous 7 days for the week before that, Older before that.',
+      'Chats keep the order the service sent. A chat that comes twice is shown once, and empty groups are left out.',
+    ],
+    why: "The service sends one ordered list; the groups are only for display and depend on the user's clock and time zone, so they are made in the browser. ChatList calls it only once chats have loaded, never in the prerendered shell, where Next.js refuses the current time.",
+    returns: 'An array of { label, chats }.',
+    tests: [FRONTEND_CHATS_LIB_TEST, FRONTEND_CHATS_TEST],
+  },
+
+  // -------------------------------------------------------------------------------------------
+  // frontend: the chat list, search and chat page
+
+  {
+    symbol: 'frontend/src/components/chats/chat-list.tsx#ChatList',
+    status: 'verified',
+    summary: 'The chats in the sidebar, grouped, with Show more for older pages.',
+    how: [
+      'useListChatsInfiniteQuery loads the first page in the browser.',
+      "While it loads there are skeleton lines; on failure 'Could not load your chats.' with Try again; with no chats 'No chats yet. Start one with New chat.'",
+      'Otherwise each group from groupChats is a section with a heading and one ChatRow per chat.',
+      'Show more fetches the next page while there is one.',
+    ],
+    why: 'The same component is in the sidebar and in the small-screen panel (MobileNav), so both show one cached list.',
+    returns: 'The list as JSX.',
+    tests: [FRONTEND_CHATS_TEST],
+  },
+  {
+    symbol: 'frontend/src/components/chats/chat-row.tsx#ChatRow',
+    status: 'verified',
+    summary: 'One chat in the sidebar: a link to /c/<id>, and a menu to rename, pin or delete it.',
+    how: [
+      "The link has aria-current='page' when its chat is open.",
+      'Rename opens a dialog with the title selected. Save sends updateChat with the trimmed title; an empty or unchanged title just closes it.',
+      "Pin or Unpin sends updateChat with pinned flipped, then puts keyboard focus on the row's menu button in its new group.",
+      "Delete asks first ('Delete chat?'). After the delete it goes to / if the deleted chat was open.",
+      "A failed call shows a toast, such as 'Could not rename the chat', with the service's message and request ID (errorMessage).",
+      'A dialog picked from the menu opens only after the menu has closed and given focus back to its button, so the dialog can return focus there.',
+    ],
+    why: 'Rename, pin and delete live where the chat is listed, and the list changes at once: updateChat and deleteChat change the cache and undo it on failure.',
+    returns: 'The row as JSX.',
+    tests: [FRONTEND_CHATS_TEST],
+  },
+  {
+    symbol: 'frontend/src/components/chats/search-dialog.tsx#SearchDialog',
+    status: 'verified',
+    summary: 'Search chats by title or message text (⌘K).',
+    how: [
+      'What is typed is used after a 250 ms pause. From 2 characters on, it runs searchChats and shows the results.',
+      'With less typed it shows the 8 latest chats from the listChats cache, under Recent.',
+      'Arrow keys move the active result while the field keeps focus (aria-activedescendant), and Enter opens it; a click opens one too.',
+      "Status lines say 'Searching…', 'Search failed. Try again.', 'No chats match …' or 'No chats yet.'",
+      'Closing it clears the text.',
+    ],
+    why: 'It is a combobox with a listbox, so screen readers announce the active result while typing goes on. Its queries run only while it is open.',
+    returns: 'The dialog as JSX.',
+    tests: [FRONTEND_CHATS_TEST],
+  },
+  {
+    symbol: 'frontend/src/components/chats/chat-commands.tsx#ChatCommands',
+    status: 'verified',
+    summary: 'The app-wide chat shortcuts, and the one search dialog.',
+    how: [
+      '⌘K (Ctrl+K) opens or closes search.',
+      '⌘⇧O (Ctrl+Shift+O) closes search and goes to / for a new chat.',
+      'With Alt held, neither fires.',
+      'It hands the function that opens search to SearchButton and SearchIconButton through a context.',
+    ],
+    why: 'The (app) layout wraps every signed-in page in it, so the shortcuts work everywhere and every search button opens the same dialog.',
+    returns: 'Its children, plus the search dialog.',
+    tests: [FRONTEND_CHATS_TEST],
+  },
+  {
+    symbol: 'frontend/src/components/chats/chat-commands.tsx#SearchButton',
+    status: 'verified',
+    summary: "The sidebar's Search chats button, with its ⌘K hint.",
+    why: 'It opens the dialog ChatCommands owns. data-closes-nav makes the small-screen panel close when it is used.',
+    returns: 'A button as JSX.',
+  },
+  {
+    symbol: 'frontend/src/components/chats/chat-commands.tsx#SearchIconButton',
+    status: 'verified',
+    summary: 'The search icon in the small-screen top bar.',
+    why: 'It opens the same search dialog as SearchButton and the ⌘K shortcut.',
+    returns: 'An icon button as JSX.',
+  },
+  {
+    symbol: 'frontend/src/components/chats/chat-header.tsx#ChatHeader',
+    status: 'verified',
+    summary: "The chat page's title bar, with a pin icon when the chat is pinned.",
+    how: [
+      'It starts from the chat the server rendered, then follows getChat, which it also fetches in the browser.',
+      "It sets the tab title to '<title> · GilderAi' whenever the title changes.",
+    ],
+    why: 'A rename or pin from the sidebar marks this chat stale in the cache, so the header and the tab title follow without a reload. generateMetadata sets the first title; this keeps it current.',
+    returns: 'The header as JSX.',
+  },
+  {
+    symbol: 'frontend/src/components/chats/message-list.tsx#MessageList',
+    status: 'verified',
+    summary:
+      "The conversation, oldest first: the user's messages on the right, answers on the left.",
+    how: [
+      "Each message is a list item, with 'You:' or 'GilderAi:' for screen readers. Line breaks are kept.",
+      "A stopped answer shows 'Stopped' and a failed one 'This answer failed.'",
+      "With no messages it shows 'No messages yet' and 'Ask anything to start this chat.'",
+    ],
+    why: 'It uses no browser-only code, so the chat page renders the history on the server and it shows on first paint.',
+    returns: 'The list as JSX.',
+    tests: [FRONTEND_CHATS_TEST],
+  },
+  {
+    symbol: 'frontend/src/server/gateway-fetch.ts#gatewayGet',
+    status: 'verified',
+    summary: "A GET to the gateway from a server component, with the browser's cookies.",
+    how: [
+      'With no gilder_sid cookie it returns null and calls nothing.',
+      "Otherwise it fetches GATEWAY_URL plus the path, with the browser's cookies, x-gilder-client: web and cache: 'no-store'.",
+    ],
+    why: 'Server components skip the /api proxy and call the gateway directly. Reading cookies makes the caller per-request, so callers sit inside a Suspense boundary. It sends no Origin, which a GET does not need, and no request ID, so the gateway makes one. getCurrentUser and getChatWithHistory use it.',
+    returns: 'A promise of the Response, or null.',
+    tests: [FRONTEND_SESSION_TEST, FRONTEND_SERVER_CHATS_TEST],
+  },
+  {
+    symbol: 'frontend/src/server/gateway-fetch.ts#SESSION_COOKIE',
+    status: 'verified',
+    summary: "The session cookie's name for the server-side gateway calls: gilder_sid.",
+    why: "gatewayGet checks for it before calling the gateway. The login gate (proxy.ts) keeps its own copy of the name, and the backend's is SESSION_COOKIE in @gilder/shared.",
+    returns: "'gilder_sid'",
+  },
+  {
+    symbol: 'frontend/src/server/chats.ts#getChatWithHistory',
+    status: 'verified',
+    summary: 'A chat and its latest page of messages, for the server render of /c/[chatId].',
+    how: [
+      'An ID that is not 24 lowercase hex characters gives null without calling the gateway.',
+      'Otherwise GET /api/chats/<id> and GET /api/chats/<id>/messages run at the same time through gatewayGet.',
+      'No session cookie, or a 401 for the chat, redirects to /login.',
+      "A 404 for the chat gives null: missing, deleted and someone else's chats look the same.",
+      'Any other failure throws.',
+    ],
+    why: "React's cache() runs it once per request, so generateMetadata and the page share one pair of calls.",
+    returns: 'A promise of { chat, messages }, or null.',
+    tests: [FRONTEND_SERVER_CHATS_TEST],
+  },
+  {
+    symbol: 'frontend/src/app/(app)/c/[chatId]/page.tsx#ChatPage',
+    status: 'verified',
+    summary: 'One chat at /c/<id>, with its history rendered on the server.',
+    why: 'It shows a skeleton in a Suspense boundary while ChatView loads the chat with getChatWithHistory. ChatView then renders ChatHeader and MessageList, or calls notFound() when the chat is not available.',
+    returns: 'The page as JSX.',
+  },
+  {
+    symbol: 'frontend/src/app/(app)/c/[chatId]/page.tsx#generateMetadata',
+    status: 'verified',
+    summary: "Titles the tab with the chat's title, or 'Chat not found'.",
+    why: "It calls getChatWithHistory, which is cached for the request, so it costs no extra calls. The root layout's title template adds ' · GilderAi'.",
+    returns: 'A promise of { title }.',
+  },
+  {
+    symbol: 'frontend/src/app/(app)/c/[chatId]/not-found.tsx#ChatNotFound',
+    status: 'verified',
+    summary: "The page for a chat that isn't available.",
+    why: 'A chat that does not exist, was deleted or belongs to someone else all lead here, with the same words, so the page cannot tell which. It links to / to start a new chat.',
+    returns: 'The page as JSX.',
   },
 ];
