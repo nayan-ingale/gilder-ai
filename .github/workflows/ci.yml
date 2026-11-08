@@ -45,3 +45,66 @@ jobs:
       - run: pnpm typecheck
       - run: pnpm test
       - run: pnpm build
+
+  e2e:
+    name: End-to-end tests (mock mode)
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      # MongoDB (a replica set, for the credits transactions), Redis and Qdrant, as in development.
+      - run: pnpm infra:up
+
+      # Fresh .env files from the examples, new internal keys, and dev sign-in for the tests.
+      # The agent's example runs in mock mode: canned answers, no AI keys.
+      - name: Configure the apps
+        run: |
+          pnpm setup:env
+          pnpm setup:keys
+          sed -i 's/^AUTH_DEV_LOGIN=false/AUTH_DEV_LOGIN=true/' backend/services/auth/.env
+
+      - run: pnpm --filter @gilder/frontend build
+
+      - name: Start the app
+        run: |
+          mkdir -p logs
+          for app in gateway services/auth services/chat services/agent services/billing; do
+            name=$(basename "$app")
+            (cd "backend/$app" && nohup node --env-file=.env src/index.ts > "../../../logs/$name.log" 2>&1 &)
+          done
+          (cd frontend && nohup pnpm start > ../logs/frontend.log 2>&1 &)
+          for port in 8000 8001 8002 8003 8004 3000; do
+            for attempt in $(seq 1 60); do
+              if curl -fs "http://localhost:$port/$([ "$port" = 3000 ] && echo login || echo healthz)" > /dev/null; then
+                break
+              fi
+              if [ "$attempt" = 60 ]; then
+                echo "port $port did not answer"; cat logs/*.log; exit 1
+              fi
+              sleep 1
+            done
+          done
+
+      - run: pnpm --filter @gilder/e2e exec playwright install --with-deps chromium
+
+      - run: pnpm --filter @gilder/e2e e2e
+
+      - if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-report
+          path: |
+            e2e/playwright-report
+            e2e/test-results
+            logs
+          retention-days: 7

@@ -4,6 +4,7 @@ packages:
   - backend/services/*
   - backend/shared
   - docs-explorer
+  - e2e
 
 # pnpm 11 runs a dependency's install script only when it is allowed here.
 allowBuilds:

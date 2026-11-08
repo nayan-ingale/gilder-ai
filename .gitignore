@@ -42,3 +42,6 @@ Thumbs.db
 
 # docs 
 docs
+
+# End-to-end run logs (CI)
+logs/
