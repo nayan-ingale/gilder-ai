@@ -84,6 +84,15 @@ describe('auth settings', () => {
     ]);
   });
 
+  it('turns escaped line breaks in the Firebase private key back into real ones', () => {
+    const escaped = '-----BEGIN PRIVATE KEY-----\\nMC4CAQAw\\n-----END PRIVATE KEY-----\\n';
+    const env = loadEnv(authEnvSchema, { ...REQUIRED, ...FIREBASE, FIREBASE_PRIVATE_KEY: escaped });
+
+    expect(env.FIREBASE_PRIVATE_KEY).toBe(
+      '-----BEGIN PRIVATE KEY-----\nMC4CAQAw\n-----END PRIVATE KEY-----\n',
+    );
+  });
+
   it('explains a missing or wrong public key, without repeating its value', () => {
     const { INTERNAL_PUBLIC_KEY: _omitted, ...withoutKey } = REQUIRED;
 

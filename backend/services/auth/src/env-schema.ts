@@ -32,7 +32,9 @@ export const authEnvSchema = baseEnvSchema
     /** Google sign-in: a service account of your own Firebase project. All three, or none. */
     FIREBASE_PROJECT_ID: optionalSetting,
     FIREBASE_CLIENT_EMAIL: optionalSetting,
-    FIREBASE_PRIVATE_KEY: optionalSetting,
+    // A pasted key often keeps its "\n" escapes: without double quotes in .env, or from a secrets
+    // store. They are turned back into line breaks, so the key works either way.
+    FIREBASE_PRIVATE_KEY: optionalSetting.transform((value) => value?.replaceAll('\\n', '\n')),
   })
   .superRefine((env, ctx) => {
     const production = env.NODE_ENV === 'production';
