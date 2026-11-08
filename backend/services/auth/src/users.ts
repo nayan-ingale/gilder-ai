@@ -77,7 +77,7 @@ export async function upsertGoogleUser(fields: GoogleProfileFields): Promise<Sig
   const byUid = await UserModel.findOneAndUpdate(
     { firebaseUid },
     { $set: refresh },
-    { new: true, runValidators: true },
+    { returnDocument: 'after', runValidators: true },
   );
   if (byUid) {
     return { user: byUid, created: false };
@@ -85,7 +85,7 @@ export async function upsertGoogleUser(fields: GoogleProfileFields): Promise<Sig
   const byEmail = await UserModel.findOneAndUpdate(
     { email: email.trim().toLowerCase() },
     { $set: { firebaseUid, ...refresh } },
-    { new: true, runValidators: true },
+    { returnDocument: 'after', runValidators: true },
   );
   if (byEmail) {
     return { user: byEmail, created: false };
