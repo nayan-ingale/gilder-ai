@@ -375,6 +375,7 @@ async function streamAnswer(deps: TurnDeps, res: Response, turn: Turn): Promise<
   let model: string | undefined;
   let usage = { inputTokens: 0, outputTokens: 0 };
   let sources: Record<string, unknown>[] | undefined;
+  let artifacts: Record<string, unknown>[] | undefined;
 
   try {
     for await (const event of runner.run({
@@ -386,6 +387,9 @@ async function streamAnswer(deps: TurnDeps, res: Response, turn: Turn): Promise<
     })) {
       if (event.type === 'model') {
         model = event.model;
+      } else if (event.type === 'artifact') {
+        artifacts = [{ files: event.files }];
+        stream.send('artifact', { files: event.files });
       } else if (event.type === 'sources') {
         sources = event.items.map((item) => ({ ...item }));
         stream.send('sources', { items: event.items });
@@ -402,6 +406,7 @@ async function streamAnswer(deps: TurnDeps, res: Response, turn: Turn): Promise<
       content: text,
       status: 'complete',
       ...(sources ? { sources } : {}),
+      ...(artifacts ? { artifacts } : {}),
     });
     const committed = await deps.billing.commit(userId, reservation.id, {
       ...(model ? { model } : {}),

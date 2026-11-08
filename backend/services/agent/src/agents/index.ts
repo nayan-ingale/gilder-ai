@@ -1,6 +1,7 @@
 import type { Agent } from '@gilder/shared';
 import type { WebSearch } from '../search/web-search.ts';
 import { chatAgent } from './chat.ts';
+import { codeAgent } from './code.ts';
 import { createSearchAgent } from './search.ts';
 import type { AgentRunner } from './types.ts';
 
@@ -13,6 +14,7 @@ export interface AgentTools {
 export function buildAgents(tools: AgentTools): Partial<Record<Agent, AgentRunner>> {
   return {
     chat: chatAgent,
+    code: codeAgent,
     ...(tools.webSearch ? { search: createSearchAgent(tools.webSearch) } : {}),
   };
 }

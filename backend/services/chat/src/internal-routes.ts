@@ -24,7 +24,8 @@ import {
  * names the user, and every lookup filters by them.
  */
 
-const MAX_CONTENT = 100_000;
+/** Long answers (code with several files) stay well within this; it only stops runaway text. */
+const MAX_CONTENT = 400_000;
 const MAX_RECENT = 50;
 
 const id = z.string().min(1).max(64);

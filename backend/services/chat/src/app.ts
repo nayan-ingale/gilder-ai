@@ -24,6 +24,8 @@ export function createApp({
     name: 'chat',
     logger,
     readinessChecks,
+    // The agent saves whole answers, code files included, which can pass the 64 KB default.
+    bodyLimit: '2mb',
     internalAuth: {
       publicKey: internalPublicKey,
       audience: 'chat',

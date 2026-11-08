@@ -23,6 +23,7 @@ import {
 import request from 'supertest';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { chatAgent } from './agents/chat.ts';
+import { codeAgent } from './agents/code.ts';
 import { createSearchAgent } from './agents/search.ts';
 import { mockWebSearch } from './search/web-search.ts';
 import { createApp } from './app.ts';
@@ -136,8 +137,8 @@ function agentApp() {
         (await chat.recentMessages(userId, chatId)).map(({ role, content }) => ({ role, content })),
       ),
       redis: store.redis,
-      agents: { chat: chatAgent, search: createSearchAgent(mockWebSearch) },
-      available: new Set(['chat', 'search']),
+      agents: { chat: chatAgent, search: createSearchAgent(mockWebSearch), code: codeAgent },
+      available: new Set(['chat', 'search', 'code']),
       stops,
     },
   });
@@ -181,6 +182,7 @@ async function historyOf(userId: string, chatId: string) {
     status: string;
     agent: string;
     sources: { n: number; url: string }[];
+    artifacts: { files: { name: string }[] }[];
   }[];
 }
 
@@ -469,6 +471,33 @@ describe('the search agent in a turn', () => {
       'https://example.org/two',
     ]);
     expect(await balanceOf(me)).toBe(95);
+  });
+});
+
+describe('the code agent in a turn', () => {
+  it('streams the code, sends and saves the files, and charges 10 credits', async () => {
+    const chatId = await newChat(me);
+    await grantCredits(me);
+    script.answer = () =>
+      'A page.\n\n### `index.html`\n```html\n<h1>Hi</h1>\n```\n\n### `script.js`\n```js\nconsole.log(1);\n```';
+
+    const { events } = await turnEvents(`/chats/${chatId}/turns`, me, {
+      content: 'a hello page',
+      clientMessageId: 'client-0001',
+      agent: 'code',
+    });
+
+    const artifact = events.find((event) => event.event === 'artifact')?.data.files as {
+      name: string;
+    }[];
+    expect(artifact.map((file) => file.name)).toEqual(['index.html', 'script.js']);
+    const answer = (await historyOf(me, chatId)).at(-1);
+    expect(answer?.agent).toBe('code');
+    expect(answer?.artifacts[0]?.files.map((file) => file.name)).toEqual([
+      'index.html',
+      'script.js',
+    ]);
+    expect(await balanceOf(me)).toBe(90);
   });
 });
 
