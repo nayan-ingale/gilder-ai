@@ -63,7 +63,23 @@ jobs:
       - run: pnpm install --frozen-lockfile
 
       # MongoDB (a replica set, for the credits transactions), Redis and Qdrant, as in development.
-      - run: pnpm infra:up
+      # Waits for the health checks here rather than with `up --wait`, which gave up on MongoDB
+      # while it was still starting, and shows the logs if one never becomes healthy.
+      - name: Start MongoDB, Redis and Qdrant
+        run: |
+          compose="docker compose -f backend/docker-compose.yml"
+          $compose up -d
+          for attempt in $(seq 1 60); do
+            waiting=$($compose ps --format '{{.Service}} {{.Health}}' | grep -v ' healthy$' || true)
+            if [ -z "$waiting" ]; then
+              $compose ps
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "not healthy after 2 minutes: $waiting"
+          $compose logs --tail 80
+          exit 1
 
       # Fresh .env files from the examples, new internal keys, and dev sign-in for the tests.
       # The agent's example runs in mock mode: canned answers, no AI keys.
