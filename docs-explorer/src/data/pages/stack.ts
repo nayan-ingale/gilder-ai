@@ -13,13 +13,13 @@ export const stackPage: DocPage = {
       blocks: [
         {
           kind: 'text',
-          text: 'A request is meant to go from the browser to the Next.js server, then to the gateway, then to one service, which reads and writes its data stores. Today the gateway forwards the sign-in, logout and profile routes to auth, but the frontend is still a starter page that makes no API calls, and chat, agent and billing have no routes yet.',
+          text: 'A request goes from the browser to the Next.js server, then to the gateway, then to one service, which reads and writes its data stores. Today that path carries sign-in, logout and the profile, end to end; chat, agent and billing have no routes yet.',
         },
         {
           kind: 'list',
           items: [
             'Browser → Next.js server (port 3000): the browser only ever talks to the frontend app.',
-            'Next.js server → gateway (port 8000): the Next.js server will forward every `/api/*` call to the gateway, so backend addresses and secrets never reach the browser. Planned in Sign-in page and app shell.',
+            'Next.js server → gateway (port 8000): the Next.js server forwards every `/api/*` call to the gateway (`forwardToGateway`), so backend addresses and secrets never reach the browser.',
             'Gateway → services: the gateway checks the rate limits, its route table, the Origin and the session, then calls the service with fetch and a short-lived signed token: today auth (8001), for the routes in its table. Chat (8002), agent (8003) and billing (8004) already refuse any call without a valid token; their routes come with their own features.',
             'Services → data stores: auth, chat, agent and billing connect to MongoDB at startup, and the gateway, auth and agent open a Redis client. Auth keeps its users in MongoDB and its sessions in Redis. Qdrant runs in Docker, but nothing connects to it yet. AWS S3 will hold files.',
             'Every backend app is built from the shared library, `@gilder/shared`, so they all start, log and fail in the same way.',
@@ -95,7 +95,7 @@ export const packageNotes: PackageNote[] = [
   {
     name: 'next',
     layer: 'frontend',
-    why: 'The frontend framework (App Router). Today it serves the starter page on port 3000.',
+    why: 'The frontend framework (App Router) on port 3000: the sign-in page, the app shell, the /api proxy route and the login gate (`proxy.ts`).',
   },
   { name: 'react', layer: 'frontend', why: 'The UI library the frontend is written in.' },
   {
@@ -106,7 +106,22 @@ export const packageNotes: PackageNote[] = [
   {
     name: 'tailwindcss',
     layer: 'frontend',
-    why: 'Tailwind CSS 4: utility classes for styling. `globals.css` imports it.',
+    why: 'Tailwind CSS 4: utility classes for styling. `globals.css` imports it and maps the design tokens to class names such as `bg-surface`.',
+  },
+  {
+    name: 'radix-ui',
+    layer: 'frontend',
+    why: 'Accessible building blocks under the menu, dialog, tooltip, toast and avatar components: keyboard support and focus management.',
+  },
+  {
+    name: 'lucide-react',
+    layer: 'frontend',
+    why: 'The icons in buttons and menus.',
+  },
+  {
+    name: 'firebase',
+    layer: 'frontend',
+    why: 'Google sign-in in the browser: a popup that returns the Firebase ID token the app exchanges for a session. Loaded only when the Google button is clicked.',
   },
   {
     name: '@tailwindcss/turbopack',
@@ -182,7 +197,22 @@ export const packageNotes: PackageNote[] = [
   {
     name: 'vitest',
     layer: 'quality',
-    why: 'Runs the tests of the shared library and every backend app (`pnpm test`).',
+    why: 'Runs the tests of the shared library, every backend app and the frontend (`pnpm test`).',
+  },
+  {
+    name: '@testing-library/react',
+    layer: 'quality',
+    why: 'Renders frontend components in tests and finds elements the way a user would, by role and label.',
+  },
+  {
+    name: '@testing-library/user-event',
+    layer: 'quality',
+    why: 'Clicks and types in component tests like a real user, focus and keyboard included.',
+  },
+  {
+    name: 'jsdom',
+    layer: 'quality',
+    why: 'A browser-like DOM for the frontend component tests, which opt into it per file.',
   },
   {
     name: 'supertest',
@@ -233,19 +263,6 @@ export const packageNotes: PackageNote[] = [
 
 export const plannedTools: PlannedTool[] = [
   // Frontend
-  {
-    name: 'Radix UI',
-    layer: 'frontend',
-    why: 'Accessible building blocks, such as menus and dialogs, for the core UI components.',
-    plannedIn: 'Sign-in page and app shell',
-  },
-  {
-    name: 'Firebase (web)',
-    package: 'firebase',
-    layer: 'frontend',
-    why: 'Google sign-in in the browser. It gives the ID token that the app exchanges for a session.',
-    plannedIn: 'Sign-in page and app shell',
-  },
   {
     name: 'Redux Toolkit + RTK Query',
     package: '@reduxjs/toolkit',

@@ -24,10 +24,12 @@ export const components: ArchComponent[] = [
     kind: 'client',
     status: 'verified',
     summary:
-      "The user's web browser. Today it can only load the frontend's starter page. Planned: Google sign-in with Firebase and /api/* calls through the frontend (both part of Sign-in page and app shell).",
+      "The user's web browser. It loads the GilderAi pages from the frontend and calls only the frontend's own /api routes, so it never sees a backend address. Google sign-in opens a Firebase popup.",
     responsibilities: [
-      'Loads the frontend starter page from port 3000.',
-      'Makes no API calls yet: the page is static content and links to outside sites.',
+      'Loads the pages from the frontend on port 3000: /login, and the signed-in app at /, which the login gate sends to /login when there is no session cookie.',
+      'Calls /api/* on the frontend itself (apiFetch), which turns problem+json errors into ApiError with the code and request ID.',
+      'Keeps the HttpOnly session cookie, which page scripts cannot read, and a gilder_theme cookie for the theme.',
+      'Google sign-in opens a Firebase popup and sends the ID token to /api/auth/session.',
     ],
   },
   {
@@ -36,14 +38,24 @@ export const components: ArchComponent[] = [
     kind: 'app',
     status: 'verified',
     summary:
-      'The Next.js app the user opens. Today it is only the create-next-app starter page. Planned: its server proxies /api/* calls to the gateway, so secrets never reach the browser (Sign-in page and app shell).',
+      'The Next.js app the user opens. Its server forwards every /api/* call to the gateway, so backend addresses and secrets never reach the browser. It has the sign-in page and the signed-in app shell.',
     responsibilities: [
-      'Serves the starter page (Home) inside the root layout (RootLayout).',
-      'Makes no API calls yet. Its .env.example lists GATEWAY_URL, and for later features the public Firebase web config (NEXT_PUBLIC_FIREBASE_*) and the Razorpay key ID (NEXT_PUBLIC_RAZORPAY_KEY_ID), but no code reads them.',
+      'Forwards /api/* to GATEWAY_URL (forwardToGateway, in the api/[...path] route): it passes the cookie, Origin and forwarded address, adds a request ID and x-gilder-client: web, streams the answer and its Set-Cookie headers back, answers 503 when the gateway is down, and cancels the call when the browser goes away.',
+      'Login gate (proxy.ts): a visitor without a session cookie who opens /, /c/... or /settings/... goes to /login.',
+      'Sign-in page (/login): Google sign-in through a Firebase popup, disabled until the NEXT_PUBLIC_FIREBASE_* settings are set, and dev sign-in by email in development builds only.',
+      "App shell (the (app) layout): a sidebar (a top bar on small screens) with New chat and the account menu (theme, sign out). Server components confirm the session with the gateway's /api/me (getCurrentUser) inside a Suspense boundary, so the shell is prerendered.",
+      'Design system: Light minimal tokens in light and dark, Radix-based components, and a theme remembered in a cookie and applied before the first paint.',
+      'Security headers on every page (next.config.ts): a Content-Security-Policy without nonces, nosniff, referrer and permissions policies, and no framing.',
+      'Reads GATEWAY_URL on the server and the public NEXT_PUBLIC_FIREBASE_* values in the browser. NEXT_PUBLIC_RAZORPAY_KEY_ID is listed for payments, but no code reads it yet.',
     ],
     path: 'frontend',
     port: 3000,
-    entryPoints: ['frontend/src/app/page.tsx#Home', 'frontend/src/app/layout.tsx#RootLayout'],
+    entryPoints: [
+      'frontend/src/app/layout.tsx#RootLayout',
+      'frontend/src/app/(app)/layout.tsx#AppLayout',
+      'frontend/src/server/gateway-proxy.ts#forwardToGateway',
+      'frontend/src/proxy.ts#proxy',
+    ],
   },
   {
     id: 'gateway',
@@ -298,7 +310,7 @@ export const components: ArchComponent[] = [
     kind: 'external',
     status: 'verified',
     summary:
-      "Google sign-in. Auth's POST /sessions checks Google sign-in tokens with the Firebase Admin SDK when its three FIREBASE_* settings are set. The gateway forwards POST /api/auth/session to that route. The browser will sign in with Firebase in Sign-in page and app shell.",
+      "Google sign-in. Auth's POST /sessions checks Google sign-in tokens with the Firebase Admin SDK when its three FIREBASE_* settings are set. The gateway forwards POST /api/auth/session to that route. In the browser, the sign-in page's Google button opens the Firebase popup that gives the ID token.",
     responsibilities: [],
   },
 ];
@@ -311,9 +323,13 @@ export const links: ArchLink[] = [
     from: 'browser',
     to: 'frontend',
     kind: 'http',
-    label: 'Page loads: today only the starter page at /',
+    label: 'Pages, and every /api/* call on the same origin',
     status: 'verified',
-    evidence: ['frontend/src/app/page.tsx#Home', 'frontend/src/app/layout.tsx#RootLayout'],
+    evidence: [
+      'frontend/src/app/layout.tsx#RootLayout',
+      'frontend/src/app/login/page.tsx#LoginPage',
+      'frontend/src/lib/api.ts#apiFetch',
+    ],
   },
 
   // Every backend app is built from the shared library.
@@ -523,17 +539,22 @@ export const links: ArchLink[] = [
     from: 'browser',
     to: 'firebase',
     kind: 'external',
-    label: 'Google sign-in',
-    status: 'planned',
-    plannedIn: 'Sign-in page and app shell',
+    label: 'Google sign-in popup, which returns the Firebase ID token',
+    status: 'verified',
+    evidence: ['frontend/src/lib/firebase-client.ts#signInWithGooglePopup'],
   },
   {
     from: 'frontend',
     to: 'gateway',
     kind: 'http',
-    label: 'Every /api/* call, forwarded by the Next.js server so secrets stay off the browser',
-    status: 'planned',
-    plannedIn: 'Sign-in page and app shell',
+    label:
+      'Every /api/* call, forwarded by the Next.js server, plus /api/me from server components',
+    status: 'verified',
+    evidence: [
+      'frontend/src/server/gateway-proxy.ts#forwardToGateway',
+      'frontend/src/app/api/[...path]/route.ts#handler',
+      'frontend/src/server/session.ts#fetchCurrentUser',
+    ],
   },
   {
     from: 'gateway',

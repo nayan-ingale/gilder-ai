@@ -16,7 +16,7 @@ const ME_ROUTES: SymbolRef = 'backend/services/auth/src/me-routes.ts#meRouter';
 
 /** Who sends these requests today. */
 const CALLERS =
-  'The browser is meant to send it through the Next.js server (planned: Sign-in page and app shell); the frontend makes no API calls yet, so today the callers are the gateway tests, above all journey.test.ts, which runs the real auth app behind the real gateway, and developers by hand.';
+  "The browser sends it to the frontend's own /api route, and the Next.js server forwards it to the gateway (forwardToGateway), adding the request ID and passing on the cookie and Origin. The gateway tests, above all journey.test.ts, which runs the real auth app behind the real gateway, also call the gateway directly.";
 
 // ---------------------------------------------------------------------------------------------
 // Gateway steps

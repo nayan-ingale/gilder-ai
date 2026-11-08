@@ -288,7 +288,7 @@ describe('SymbolDetails', () => {
   });
 
   it('selects its part of the system in place when the open view shows it', () => {
-    const symbolId = 'frontend/src/app/page.tsx#Home';
+    const symbolId = 'frontend/src/app/(app)/page.tsx#NewChatPage';
     const html = render(
       <SymbolDetails symbolId={symbolId} />,
       url('/architecture/frontend', { node: 'browser', symbol: symbolId }),

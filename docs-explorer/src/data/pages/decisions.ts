@@ -490,15 +490,14 @@ export const decisionsPage: DocPage = {
     {
       id: 'server-side-proxy',
       title: 'Secrets stay on servers',
-      status: 'planned',
-      plannedIn: 'Sign-in page and app shell',
+      status: 'verified',
       blocks: [
         {
           kind: 'fields',
           fields: [
             {
               label: 'Decision',
-              text: 'The browser will talk only to the Next.js app. Its server will forward every `/api/*` call to the gateway.',
+              text: "The browser talks only to the Next.js app. Its server forwards every `/api/*` call to the gateway, and server components call the gateway directly with the browser's cookie.",
             },
             {
               label: 'Why',
@@ -512,10 +511,16 @@ export const decisionsPage: DocPage = {
         },
         {
           kind: 'text',
-          text: 'Not built yet: the frontend is still the starter page and makes no API calls.',
+          text: 'The `/api/[...path]` route forwards with `forwardToGateway`, and `getCurrentUser` asks the gateway for `/api/me` on the server. `GATEWAY_URL` is a server-only setting; the browser gets only `NEXT_PUBLIC_*` values, which are public by design.',
         },
       ],
-      refs: [{ component: 'browser' }, { component: 'frontend' }, { component: 'gateway' }],
+      refs: [
+        { component: 'browser' },
+        { component: 'frontend' },
+        { component: 'gateway' },
+        { symbol: 'frontend/src/server/gateway-proxy.ts#forwardToGateway' },
+        { symbol: 'frontend/src/server/session.ts#getCurrentUser' },
+      ],
     },
   ],
 };
