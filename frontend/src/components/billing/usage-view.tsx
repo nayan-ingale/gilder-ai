@@ -74,11 +74,13 @@ export function UsageView() {
           By agent
         </h2>
         {data && data.byAgent.length > 0 ? (
-          <ul className="flex flex-col gap-2.5">
+          // One grid for all rows (each row a subgrid), so every bar's track has the same width
+          // however long its label is.
+          <ul className="grid grid-cols-[7rem_1fr_auto] gap-x-3 gap-y-2.5">
             {data.byAgent.map((row) => (
               <li
                 key={row.agent}
-                className="grid grid-cols-[7rem_1fr_auto] items-center gap-3 text-sm"
+                className="col-span-3 grid grid-cols-subgrid items-center text-sm"
               >
                 <span className="truncate text-fg">{AGENT_NAMES[row.agent] ?? row.agent}</span>
                 <span className="h-2 rounded-full bg-sunken">
