@@ -36,6 +36,9 @@ export const AGENT_RATE_LIMITS: Readonly<Record<Agent, number>> = {
   image_qa: 5,
 };
 
+/** Requests per minute through the gateway: from one IP address, and from one signed-in user. */
+export const GATEWAY_RATE_LIMITS = { perIp: 120, perUser: 60 } as const;
+
 /** Credits every new account starts with. */
 export const SIGNUP_CREDITS = 100;
 
