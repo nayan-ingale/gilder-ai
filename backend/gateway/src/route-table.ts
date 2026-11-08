@@ -77,6 +77,36 @@ export const PUBLIC_ROUTES: readonly PublicRoute[] = [
     session: 'required',
   },
 
+  // Answers: send a message, regenerate or edit (each streams the answer back), and stop.
+  {
+    method: 'POST',
+    path: '/api/chats/:id/messages',
+    service: 'agent',
+    target: '/chats/:id/turns',
+    session: 'required',
+  },
+  {
+    method: 'POST',
+    path: '/api/chats/:id/messages/:messageId/regenerate',
+    service: 'agent',
+    target: '/chats/:id/messages/:messageId/regenerate',
+    session: 'required',
+  },
+  {
+    method: 'POST',
+    path: '/api/chats/:id/messages/:messageId/edit',
+    service: 'agent',
+    target: '/chats/:id/messages/:messageId/edit',
+    session: 'required',
+  },
+  {
+    method: 'POST',
+    path: '/api/turns/:turnId/stop',
+    service: 'agent',
+    target: '/turns/:turnId/stop',
+    session: 'required',
+  },
+
   // Credits: the user's plan and balance.
   {
     method: 'GET',

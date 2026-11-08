@@ -36,6 +36,30 @@ describe('matchRoute', () => {
     expect(matchRoute('DELETE', '/api/chats')).toBeUndefined();
   });
 
+  it('maps sending, regenerating, editing and stopping to the agent, behind a session', () => {
+    const chat = '65f0c0ffee1234567890abcd';
+    const message = '65f0c0ffee1234567890ef01';
+    const cases = [
+      [`/api/chats/${chat}/messages`, `/chats/${chat}/turns`],
+      [
+        `/api/chats/${chat}/messages/${message}/regenerate`,
+        `/chats/${chat}/messages/${message}/regenerate`,
+      ],
+      [`/api/chats/${chat}/messages/${message}/edit`, `/chats/${chat}/messages/${message}/edit`],
+      [`/api/turns/${message}/stop`, `/turns/${message}/stop`],
+    ] as const;
+
+    for (const [path, target] of cases) {
+      expect(matchRoute('POST', path), path).toMatchObject({
+        route: { service: 'agent', session: 'required' },
+        targetPath: target,
+      });
+    }
+    // History stays with chat: only POST on the messages path goes to the agent.
+    expect(matchRoute('GET', `/api/chats/${chat}/messages`)?.route.service).toBe('chat');
+    expect(matchRoute('POST', `/api/chats/${chat}/turns`)).toBeUndefined();
+  });
+
   it("maps the credits route to billing, behind a session, and never billing's internal routes", () => {
     expect(matchRoute('GET', '/api/billing/account')).toMatchObject({
       route: { service: 'billing', session: 'required' },
