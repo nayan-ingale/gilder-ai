@@ -1,5 +1,7 @@
 import { createService, type InternalKey, type Logger, type ReadinessCheck } from '@gilder/shared';
 import type { Express } from 'express';
+import { chatRouter } from './chat-routes.ts';
+import { internalRouter } from './internal-routes.ts';
 
 export interface AppDeps {
   logger: Logger;
@@ -9,12 +11,15 @@ export interface AppDeps {
 }
 
 export function createApp({ logger, readinessChecks, internalPublicKey }: AppDeps): Express {
-  // No routes of its own yet, but locked already: only the gateway's token gets past the health
-  // checks, so a direct call gets 401 on any path.
+  // Only the gateway's token gets past the health checks, so a direct call gets 401 on any path.
   return createService({
     name: 'chat',
     logger,
     readinessChecks,
     internalAuth: { publicKey: internalPublicKey, audience: 'chat' },
+    routes: (app) => {
+      app.use(chatRouter());
+      app.use(internalRouter());
+    },
   });
 }
