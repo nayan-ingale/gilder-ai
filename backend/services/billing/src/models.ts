@@ -110,3 +110,20 @@ export function toAccount(account: AccountDocument): AccountView {
     balance: account.balance,
   };
 }
+
+/** What the API shows of a reservation. */
+export interface ReservationView {
+  id: string;
+  amount: number;
+  agent: string;
+  status: (typeof RESERVATION_STATUSES)[number];
+}
+
+export function toReservation(reservation: ReservationDocument): ReservationView {
+  return {
+    id: reservation.id,
+    amount: reservation.amount,
+    agent: reservation.agent,
+    status: reservation.status,
+  };
+}
