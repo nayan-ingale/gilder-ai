@@ -35,6 +35,8 @@ export const agentEnvSchema = baseEnvSchema
     GROQ_API_KEY: optionalSetting,
     OPENROUTER_API_KEY: optionalSetting,
     GEMINI_API_KEY: optionalSetting,
+    /** Web search for the search agent. Without it, search is off in live mode. */
+    TAVILY_API_KEY: optionalSetting,
   })
   .superRefine((env, ctx) => {
     // Chat and routing run on Groq, so live mode can't work without it. The other keys only turn

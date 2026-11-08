@@ -23,6 +23,8 @@ import {
 import request from 'supertest';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { chatAgent } from './agents/chat.ts';
+import { createSearchAgent } from './agents/search.ts';
+import { mockWebSearch } from './search/web-search.ts';
 import { createApp } from './app.ts';
 import { createLlm } from './llm/llm.ts';
 import { createMockProvider } from './llm/mock.ts';
@@ -134,8 +136,8 @@ function agentApp() {
         (await chat.recentMessages(userId, chatId)).map(({ role, content }) => ({ role, content })),
       ),
       redis: store.redis,
-      agents: { chat: chatAgent },
-      available: new Set(['chat']),
+      agents: { chat: chatAgent, search: createSearchAgent(mockWebSearch) },
+      available: new Set(['chat', 'search']),
       stops,
     },
   });
@@ -178,6 +180,7 @@ async function historyOf(userId: string, chatId: string) {
     content: string;
     status: string;
     agent: string;
+    sources: { n: number; url: string }[];
   }[];
 }
 
@@ -439,6 +442,35 @@ const tokensOf = (events: SseEvent[]) =>
     .filter((event) => event.event === 'token')
     .map((event) => event.data.text)
     .join('');
+
+describe('the search agent in a turn', () => {
+  it('streams the sources, saves them with the answer and charges 5 credits', async () => {
+    const chatId = await newChat(me);
+    await grantCredits(me);
+    script.answer = () => 'Here is what I found [1].';
+
+    const { events } = await turnEvents(`/chats/${chatId}/turns`, me, {
+      content: '/search latest TypeScript',
+      clientMessageId: 'client-0001',
+    });
+
+    expect(events.find((event) => event.event === 'agent')?.data).toEqual({
+      agent: 'search',
+      reason: 'chosen',
+    });
+    const sources = events.find((event) => event.event === 'sources')?.data.items as {
+      n: number;
+    }[];
+    expect(sources.map((source) => source.n)).toEqual([1, 2]);
+    const answer = (await historyOf(me, chatId)).at(-1);
+    expect(answer).toMatchObject({ agent: 'search', status: 'complete' });
+    expect(answer?.sources.map((source) => source.url)).toEqual([
+      'https://example.com/one',
+      'https://example.org/two',
+    ]);
+    expect(await balanceOf(me)).toBe(95);
+  });
+});
 
 describe('regenerate and edit', () => {
   it('regenerates the latest answer with the same agent, hiding the old one', async () => {

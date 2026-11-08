@@ -10,12 +10,13 @@ import {
   pingRedis,
   startService,
 } from '@gilder/shared';
-import { AGENT_RUNNERS, AVAILABLE_AGENTS } from './agents/index.ts';
+import { availableAgents, buildAgents } from './agents/index.ts';
 import { createApp } from './app.ts';
 import { env } from './env.ts';
 import { createLlm } from './llm/llm.ts';
 import { buildProviders } from './llm/providers.ts';
 import { createMemory } from './memory.ts';
+import { createTavilySearch, mockWebSearch } from './search/web-search.ts';
 import { billingService, chatService } from './services.ts';
 import { createStopSignals } from './stops.ts';
 import { llmCallRecorder } from './telemetry.ts';
@@ -64,6 +65,15 @@ logger.info(
 );
 
 const stops = await createStopSignals(redis, logger);
+const agents = buildAgents({
+  webSearch:
+    env.LLM_MODE === 'mock'
+      ? mockWebSearch
+      : env.TAVILY_API_KEY
+        ? createTavilySearch(env.TAVILY_API_KEY)
+        : undefined,
+});
+logger.info({ agents: [...availableAgents(agents)] }, 'agents ready');
 
 const app = createApp({
   logger,
@@ -77,8 +87,8 @@ const app = createApp({
       (await chat.recentMessages(userId, chatId)).map(({ role, content }) => ({ role, content })),
     ),
     redis,
-    agents: AGENT_RUNNERS,
-    available: AVAILABLE_AGENTS,
+    agents,
+    available: availableAgents(agents),
     stops,
   },
 });

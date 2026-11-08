@@ -1,6 +1,7 @@
 import type { Agent } from '@gilder/shared';
 import type { Llm, LlmEvent } from '../llm/llm.ts';
 import type { LlmMessage } from '../llm/types.ts';
+import type { Source } from '../search/web-search.ts';
 
 /** What every agent gets for one answer. */
 export interface AgentContext {
@@ -14,8 +15,8 @@ export interface AgentContext {
   messageId?: string;
 }
 
-/** What an agent streams back. Later agents add sources, artifacts and files. */
-export type AgentEvent = LlmEvent;
+/** What an agent streams back: the model's events, plus what some agents add. */
+export type AgentEvent = LlmEvent | { type: 'sources'; items: Source[] };
 
 export interface AgentRunner {
   name: Agent;

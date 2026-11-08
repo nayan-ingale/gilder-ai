@@ -374,6 +374,7 @@ async function streamAnswer(deps: TurnDeps, res: Response, turn: Turn): Promise<
   let firstTokenAt: number | undefined;
   let model: string | undefined;
   let usage = { inputTokens: 0, outputTokens: 0 };
+  let sources: Record<string, unknown>[] | undefined;
 
   try {
     for await (const event of runner.run({
@@ -385,6 +386,9 @@ async function streamAnswer(deps: TurnDeps, res: Response, turn: Turn): Promise<
     })) {
       if (event.type === 'model') {
         model = event.model;
+      } else if (event.type === 'sources') {
+        sources = event.items.map((item) => ({ ...item }));
+        stream.send('sources', { items: event.items });
       } else if (event.type === 'token') {
         firstTokenAt ??= Date.now();
         text += event.text;
@@ -397,6 +401,7 @@ async function streamAnswer(deps: TurnDeps, res: Response, turn: Turn): Promise<
     await deps.chat.updateMessage(userId, turn.messageIds.answer, {
       content: text,
       status: 'complete',
+      ...(sources ? { sources } : {}),
     });
     const committed = await deps.billing.commit(userId, reservation.id, {
       ...(model ? { model } : {}),
@@ -425,6 +430,7 @@ async function streamAnswer(deps: TurnDeps, res: Response, turn: Turn): Promise<
       stopped: controller.signal.aborted,
       text,
       started: firstTokenAt !== undefined,
+      ...(sources ? { sources } : {}),
     });
   } finally {
     await unregister().catch(() => undefined);
@@ -440,7 +446,13 @@ async function settleUnfinished(
   deps: TurnDeps,
   stream: EventStream,
   turn: Turn,
-  outcome: { error: unknown; stopped: boolean; text: string; started: boolean },
+  outcome: {
+    error: unknown;
+    stopped: boolean;
+    text: string;
+    started: boolean;
+    sources?: Record<string, unknown>[];
+  },
 ): Promise<void> {
   const { userId, reservation } = turn;
   const charge = outcome.stopped && outcome.started;
@@ -448,6 +460,7 @@ async function settleUnfinished(
     await deps.chat.updateMessage(userId, turn.messageIds.answer, {
       content: outcome.text,
       status: outcome.stopped ? 'stopped' : 'failed',
+      ...(outcome.sources ? { sources: outcome.sources } : {}),
     });
     if (charge) {
       const committed = await deps.billing.commit(userId, reservation.id, {
