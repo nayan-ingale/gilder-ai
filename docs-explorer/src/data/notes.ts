@@ -422,7 +422,7 @@ export const notes: SymbolNote[] = [
       'Each check is recorded as ok or failed; a failure is logged as a warning.',
       'It answers 200 "ready" if every check passed (or there are none), otherwise 503 "not_ready", with the result of each check.',
     ],
-    why: '/healthz says the process is up; it is meant to be used to restart a stuck app. /readyz says its dependencies answer; it is meant to decide whether to send the app traffic. Outside the tests, only the end-to-end CI job reads /healthz, to wait until each app is up; neither Docker Compose file has health checks for the apps, only for the data stores. Failure reasons go to the logs only, so internal addresses are not exposed.',
+    why: "/healthz says the process is up; it is meant to be used to restart a stuck app. /readyz says its dependencies answer; it is meant to decide whether to send the app traffic. Outside the tests, the end-to-end CI job reads /healthz, to wait until each app is up, and the web app's GET /api/health reads the gateway's /readyz for uptime monitors; neither Docker Compose file has health checks for the apps, only for the data stores. Failure reasons go to the logs only, so internal addresses are not exposed.",
     returns: 'An Express Router.',
     sideEffects: ['Logs a "readiness check failed" warning for each failed check.'],
     tests: [SERVICE_TEST, ...APP_TESTS],
@@ -3428,6 +3428,30 @@ export const notes: SymbolNote[] = [
     tests: ['frontend/src/server/gateway-proxy.test.ts'],
   },
   {
+    symbol: 'frontend/src/server/health.ts#siteHealth',
+    status: 'verified',
+    summary: "The site's health for uptime monitors: ok only when the gateway is ready.",
+    how: [
+      "It fetches the gateway's /readyz (which checks Redis), with no caching and a time limit of 3 seconds by default.",
+      "A 2xx answer is { status: 'ok' } with 200. Anything else, a gateway that cannot be reached or one too slow, is { status: 'unavailable' } with 503. Both carry cache-control: no-store.",
+    ],
+    why: "One URL proves the whole path a visitor's request takes: the web server, the gateway and Redis, and through Caddy in production. The gateway's check details are never passed on, so the answer tells a visitor nothing about the setup.",
+    returns: 'A promise of the Response.',
+    tests: ['frontend/src/server/health.test.ts'],
+  },
+  {
+    symbol: 'frontend/src/app/api/health/route.ts#GET',
+    status: 'verified',
+    summary: 'GET /api/health: 200 when the whole path to the backend works, otherwise 503.',
+    how: [
+      'await connection() makes it run on every request, so it is never prerendered.',
+      'It calls siteHealth with GATEWAY_URL.',
+    ],
+    why: 'A static route segment wins over the /api/[...path] proxy route, so this request is answered by the web server itself and the gateway never sees it as an /api route. Checked against the production build behind Caddy: 200, then 503 with the gateway stopped, then 200 again.',
+    returns: 'A promise of the Response.',
+    tests: ['frontend/src/server/health.test.ts'],
+  },
+  {
     symbol: 'frontend/src/proxy.ts#proxy',
     status: 'verified',
     summary: 'The login gate: no session cookie on an app page means a redirect to /login.',
@@ -3853,7 +3877,7 @@ export const notes: SymbolNote[] = [
     summary: 'The usage page: where the credits went in the last 30 days.',
     how: [
       "It reads the browser's time zone once, and loads the summary for 30 days in that zone and the latest answers.",
-      'Two tiles show the credits used and the number of answers. A chart shows the credits per day (DailyChart, after fillDays); a bar per agent shows its credits and answers; a table lists the latest answers with their agent, credits, tokens in and out, and time taken.',
+      "Two tiles show the credits used and the number of answers. A chart shows the credits per day (DailyChart, after fillDays); a bar per agent shows its credits and answers, with every row on one shared grid (each row a subgrid), so every bar's track has the same width however long its label is; a table lists the latest answers with their agent, credits, tokens in and out, and time taken.",
       'Agents are shown by name (Chat, Search, Code and so on). Skeletons show while loading, and a short line when there is nothing yet.',
     ],
     why: 'People can see what each kind of answer costs them. The numbers come from the ledger, so they always match the balance.',

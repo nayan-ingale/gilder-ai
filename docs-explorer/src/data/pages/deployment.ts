@@ -172,6 +172,15 @@ export const deploymentPage: DocPage = {
           kind: 'text',
           text: "Every backend app answers `GET /healthz` (the process is up) and `GET /readyz` (its data stores answer, or 503 if one does not), without an internal token, even on the services, which need one for every other path. The gateway answers them before its rate limits, so probes are never limited. On SIGTERM or SIGINT it stops taking new connections, waits up to 10 seconds for requests in progress, closes its database connections and exits; if the cleanup hangs, it exits with code 1 after 15 seconds. Under `pnpm dev` one Ctrl+C reaches each backend app twice: from the terminal, and again from `node --watch`, which passes it on. The app logs the second as 'already shutting down' and finishes its cleanup. Only the end-to-end CI job calls /healthz, to wait until each app is up; the Docker health checks, in development and in the production stack, cover only the data stores.",
         },
+        {
+          kind: 'text',
+          text: "For an uptime monitor there is one public URL, `GET /api/health` on the site. The web server answers it itself (its static route wins over the /api proxy route): it asks the gateway's `/readyz`, which checks Redis, with a 3-second limit, and answers only `{ status: 'ok' }` with 200 or `{ status: 'unavailable' }` with 503, never cached and never with the gateway's details. So a 200 proves the whole path: Caddy, the web server, the gateway and Redis. Checked against the production build behind Caddy: 200, then 503 with the gateway stopped, then 200 again.",
+        },
+        {
+          kind: 'quote',
+          file: 'frontend/src/app/api/health/route.ts',
+          text: '// GET /api/health for uptime monitors: 200 when the whole path to the backend works, else 503.',
+        },
       ],
       refs: [
         { flow: 'health-check' },
@@ -179,6 +188,8 @@ export const deploymentPage: DocPage = {
         { flow: 'graceful-shutdown' },
         { symbol: 'backend/shared/src/health.ts#healthRouter' },
         { symbol: 'backend/shared/src/service.ts#startService' },
+        { symbol: 'frontend/src/server/health.ts#siteHealth' },
+        { symbol: 'frontend/src/app/api/health/route.ts#GET' },
       ],
     },
     {
@@ -220,7 +231,7 @@ export const deploymentPage: DocPage = {
       blocks: [
         {
           kind: 'text',
-          text: 'The e2e package runs Playwright against the whole app, on a desktop and a phone (Pixel 7) screen: behaviour tests (app.spec.ts) and axe accessibility checks (a11y.spec.ts). Each test signs in a fresh user with dev sign-in. In CI the e2e job starts the data stores, writes fresh settings in mock mode with dev sign-in on and RATE_LIMIT_PER_IP raised, builds and starts the frontend and the five backend apps, waits for each to answer, installs Chromium and runs the tests; a failed run keeps its report, traces and logs as the e2e-report artifact for 7 days. The job stops after 25 minutes.',
+          text: 'The e2e package runs Playwright against the whole app, on a desktop and a phone (Pixel 7) screen: behaviour tests (app.spec.ts) and axe accessibility checks (a11y.spec.ts). Each test signs in a fresh user with dev sign-in. In CI the e2e job starts the data stores with `docker compose up -d` and polls their health checks every 2 seconds for up to 2 minutes, printing the container logs if one never becomes healthy (`up --wait` gave up on MongoDB while it was still starting on the runner). It then writes fresh settings in mock mode with dev sign-in on and RATE_LIMIT_PER_IP raised, builds and starts the frontend and the five backend apps, waits for each to answer, installs Chromium and runs the tests; a failed run keeps its report, traces and logs as the e2e-report artifact for 7 days. The job stops after 25 minutes.',
         },
         {
           kind: 'text',

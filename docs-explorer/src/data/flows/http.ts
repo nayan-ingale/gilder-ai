@@ -121,7 +121,7 @@ const readinessCheck: Flow = {
   route: { method: 'GET', path: '/readyz' },
   apps: APPS,
   summary:
-    "Every app answers GET /readyz from the shared health router. It runs the app's readiness checks (MongoDB, Redis or both) at the same time, each with a 2-second limit. It replies 200 when every check passes and 503 when any fails. Failures are logged at warn; the reply only says ok or failed for each check.",
+    "Every app answers GET /readyz from the shared health router. It runs the app's readiness checks (MongoDB, Redis or both) at the same time, each with a 2-second limit. It replies 200 when every check passes and 503 when any fails. Failures are logged at warn; the reply only says ok or failed for each check. The web app's GET /api/health asks the gateway's /readyz and passes on only ok or unavailable, for uptime monitors.",
   status: 'verified',
   steps: [
     {
