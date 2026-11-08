@@ -6,6 +6,7 @@ import {
   resolveSession,
   SESSION_TTL_SECONDS,
   type Session,
+  sessionIdFromCookies,
 } from './sessions.ts';
 import { createTestRedis, type TestRedis } from './test-redis.ts';
 
@@ -95,5 +96,18 @@ describe('deleteSession', () => {
     await expect(deleteSession(store.redis, sessionId)).resolves.toBeUndefined();
     await expect(deleteSession(store.redis, 'A'.repeat(43))).resolves.toBeUndefined();
     await expect(deleteSession(store.redis, '../not-an-id')).resolves.toBeUndefined();
+  });
+});
+
+describe('sessionIdFromCookies', () => {
+  it('finds the session cookie among the others', () => {
+    expect(sessionIdFromCookies('theme=dark; gilder_sid=abc123; other=1')).toBe('abc123');
+    expect(sessionIdFromCookies('gilder_sid=abc123')).toBe('abc123');
+  });
+
+  it('finds nothing when there is no header, no session cookie or an empty one', () => {
+    for (const header of [undefined, '', 'theme=dark', 'gilder_sid=', 'not a cookie header']) {
+      expect(sessionIdFromCookies(header)).toBeUndefined();
+    }
   });
 });

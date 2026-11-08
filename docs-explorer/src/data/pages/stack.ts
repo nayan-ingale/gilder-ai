@@ -143,7 +143,7 @@ export const packageNotes: PackageNote[] = [
   {
     name: 'cookie',
     layer: 'backend',
-    why: 'Installed in the shared library, for the gateway and auth to read the session cookie from a request. No code calls it yet.',
+    why: "Installed in the shared library. `sessionIdFromCookies` uses it to read the session cookie from a request, for auth's logout route and, later, the gateway. No running app calls it yet.",
   },
   {
     name: 'pino',

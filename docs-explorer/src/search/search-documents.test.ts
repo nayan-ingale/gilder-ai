@@ -150,7 +150,9 @@ describe('routeEntries', () => {
       flowForRoute: (method: string, path: string) =>
         path === '/healthz' ? undefined : docs.flowForRoute(method, path),
     };
-    const route = buildSearchDocuments(model).find((doc) => doc.type === 'route');
+    const route = buildSearchDocuments(model).find(
+      (doc) => doc.type === 'route' && doc.title === 'GET /healthz',
+    );
     expect(route).toMatchObject({
       title: 'GET /healthz',
       subtitle: 'healthRouter · backend/shared/src/health.ts',

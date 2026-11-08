@@ -19,6 +19,7 @@ const AUTH_TEST = 'backend/services/auth/src/app.test.ts';
 const AUTH_ENV_SCHEMA_TEST = 'backend/services/auth/src/env-schema.test.ts';
 const AUTH_USERS_TEST = 'backend/services/auth/src/users.test.ts';
 const AUTH_FIREBASE_TEST = 'backend/services/auth/src/firebase.test.ts';
+const AUTH_SESSION_ROUTES_TEST = 'backend/services/auth/src/session-routes.test.ts';
 const CHAT_TEST = 'backend/services/chat/src/app.test.ts';
 const AGENT_TEST = 'backend/services/agent/src/app.test.ts';
 const BILLING_TEST = 'backend/services/billing/src/app.test.ts';
@@ -700,7 +701,7 @@ export const notes: SymbolNote[] = [
     symbol: 'backend/shared/src/sessions.ts#SESSION_COOKIE',
     status: 'not-wired',
     summary: 'The name of the cookie that carries the session ID.',
-    why: 'The app that sets the cookie and the app that reads it must agree on the name, so it is defined once. The logger redacts the Cookie and Set-Cookie headers, so the session ID never reaches the logs. Nothing reads it yet, not even the tests.',
+    why: "The app that sets the cookie and the app that reads it must agree on the name, so it is defined once. The logger redacts the Cookie and Set-Cookie headers, so the session ID never reaches the logs. sessionIdFromCookies and auth's sign-in routes use it.",
     returns: "The string 'gilder_sid'.",
   },
   {
@@ -777,6 +778,18 @@ export const notes: SymbolNote[] = [
     why: 'Only that session ends, so the user stays signed in on their other devices. Logging out twice, or after the session expired, does no harm. No app calls it yet.',
     returns: 'A promise that resolves once done.',
     sideEffects: ['Deletes the session key from Redis.'],
+    tests: [SESSIONS_TEST],
+  },
+  {
+    symbol: 'backend/shared/src/sessions.ts#sessionIdFromCookies',
+    status: 'not-wired',
+    summary: "Reads the session ID from a request's Cookie header.",
+    how: [
+      "The cookie package's parseCookie splits the header into name and value pairs.",
+      'It returns the SESSION_COOKIE value, or undefined when there is no header, no session cookie or an empty one.',
+    ],
+    why: "Auth's logout route reads the session it must end this way, and the gateway will read sessions the same way, so both parse the cookie identically. The value is still untrusted: resolveSession and deleteSession check its shape before using it. No running app calls it yet.",
+    returns: 'The session ID string, or undefined.',
     tests: [SESSIONS_TEST],
   },
   {
@@ -993,6 +1006,62 @@ export const notes: SymbolNote[] = [
     why: "Outside production the Firebase settings are optional. Google sign-in then answers 503 service_unavailable, while dev sign-in still works. Because it is a 5xx, the client sees only 'Service unavailable'; the message 'Google sign-in is not set up on this server' is in auth's error log. No app uses it yet.",
     returns: 'A function that always rejects with that 503 error.',
     tests: [AUTH_FIREBASE_TEST],
+  },
+  {
+    symbol: 'backend/services/auth/src/session-routes.ts#COOKIE_MAX_AGE_MS',
+    status: 'not-wired',
+    summary: 'How long the browser keeps the session cookie: 30 days.',
+    why: 'Redis ends a session after 7 days without use (SESSION_TTL_SECONDS, renewed on every lookup), so an idle user is signed out after a week. The cookie limit caps even an active session at 30 days, after which the user signs in again.',
+    returns: '2,592,000,000 milliseconds.',
+    tests: [AUTH_SESSION_ROUTES_TEST],
+  },
+  {
+    symbol: 'backend/services/auth/src/session-routes.ts#sessionRouter',
+    status: 'not-wired',
+    summary: 'The sign-in and logout routes: auth creates sessions, sets the cookie and ends them.',
+    how: [
+      'POST /sessions takes { idToken }, checks it with verifyIdToken, finds or makes the user with upsertGoogleUser and starts a session.',
+      'POST /sessions/dev takes { email, name? } and does the same with findOrCreateDevUser. It is added only when devLogin is on, so without it the path is a 404.',
+      "Starting a session creates it in Redis, sets the gilder_sid cookie (HttpOnly, SameSite=Lax, Path=/, Max-Age 30 days, plus Secure when secureCookie is on), records the user in the request context, logs 'signed in' with the method and whether the user is new, and answers { user } with toProfile.",
+      'DELETE /sessions/current needs a user in the internal token (requireUser). It deletes the session the cookie names, clears the cookie and answers 204. Calling it twice, or without a cookie, still gives 204.',
+      'Request bodies are checked with validate, so a missing token or a bad email is a 400.',
+    ],
+    why: 'One service owns sessions end to end, so the cookie settings live in one place. The gateway will map the public routes onto these paths. createApp does not add the router yet, so no running app serves them.',
+    returns: 'An Express Router.',
+    sideEffects: [
+      'Writes and deletes session keys in Redis.',
+      'Creates and updates users in MongoDB.',
+      'Sets and clears the session cookie.',
+    ],
+    tests: [AUTH_SESSION_ROUTES_TEST],
+  },
+  {
+    symbol: 'backend/services/auth/src/users.ts#upsertGoogleUser',
+    status: 'not-wired',
+    summary: 'Finds the user for a Google sign-in, or makes one.',
+    how: [
+      'By Firebase ID first: the same ID is the same user, and its email, name and avatar are refreshed (a name or avatar the sign-in leaves out is kept).',
+      'Then by email: a verified email already on file under another ID belongs to the same person, for example after the Firebase account was recreated or a local dev sign-in used it, so that user gets the new Firebase ID.',
+      'Otherwise it creates the user. If a second sign-in creates the same user at the same moment, the unique index makes one fail, and that one finds the user the other made.',
+    ],
+    why: 'Sign-in must never create two accounts for one person. `created` tells the caller about a first sign-in, which the credits grant will need. Only the sign-in route calls it, and no running app serves that route yet.',
+    returns: 'A promise of { user, created }.',
+    sideEffects: ['Creates or updates a user in MongoDB.'],
+    tests: [AUTH_USERS_TEST],
+  },
+  {
+    symbol: 'backend/services/auth/src/users.ts#findOrCreateDevUser',
+    status: 'not-wired',
+    summary: 'Finds the user with an email for dev sign-in, or makes one.',
+    how: [
+      'The email is trimmed and lowercased.',
+      "A new user gets the Firebase ID 'dev:' plus the email. Real Firebase IDs never contain ':', so they can't collide.",
+      'A parallel sign-in that creates the same user first is handled like in upsertGoogleUser.',
+    ],
+    why: 'Local development and tests need sessions without a Google account. A later Google sign-in with the same email takes over the account (see upsertGoogleUser). Only the dev sign-in route calls it.',
+    returns: 'A promise of { user, created }.',
+    sideEffects: ['May create a user in MongoDB.'],
+    tests: [AUTH_USERS_TEST],
   },
   {
     symbol: 'backend/services/auth/src/users.ts#THEME_PREFERENCES',

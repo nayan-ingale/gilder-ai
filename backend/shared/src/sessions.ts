@@ -1,4 +1,5 @@
 import { createHash, randomBytes } from 'node:crypto';
+import { parseCookie } from 'cookie';
 import type { Redis } from './redis.ts';
 
 /**
@@ -49,6 +50,15 @@ export async function resolveSession(
   // GETEX reads the session and renews its expiry in one round trip.
   const stored = await redis.getex(sessionKey(sessionId), 'EX', SESSION_TTL_SECONDS);
   return stored === null ? undefined : parseSession(stored);
+}
+
+/** The session ID in a request's Cookie header, or undefined when it carries none. */
+export function sessionIdFromCookies(cookieHeader: string | undefined): string | undefined {
+  if (!cookieHeader) {
+    return undefined;
+  }
+  const value = parseCookie(cookieHeader)[SESSION_COOKIE];
+  return value === undefined || value === '' ? undefined : value;
 }
 
 /** Ends a session (logout). Does nothing if it has already gone. */
