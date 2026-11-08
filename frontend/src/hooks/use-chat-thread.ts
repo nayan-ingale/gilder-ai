@@ -5,6 +5,7 @@ import { useDispatch } from 'react-redux';
 import { useToast } from '@/components/ui/toast';
 import { ApiError } from '@/lib/api';
 import type { ChatMessage } from '@/lib/chats';
+import type { CodeFile } from '@/lib/code-files';
 import {
   type Source,
   newClientMessageId,
@@ -31,7 +32,14 @@ export function toThreadMessage(message: ChatMessage): ThreadMessage {
     status: message.status,
     agent: message.agent,
     ...(message.sources.length > 0 ? { sources: message.sources as Source[] } : {}),
+    ...(filesOf(message) ? { files: filesOf(message) } : {}),
   };
+}
+
+/** The files of a saved code answer: its first artifact's files, if any. */
+function filesOf(message: ChatMessage): CodeFile[] | undefined {
+  const first = message.artifacts[0] as { files?: CodeFile[] } | undefined;
+  return first?.files?.length ? first.files : undefined;
 }
 
 interface Running {
@@ -112,6 +120,9 @@ export function useChatThread(chatId: string, initial: ChatMessage[]): ChatThrea
               );
               break;
             }
+            case 'artifact':
+              updateAnswer((message) => ({ ...message, files: turnEvent.data.files }));
+              break;
             case 'sources':
               updateAnswer((message) => ({ ...message, sources: turnEvent.data.items }));
               break;

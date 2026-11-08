@@ -138,3 +138,49 @@
     border-color: var(--color-line);
   }
 }
+
+/* Code colours (highlight.js classes), from the design tokens so both themes work. */
+@layer components {
+  .hljs-comment,
+  .hljs-quote {
+    color: var(--color-fg-subtle);
+    font-style: italic;
+  }
+  .hljs-keyword,
+  .hljs-selector-tag,
+  .hljs-built_in,
+  .hljs-meta .hljs-keyword {
+    color: var(--color-accent-text);
+  }
+  .hljs-string,
+  .hljs-regexp,
+  .hljs-addition,
+  .hljs-attr-value {
+    color: var(--color-success);
+  }
+  .hljs-number,
+  .hljs-literal,
+  .hljs-symbol,
+  .hljs-bullet {
+    color: var(--color-warning);
+  }
+  .hljs-title,
+  .hljs-section,
+  .hljs-name,
+  .hljs-selector-id,
+  .hljs-selector-class {
+    color: var(--color-fg);
+    font-weight: 600;
+  }
+  .hljs-attr,
+  .hljs-attribute,
+  .hljs-variable,
+  .hljs-template-variable,
+  .hljs-type,
+  .hljs-params {
+    color: var(--color-fg-muted);
+  }
+  .hljs-deletion {
+    color: var(--color-danger);
+  }
+}

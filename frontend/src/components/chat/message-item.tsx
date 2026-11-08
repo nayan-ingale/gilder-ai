@@ -5,6 +5,7 @@ import { useState } from 'react';
 import { IconButton } from '@/components/ui/button';
 import { cn } from '@/components/ui/cn';
 import type { Source, ThreadMessage } from '@/lib/turns';
+import { FilesCard } from './files-card';
 import { Markdown } from './markdown';
 
 /**
@@ -107,6 +108,7 @@ export function MessageItem({ message, onRegenerate, onEdit }: MessageItemProps)
               ))}
             </span>
           ) : null}
+          {message.files?.length && !writing ? <FilesCard files={message.files} /> : null}
           {message.sources?.length ? <Sources sources={message.sources} /> : null}
           {message.status === 'stopped' ? (
             <p className="mt-1 text-xs text-fg-subtle">Stopped</p>

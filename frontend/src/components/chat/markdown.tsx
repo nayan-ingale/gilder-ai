@@ -4,6 +4,7 @@ import { Check, Copy } from 'lucide-react';
 import { type ReactNode, useRef, useState } from 'react';
 import ReactMarkdown, { type Components } from 'react-markdown';
 import remarkGfm from 'remark-gfm';
+import { highlightCode } from '@/lib/highlight';
 
 /**
  * Renders a model's answer as Markdown, safely:
@@ -17,9 +18,10 @@ import remarkGfm from 'remark-gfm';
 function CodeBlock({ children }: { children?: ReactNode }) {
   const ref = useRef<HTMLPreElement>(null);
   const [copied, setCopied] = useState(false);
-  const language = /language-([\w+-]+)/.exec(
-    (children as { props?: { className?: string } } | undefined)?.props?.className ?? '',
-  )?.[1];
+  const code = children as { props?: { className?: string; children?: unknown } } | undefined;
+  const language = /language-([\w+-]+)/.exec(code?.props?.className ?? '')?.[1];
+  const text = typeof code?.props?.children === 'string' ? code.props.children : undefined;
+  const highlighted = text === undefined ? null : highlightCode(text.replace(/\n$/, ''), language);
 
   async function copy() {
     await navigator.clipboard.writeText(ref.current?.innerText ?? '');
@@ -41,8 +43,13 @@ function CodeBlock({ children }: { children?: ReactNode }) {
           {copied ? 'Copied' : 'Copy'}
         </button>
       </div>
-      <pre ref={ref} className="overflow-x-auto p-3 text-[13px] leading-relaxed">
-        {children}
+      <pre ref={ref} className="hljs overflow-x-auto p-3 text-[13px] leading-relaxed">
+        {highlighted === null ? (
+          children
+        ) : (
+          // highlight.js escapes the code; its output only adds colour spans.
+          <code dangerouslySetInnerHTML={{ __html: highlighted }} />
+        )}
       </pre>
     </div>
   );

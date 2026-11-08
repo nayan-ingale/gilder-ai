@@ -1,5 +1,6 @@
 import { ApiError } from './api';
 import type { ChatMessage } from './chats';
+import type { CodeFile } from './code-files';
 import { readServerEvents } from './sse';
 
 /**
@@ -8,7 +9,7 @@ import { readServerEvents } from './sse';
  * stream starts, everything arrives as events.
  */
 
-export const BUILT_AGENTS = ['chat', 'search'] as const;
+export const BUILT_AGENTS = ['chat', 'search', 'code'] as const;
 
 /** A web source a search answer cites as [n]. */
 export interface Source {
@@ -23,6 +24,7 @@ export type TurnEvent =
   | { event: 'meta'; data: { turnId: string; userMessageId: string; assistantMessageId: string } }
   | { event: 'agent'; data: { agent: string; reason: string } }
   | { event: 'sources'; data: { items: Source[] } }
+  | { event: 'artifact'; data: { files: CodeFile[] } }
   | { event: 'token'; data: { text: string } }
   | { event: 'usage'; data: { creditsCharged: number; balance: number } }
   | { event: 'title'; data: { title: string } }
@@ -146,4 +148,6 @@ export type ThreadMessage = Pick<ChatMessage, 'role' | 'content' | 'status'> & {
   error?: { message: string; requestId?: string };
   /** Web sources a search answer cites. */
   sources?: Source[];
+  /** Files a code answer made. */
+  files?: CodeFile[];
 };
