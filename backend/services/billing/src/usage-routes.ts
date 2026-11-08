@@ -8,7 +8,23 @@ import { LedgerModel } from './models.ts';
  */
 
 const DAY_MS = 24 * 60 * 60 * 1000;
-const summaryQuery = z.object({ days: z.coerce.number().int().min(1).max(90).default(30) });
+/**
+ * True for any time zone name the runtime knows, aliases included. (The list from
+ * Intl.supportedValuesOf leaves out aliases such as Asia/Kolkata, so it can't be used here.)
+ */
+function isTimeZone(zone: string): boolean {
+  try {
+    new Intl.DateTimeFormat('en', { timeZone: zone });
+    return true;
+  } catch {
+    return false;
+  }
+}
+const summaryQuery = z.object({
+  days: z.coerce.number().int().min(1).max(90).default(30),
+  /** Days are counted in the viewer's time zone, so "today" matches their clock. */
+  tz: z.string().max(64).refine(isTimeZone, 'is not a known time zone').default('UTC'),
+});
 const eventsQuery = z.object({
   limit: z.coerce.number().int().min(1).max(100).default(30),
   before: z.iso.datetime().optional(),
@@ -32,7 +48,7 @@ export function usageRouter(): Router {
     validate({ query: summaryQuery }),
     async (req, res) => {
       const userId = res.locals.userId as string;
-      const { days } = req.query as unknown as z.output<typeof summaryQuery>;
+      const { days, tz } = req.query as unknown as z.output<typeof summaryQuery>;
       const since = new Date(Date.now() - days * DAY_MS);
       const match = { userId, kind: 'usage', createdAt: { $gte: since } };
 
@@ -52,7 +68,7 @@ export function usageRouter(): Router {
           { $match: match },
           {
             $group: {
-              _id: { $dateToString: { format: '%Y-%m-%d', date: '$createdAt' } },
+              _id: { $dateToString: { format: '%Y-%m-%d', date: '$createdAt', timezone: tz } },
               credits: { $sum: { $multiply: ['$delta', -1] } },
             },
           },

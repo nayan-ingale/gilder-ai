@@ -303,6 +303,11 @@ describe('payments and usage', () => {
     expect(summary.body.byDay).toEqual([
       { date: new Date().toISOString().slice(0, 10), credits: 7 },
     ]);
+    // Days follow the viewer's time zone; an unknown zone is refused.
+    const kolkata = await client.get('/usage/summary?days=7&tz=Asia/Kolkata');
+    const today = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Kolkata' }).format(new Date());
+    expect(kolkata.body.byDay).toEqual([{ date: today, credits: 7 }]);
+    expect((await client.get('/usage/summary?tz=Mars/Base')).status).toBe(400);
     expect(events.body.items).toHaveLength(2);
     expect(events.body.items[0]).toMatchObject({
       agent: 'chat',
