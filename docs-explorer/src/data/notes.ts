@@ -18,6 +18,7 @@ const GATEWAY_TEST = 'backend/gateway/src/app.test.ts';
 const AUTH_TEST = 'backend/services/auth/src/app.test.ts';
 const AUTH_ENV_SCHEMA_TEST = 'backend/services/auth/src/env-schema.test.ts';
 const AUTH_USERS_TEST = 'backend/services/auth/src/users.test.ts';
+const AUTH_FIREBASE_TEST = 'backend/services/auth/src/firebase.test.ts';
 const CHAT_TEST = 'backend/services/chat/src/app.test.ts';
 const AGENT_TEST = 'backend/services/agent/src/app.test.ts';
 const BILLING_TEST = 'backend/services/billing/src/app.test.ts';
@@ -949,6 +950,49 @@ export const notes: SymbolNote[] = [
     returns:
       'A read-only array: FIREBASE_PROJECT_ID, FIREBASE_CLIENT_EMAIL and FIREBASE_PRIVATE_KEY.',
     tests: [AUTH_ENV_SCHEMA_TEST],
+  },
+  {
+    symbol: 'backend/services/auth/src/firebase.ts#REJECTED_TOKEN_CODES',
+    status: 'not-wired',
+    summary: 'The Firebase error codes that mean the sign-in token itself is no good.',
+    why: "auth/argument-error, auth/invalid-id-token, auth/id-token-expired, auth/id-token-revoked, auth/user-disabled and auth/user-not-found all mean the user has to sign in again, so they become a 401. Any other failure, such as a wrong service account or Firebase being unreachable, is the server's problem and stays a 500, so users are never blamed for an outage.",
+    returns: 'A Set of six error codes.',
+    tests: [AUTH_FIREBASE_TEST],
+  },
+  {
+    symbol: 'backend/services/auth/src/firebase.ts#verifierFrom',
+    status: 'not-wired',
+    summary: 'Checks a Google sign-in ID token and returns who signed in.',
+    how: [
+      'It calls verifyIdToken(token, true): `true` also asks Firebase whether the token was revoked, for example after the account was disabled.',
+      "A FirebaseAuthError whose code is in REJECTED_TOKEN_CODES becomes AppError('unauthorized'), 'The Google sign-in is not valid. Sign in again.', with Firebase's error as its cause. Any other error is thrown again unchanged.",
+      "The token must carry an email with email_verified true; otherwise it is a 401, 'The Google account has no verified email address'.",
+      'It returns firebaseUid and email, plus name and avatarUrl when the account has them.',
+    ],
+    why: 'The browser sends the token it got from Firebase, so auth must check it before trusting who the user is. It takes the checker as an argument, so tests can pass a fake. No route uses it yet.',
+    returns:
+      'A function from an ID token to a promise of { firebaseUid, email, name?, avatarUrl? }.',
+    tests: [AUTH_FIREBASE_TEST],
+  },
+  {
+    symbol: 'backend/services/auth/src/firebase.ts#createFirebaseVerifier',
+    status: 'not-wired',
+    summary: 'Builds the real token check from a Firebase service account.',
+    how: [
+      "It starts a firebase-admin app named 'gilder-auth' with the project ID, client email and private key from auth's settings.",
+      "It passes that app's Auth to verifierFrom.",
+    ],
+    why: "Google sign-in needs the project's own Firebase service account. A test builds one with a throwaway key for a made-up project and checks that a malformed token gets a 401 from the real SDK, which rejects it without using the network. No app calls it yet.",
+    returns: 'The verifier from verifierFrom.',
+    tests: [AUTH_FIREBASE_TEST],
+  },
+  {
+    symbol: 'backend/services/auth/src/firebase.ts#googleSignInNotSetUp',
+    status: 'not-wired',
+    summary: 'The token check to use when the Firebase settings are not set.',
+    why: "Outside production the Firebase settings are optional. Google sign-in then answers 503 service_unavailable, while dev sign-in still works. Because it is a 5xx, the client sees only 'Service unavailable'; the message 'Google sign-in is not set up on this server' is in auth's error log. No app uses it yet.",
+    returns: 'A function that always rejects with that 503 error.',
+    tests: [AUTH_FIREBASE_TEST],
   },
   {
     symbol: 'backend/services/auth/src/users.ts#THEME_PREFERENCES',

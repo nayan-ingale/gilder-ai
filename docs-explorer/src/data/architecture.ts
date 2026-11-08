@@ -66,12 +66,13 @@ export const components: ArchComponent[] = [
     kind: 'app',
     status: 'verified',
     summary:
-      'Will handle sign-in. Today it only answers health checks. Planned: check Google sign-in tokens from Firebase (Sign-in and sessions).',
+      'Will handle sign-in. Today it only answers health checks. Its users model and its Google sign-in token check are built and tested, but no route uses them yet.',
     responsibilities: [
       'Builds its Express app with createService: the shared middleware plus GET /healthz and GET /readyz. It has no routes of its own yet.',
       'Connects to MongoDB at startup and does not start serving until the connection works.',
       'Opens a Redis client at startup. /readyz says ready only when both MongoDB and Redis answer.',
       'Defines the users collection (UserModel, with a unique Firebase ID and a unique lowercase email) and toProfile, the public shape of a user. No route uses them yet.',
+      'Has the Google sign-in token check (firebase.ts): the Firebase Admin SDK checks an ID token, including whether it was revoked. A bad token gives 401, and a server-side failure stays a 500. Without the Firebase settings, Google sign-in answers 503. No route uses it yet.',
       'Checks its settings at startup (rules in env-schema.ts) and refuses to start if a required variable (MONGODB_URI, REDIS_URL, INTERNAL_PUBLIC_KEY) is missing, or if any value is invalid. INTERNAL_PUBLIC_KEY must start with -----BEGIN PUBLIC KEY-----, and nothing parses the key yet; the message says to run pnpm setup:keys and never repeats the value. PORT, NODE_ENV, LOG_LEVEL and AUTH_DEV_LOGIN (false) have defaults.',
       'In production it also refuses AUTH_DEV_LOGIN=true and requires FIREBASE_PROJECT_ID, FIREBASE_CLIENT_EMAIL and FIREBASE_PRIVATE_KEY; elsewhere the three are optional, but all three or none. Nothing uses the key, the dev sign-in flag or the Firebase settings yet.',
       'On SIGTERM or SIGINT, finishes in-flight requests, then disconnects MongoDB and closes Redis.',
@@ -272,10 +273,9 @@ export const components: ArchComponent[] = [
     id: 'firebase',
     name: 'Firebase Authentication',
     kind: 'external',
-    status: 'planned',
-    plannedIn: 'Sign-in and sessions',
+    status: 'not-wired',
     summary:
-      "Google sign-in. Auth will check Google sign-in tokens against Firebase's public keys (Sign-in and sessions), and the browser will sign in with Firebase (Sign-in page and app shell). Not built yet.",
+      'Google sign-in. Auth has the code to check Google sign-in tokens with the Firebase Admin SDK, but no route uses it yet. The browser will sign in with Firebase in Sign-in page and app shell.',
     responsibilities: [],
   },
 ];
@@ -481,9 +481,12 @@ export const links: ArchLink[] = [
     from: 'auth',
     to: 'firebase',
     kind: 'external',
-    label: "Fetches Firebase's public keys to check Google sign-in tokens",
-    status: 'planned',
-    plannedIn: 'Sign-in and sessions',
+    label: 'Checks Google sign-in tokens with the Firebase Admin SDK, including revocation',
+    status: 'not-wired',
+    evidence: [
+      'backend/services/auth/src/firebase.ts#createFirebaseVerifier',
+      'backend/services/auth/src/firebase.ts#verifierFrom',
+    ],
   },
   {
     from: 'gateway',

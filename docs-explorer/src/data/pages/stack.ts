@@ -138,7 +138,7 @@ export const packageNotes: PackageNote[] = [
   {
     name: 'firebase-admin',
     layer: 'backend',
-    why: 'For the auth service to check Google sign-in tokens. Installed, but no code calls it yet.',
+    why: 'Checks Google sign-in tokens in the auth service (`createFirebaseVerifier`), including whether a token was revoked. Built and tested, but no route uses it yet.',
   },
   {
     name: 'cookie',
