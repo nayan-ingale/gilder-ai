@@ -1,0 +1,103 @@
+name: Deploy
+
+# Run by hand from the Actions tab once the server is set up. It builds both images, pushes them to
+# GitHub's container registry, copies the Compose files to the server and restarts the app there.
+#
+# Repository secrets:   DEPLOY_HOST, DEPLOY_USER, DEPLOY_SSH_KEY (a private key the server accepts),
+#                       DEPLOY_KNOWN_HOSTS (the server's line from ssh-keyscan, so the host is checked)
+# Repository variables: the NEXT_PUBLIC_* values the web app is built with (they are public).
+on:
+  workflow_dispatch:
+
+concurrency:
+  group: deploy
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  images:
+    name: Build and push images
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v5
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Backend image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: backend/Dockerfile
+          push: true
+          tags: |
+            ghcr.io/${{ github.repository_owner }}/gilder-backend:${{ github.sha }}
+            ghcr.io/${{ github.repository_owner }}/gilder-backend:latest
+          cache-from: type=gha,scope=backend
+          cache-to: type=gha,mode=max,scope=backend
+      - name: Web image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: frontend/Dockerfile
+          push: true
+          build-args: |
+            NEXT_PUBLIC_FIREBASE_API_KEY=${{ vars.NEXT_PUBLIC_FIREBASE_API_KEY }}
+            NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN=${{ vars.NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN }}
+            NEXT_PUBLIC_FIREBASE_PROJECT_ID=${{ vars.NEXT_PUBLIC_FIREBASE_PROJECT_ID }}
+            NEXT_PUBLIC_FIREBASE_APP_ID=${{ vars.NEXT_PUBLIC_FIREBASE_APP_ID }}
+            NEXT_PUBLIC_RAZORPAY_KEY_ID=${{ vars.NEXT_PUBLIC_RAZORPAY_KEY_ID }}
+          tags: |
+            ghcr.io/${{ github.repository_owner }}/gilder-frontend:${{ github.sha }}
+            ghcr.io/${{ github.repository_owner }}/gilder-frontend:latest
+          cache-from: type=gha,scope=frontend
+          cache-to: type=gha,mode=max,scope=frontend
+
+  server:
+    name: Restart the app on the server
+    needs: images
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment: production
+    permissions:
+      contents: read
+      packages: read
+    steps:
+      - uses: actions/checkout@v5
+      - name: SSH access
+        env:
+          SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+          KNOWN_HOSTS: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
+        run: |
+          install -m 700 -d ~/.ssh
+          printf '%s\n' "$SSH_KEY" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          printf '%s\n' "$KNOWN_HOSTS" > ~/.ssh/known_hosts
+      - name: Copy the Compose files
+        env:
+          TARGET: ${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }}
+        run: |
+          ssh -i ~/.ssh/deploy_key "$TARGET" 'mkdir -p ~/gilder-ai'
+          scp -i ~/.ssh/deploy_key deploy/compose.yml deploy/Caddyfile deploy/backup.sh "$TARGET":~/gilder-ai/
+      - name: Pull and restart
+        env:
+          TARGET: ${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }}
+          TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          ACTOR: ${{ github.actor }}
+          TAG: ${{ github.sha }}
+        # The job's own token signs the server in to the registry for this pull only.
+        run: |
+          ssh -i ~/.ssh/deploy_key "$TARGET" "cd ~/gilder-ai \
+            && echo '$TOKEN' | docker login ghcr.io -u '$ACTOR' --password-stdin \
+            && TAG='$TAG' docker compose pull --quiet \
+            && TAG='$TAG' docker compose up -d --remove-orphans \
+            && docker logout ghcr.io \
+            && docker image prune -f"

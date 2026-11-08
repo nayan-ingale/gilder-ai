@@ -1,0 +1,15 @@
+# Only what the images need. Dependencies are installed inside the image, and secrets stay on
+# the server.
+*
+!package.json
+!pnpm-lock.yaml
+!pnpm-workspace.yaml
+!backend
+!frontend
+!docs-explorer/package.json
+!e2e/package.json
+**/node_modules
+**/.next
+**/coverage
+**/.env
+**/.env.*

@@ -45,3 +45,7 @@ docs
 
 # End-to-end run logs (CI)
 logs/
+
+# Server secrets for the production stack
+deploy/.env
+deploy/env/

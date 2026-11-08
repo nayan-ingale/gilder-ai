@@ -1,0 +1,25 @@
+# HTTPS for the site, with certificates Caddy gets and renews itself. Everything goes to the web
+# server, which forwards /api/* to the gateway.
+{$DOMAIN} {
+	encode {
+		zstd
+		gzip
+		# Pages, scripts and data only: never the answer stream (text/event-stream), where
+		# compression would hold tokens back.
+		match {
+			header Content-Type text/html*
+			header Content-Type text/css*
+			header Content-Type text/plain*
+			header Content-Type application/javascript*
+			header Content-Type application/json*
+			header Content-Type image/svg+xml*
+		}
+	}
+	reverse_proxy frontend:3000 {
+		# Send each streamed token on as soon as it arrives.
+		flush_interval -1
+	}
+	header {
+		-Server
+	}
+}

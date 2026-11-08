@@ -1,0 +1,158 @@
+# The whole app on one server, behind Caddy (automatic HTTPS). Run from this folder:
+#   docker compose pull && docker compose up -d
+# It needs, next to this file:
+#   .env            DOMAIN (the site's name, such as gilder.example.com) and TAG (an image tag, default latest)
+#   env/<app>.env   one per app (gateway, auth, chat, agent, billing, frontend), in the format of that
+#                   app's .env.example, holding its keys. Addresses between the containers are set below,
+#                   so those files only need the secrets and settings.
+# Only Caddy is reachable from outside; everything else talks on the internal network.
+
+name: gilder-prod
+
+x-backend: &backend
+  image: ghcr.io/nayan-ingale/gilder-backend:${TAG:-latest}
+  restart: unless-stopped
+  init: true
+  networks: [internal]
+  depends_on:
+    mongo: { condition: service_healthy }
+    redis: { condition: service_healthy }
+
+services:
+  gateway:
+    <<: *backend
+    command: ['node', 'backend/gateway/src/index.ts']
+    env_file: env/gateway.env
+    environment:
+      PORT: 8000
+      FRONTEND_ORIGIN: https://${DOMAIN:?set DOMAIN in deploy/.env}
+      REDIS_URL: redis://redis:6379
+      AUTH_SERVICE_URL: http://auth:8001
+      CHAT_SERVICE_URL: http://chat:8002
+      AGENT_SERVICE_URL: http://agent:8003
+      BILLING_SERVICE_URL: http://billing:8004
+      # Caddy, then the web server: the web server passes on the address Caddy saw.
+      TRUST_PROXY_HOPS: 1
+
+  auth:
+    <<: *backend
+    command: ['node', 'backend/services/auth/src/index.ts']
+    env_file: env/auth.env
+    environment:
+      PORT: 8001
+      MONGODB_URI: mongodb://mongo:27017/gilder_auth?replicaSet=rs0&directConnection=true
+      REDIS_URL: redis://redis:6379
+      BILLING_SERVICE_URL: http://billing:8004
+
+  chat:
+    <<: *backend
+    command: ['node', 'backend/services/chat/src/index.ts']
+    env_file: env/chat.env
+    environment:
+      PORT: 8002
+      MONGODB_URI: mongodb://mongo:27017/gilder_chat?replicaSet=rs0&directConnection=true
+
+  agent:
+    <<: *backend
+    command: ['node', 'backend/services/agent/src/index.ts']
+    env_file: env/agent.env
+    environment:
+      PORT: 8003
+      MONGODB_URI: mongodb://mongo:27017/gilder_agent?replicaSet=rs0&directConnection=true
+      REDIS_URL: redis://redis:6379
+      QDRANT_URL: http://qdrant:6333
+      CHAT_SERVICE_URL: http://chat:8002
+      BILLING_SERVICE_URL: http://billing:8004
+    depends_on:
+      mongo: { condition: service_healthy }
+      redis: { condition: service_healthy }
+      qdrant: { condition: service_healthy }
+
+  billing:
+    <<: *backend
+    command: ['node', 'backend/services/billing/src/index.ts']
+    env_file: env/billing.env
+    environment:
+      PORT: 8004
+      MONGODB_URI: mongodb://mongo:27017/gilder_billing?replicaSet=rs0&directConnection=true
+
+  frontend:
+    image: ghcr.io/nayan-ingale/gilder-frontend:${TAG:-latest}
+    restart: unless-stopped
+    init: true
+    networks: [internal]
+    env_file: env/frontend.env
+    environment:
+      GATEWAY_URL: http://gateway:8000
+    depends_on: [gateway]
+
+  caddy:
+    image: caddy:2.10-alpine
+    restart: unless-stopped
+    networks: [internal]
+    ports:
+      - '80:80'
+      - '443:443'
+      - '443:443/udp'
+    environment:
+      DOMAIN: ${DOMAIN}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    depends_on: [frontend]
+
+  mongo:
+    image: mongo:8
+    restart: unless-stopped
+    networks: [internal]
+    # A single-node replica set (the credits ledger uses transactions), with a small cache for a
+    # small server.
+    command: ['--replSet', 'rs0', '--bind_ip_all', '--wiredTigerCacheSizeGB', '0.25']
+    volumes:
+      - mongo-data:/data/db
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - >-
+          mongosh --quiet --eval "try { rs.status().ok } catch (e) {
+          rs.initiate({ _id: 'rs0', members: [{ _id: 0, host: 'mongo:27017' }] }).ok }"
+      interval: 5s
+      timeout: 10s
+      retries: 20
+      start_period: 10s
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    networks: [internal]
+    command: ['redis-server', '--appendonly', 'yes', '--maxmemory-policy', 'noeviction']
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ['CMD', 'redis-cli', 'ping']
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  qdrant:
+    image: qdrant/qdrant:v1.16.0
+    restart: unless-stopped
+    networks: [internal]
+    volumes:
+      - qdrant-data:/qdrant/storage
+    healthcheck:
+      test: ['CMD-SHELL', 'bash -c ":> /dev/tcp/127.0.0.1/6333"']
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+networks:
+  internal:
+
+volumes:
+  mongo-data:
+  redis-data:
+  qdrant-data:
+  caddy-data:
+  caddy-config:
