@@ -9,7 +9,16 @@ import { readServerEvents } from './sse';
  * stream starts, everything arrives as events.
  */
 
-export const BUILT_AGENTS = ['chat', 'search', 'code'] as const;
+export const BUILT_AGENTS = ['chat', 'search', 'code', 'pdf', 'slides', 'image'] as const;
+
+/** A file an answer made, as announced while streaming (its link is fresh and short-lived). */
+export interface AnnouncedFile {
+  fileId: string;
+  kind: 'pdf' | 'slides' | 'image';
+  name: string;
+  url: string;
+  expiresAt: string;
+}
 
 /** A PDF passage an answer cites as [p. N]. */
 export interface Citation {
@@ -34,6 +43,8 @@ export type TurnEvent =
   | { event: 'sources'; data: { items: Source[] } }
   | { event: 'artifact'; data: { files: CodeFile[] } }
   | { event: 'citations'; data: { items: Citation[] } }
+  | { event: 'progress'; data: { step: string; current: number; total: number } }
+  | { event: 'file'; data: AnnouncedFile }
   | { event: 'token'; data: { text: string } }
   | { event: 'usage'; data: { creditsCharged: number; balance: number } }
   | { event: 'title'; data: { title: string } }
@@ -171,4 +182,8 @@ export type ThreadMessage = Pick<ChatMessage, 'role' | 'content' | 'status'> & {
   attachments?: string[];
   /** PDF pages an answer is based on. */
   citations?: Citation[];
+  /** While a file is being made: the current step. */
+  progress?: { step: string; current: number; total: number };
+  /** Files the answer made, by ID. */
+  generated?: string[];
 };

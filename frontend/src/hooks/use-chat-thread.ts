@@ -36,6 +36,7 @@ export function toThreadMessage(message: ChatMessage): ThreadMessage {
     ...(filesOf(message) ? { files: filesOf(message) } : {}),
     ...(message.attachments.length > 0 ? { attachments: message.attachments } : {}),
     ...(message.citations.length > 0 ? { citations: message.citations as Citation[] } : {}),
+    ...(message.fileRefs?.length ? { generated: message.fileRefs } : {}),
   };
 }
 
@@ -128,6 +129,15 @@ export function useChatThread(chatId: string, initial: ChatMessage[]): ChatThrea
               );
               break;
             }
+            case 'progress':
+              updateAnswer((message) => ({ ...message, progress: turnEvent.data }));
+              break;
+            case 'file':
+              updateAnswer((message) => ({
+                ...message,
+                generated: [...(message.generated ?? []), turnEvent.data.fileId],
+              }));
+              break;
             case 'citations':
               updateAnswer((message) => ({ ...message, citations: turnEvent.data.items }));
               break;
@@ -183,7 +193,15 @@ export function useChatThread(chatId: string, initial: ChatMessage[]): ChatThrea
         }
         const stopped = current.controller.signal.aborted;
         if (!failed) {
-          updateAnswer((message) => ({ ...message, status: stopped ? 'stopped' : 'complete' }));
+          updateAnswer((message) => {
+            // The file is done: the progress bar goes.
+            const finished = {
+              ...message,
+              status: stopped ? ('stopped' as const) : ('complete' as const),
+            };
+            delete finished.progress;
+            return finished;
+          });
         }
         return true;
       } catch (error) {

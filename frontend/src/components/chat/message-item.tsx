@@ -8,6 +8,7 @@ import type { Citation, Source, ThreadMessage } from '@/lib/turns';
 import { openFile } from '@/lib/uploads';
 import { useGetFileQuery } from '@/store/api';
 import { FilesCard } from './files-card';
+import { GeneratedFiles } from './generated-files';
 import { Markdown } from './markdown';
 
 /**
@@ -155,6 +156,20 @@ export function MessageItem({ message, onRegenerate, onEdit }: MessageItemProps)
             </span>
           ) : null}
           {message.files?.length && !writing ? <FilesCard files={message.files} /> : null}
+          {writing && message.progress ? (
+            <div className="mt-2 flex max-w-sm flex-col gap-1" role="status">
+              <span className="text-xs text-fg-muted">
+                {message.progress.step}… ({message.progress.current} of {message.progress.total})
+              </span>
+              <span className="h-1.5 overflow-hidden rounded-full bg-sunken">
+                <span
+                  className="block h-full rounded-full bg-accent transition-all"
+                  style={{ width: `${(message.progress.current / message.progress.total) * 100}%` }}
+                />
+              </span>
+            </div>
+          ) : null}
+          {message.generated?.length ? <GeneratedFiles fileIds={message.generated} /> : null}
           {message.sources?.length ? <Sources sources={message.sources} /> : null}
           {message.citations?.length ? <Citations citations={message.citations} /> : null}
           {message.status === 'stopped' ? (

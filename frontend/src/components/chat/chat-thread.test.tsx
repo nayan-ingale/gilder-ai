@@ -167,6 +167,7 @@ describe('ChatThread', () => {
       status: 'complete',
       clientMessageId: null,
       attachments: [],
+      fileRefs: [],
       artifacts: [],
       sources: [],
       citations: [],
@@ -273,5 +274,57 @@ describe('attachments', () => {
     expect(stored).toHaveLength(1);
     expect(await screen.findByRole('button', { name: 'cat.png' })).toBeTruthy();
     expect(screen.queryByRole('list', { name: 'Attached files' })).toBeNull();
+  });
+});
+
+describe('generated files', () => {
+  it('shows progress while a file is made, then the file to download', async () => {
+    let release = () => {};
+    const hold = new Promise<void>((resolve) => (release = resolve));
+    answer = (call) => {
+      if (call.path === '/api/billing/account') {
+        return account(100);
+      }
+      if (call.path === '/api/files/gen-1') {
+        return json({
+          file: { id: 'gen-1', name: 'packing-list.pdf', purpose: 'pdf', status: 'ready' },
+          indexing: null,
+        });
+      }
+      if (call.method === 'POST' && call.path === `/api/chats/${CHAT}/messages`) {
+        return streamed(
+          [
+            ['meta', { turnId: 'a1', userMessageId: 'u1', assistantMessageId: 'a1' }],
+            ['progress', { step: 'Laying out the pages', current: 2, total: 3 }],
+            ['token', { text: 'Here is your PDF.' }],
+            [
+              'file',
+              {
+                fileId: 'gen-1',
+                kind: 'pdf',
+                name: 'packing-list.pdf',
+                url: 'https://x',
+                expiresAt: '',
+              },
+            ],
+            ['done', {}],
+          ],
+          hold,
+        );
+      }
+      return json({ items: [], nextCursor: null });
+    };
+    renderThread();
+
+    await userEvent.type(
+      screen.getByRole('textbox', { name: 'Message' }),
+      '/pdf packing list{Enter}',
+    );
+
+    expect(await screen.findByText('Laying out the pages… (2 of 3)')).toBeTruthy();
+    act(() => release());
+    expect(await screen.findByText('packing-list.pdf')).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Download' })).toBeTruthy();
+    expect(screen.queryByText(/Laying out the pages/)).toBeNull();
   });
 });

@@ -15,6 +15,8 @@ export interface ChatMessage {
   status: 'streaming' | 'complete' | 'stopped' | 'failed';
   clientMessageId: string | null;
   attachments: string[];
+  /** Files the answer made (PDFs, slides, images), by ID. */
+  fileRefs: string[];
   artifacts: unknown[];
   sources: unknown[];
   citations: unknown[];
