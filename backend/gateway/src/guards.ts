@@ -8,6 +8,7 @@ import {
   setContextUserId,
 } from '@gilder/shared';
 import type { RequestHandler } from 'express';
+import type { MatchedRoute } from './route-table.ts';
 
 /**
  * The checks the gateway runs before forwarding a request, cheapest first. Each is its own
@@ -24,8 +25,10 @@ const SAFE_METHODS = new Set(['GET', 'HEAD', 'OPTIONS']);
  * the first line; this is the second.
  */
 export function originCheck(allowedOrigins: readonly string[]): RequestHandler {
-  return (req, _res, next) => {
-    if (SAFE_METHODS.has(req.method)) {
+  return (req, res, next) => {
+    // A webhook comes from another server, not a browser; its service checks its signature.
+    const matched = res.locals.route as MatchedRoute | undefined;
+    if (SAFE_METHODS.has(req.method) || matched?.route.webhook) {
       next();
       return;
     }

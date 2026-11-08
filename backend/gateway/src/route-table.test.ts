@@ -74,6 +74,30 @@ describe('matchRoute', () => {
     }
   });
 
+  it('maps the payment and usage routes to billing, with the webhook open but signed', () => {
+    expect(matchRoute('POST', '/api/billing/orders/order_Abc123/verify')).toMatchObject({
+      route: { service: 'billing', session: 'required' },
+      targetPath: '/orders/order_Abc123/verify',
+    });
+    for (const [method, path, target] of [
+      ['GET', '/api/billing/plans', '/plans'],
+      ['POST', '/api/billing/orders', '/orders'],
+      ['GET', '/api/billing/payments', '/payments'],
+      ['GET', '/api/usage/summary', '/usage/summary'],
+      ['GET', '/api/usage/events', '/usage/events'],
+    ] as const) {
+      expect(matchRoute(method, path)?.targetPath, path).toBe(target);
+    }
+    expect(matchRoute('POST', '/api/webhooks/razorpay')).toMatchObject({
+      route: {
+        session: 'none',
+        webhook: { headers: ['x-razorpay-signature', 'x-razorpay-event-id'] },
+      },
+      targetPath: '/webhooks/razorpay',
+    });
+    expect(PUBLIC_ROUTES.filter((route) => route.webhook)).toHaveLength(1);
+  });
+
   it('finds nothing for an unknown path or a method the route does not have', () => {
     expect(matchRoute('GET', '/api/nothing-here')).toBeUndefined();
     expect(matchRoute('DELETE', '/api/me')).toBeUndefined();

@@ -44,7 +44,8 @@ export function proxyToService(deps: ProxyDeps): RequestHandler {
     const url = `${deps.serviceUrls[service]}${matched.targetPath}${query}`;
 
     const headers = new Headers();
-    for (const name of FORWARDED_REQUEST_HEADERS) {
+    // A webhook route also passes the sender's signature headers, and only those.
+    for (const name of [...FORWARDED_REQUEST_HEADERS, ...(matched.route.webhook?.headers ?? [])]) {
       const value = req.get(name);
       if (value) {
         headers.set(name, value);

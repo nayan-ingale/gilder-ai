@@ -17,6 +17,12 @@ export interface PublicRoute {
   target: string;
   /** 'required': the caller must be signed in. 'none': open, such as sign-in itself. */
   session: 'required' | 'none';
+  /**
+   * A server-to-server webhook, such as Razorpay's: it has no browser Origin, so the Origin check
+   * is skipped (the service checks the sender's signature instead), and these extra headers are
+   * passed on for that check.
+   */
+  webhook?: { headers: readonly string[] };
 }
 
 export const PUBLIC_ROUTES: readonly PublicRoute[] = [
@@ -105,6 +111,58 @@ export const PUBLIC_ROUTES: readonly PublicRoute[] = [
     service: 'agent',
     target: '/turns/:turnId/stop',
     session: 'required',
+  },
+
+  // Buying credits and the usage page.
+  {
+    method: 'GET',
+    path: '/api/billing/plans',
+    service: 'billing',
+    target: '/plans',
+    session: 'required',
+  },
+  {
+    method: 'POST',
+    path: '/api/billing/orders',
+    service: 'billing',
+    target: '/orders',
+    session: 'required',
+  },
+  {
+    method: 'POST',
+    path: '/api/billing/orders/:orderId/verify',
+    service: 'billing',
+    target: '/orders/:orderId/verify',
+    session: 'required',
+  },
+  {
+    method: 'GET',
+    path: '/api/billing/payments',
+    service: 'billing',
+    target: '/payments',
+    session: 'required',
+  },
+  {
+    method: 'GET',
+    path: '/api/usage/summary',
+    service: 'billing',
+    target: '/usage/summary',
+    session: 'required',
+  },
+  {
+    method: 'GET',
+    path: '/api/usage/events',
+    service: 'billing',
+    target: '/usage/events',
+    session: 'required',
+  },
+  {
+    method: 'POST',
+    path: '/api/webhooks/razorpay',
+    service: 'billing',
+    target: '/webhooks/razorpay',
+    session: 'none',
+    webhook: { headers: ['x-razorpay-signature', 'x-razorpay-event-id'] },
   },
 
   // Credits: the user's plan and balance.

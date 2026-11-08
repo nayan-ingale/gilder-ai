@@ -130,3 +130,41 @@ describe('gateway', () => {
     );
   });
 });
+
+describe('the payment webhook', () => {
+  it('reaches billing without a browser Origin, with only the signature headers added', async () => {
+    const response = await request(buildApp())
+      .post('/api/webhooks/razorpay')
+      .set('content-type', 'application/json')
+      .set('x-razorpay-signature', 'abc123')
+      .set('x-razorpay-event-id', 'evt_1')
+      .set('x-other-header', 'dropped')
+      .send('{"event":"payment.captured"}');
+
+    expect(response.status).toBe(200);
+    expect(reached[0]?.url).toBe('/webhooks/razorpay');
+    expect(reached[0]?.headers['x-razorpay-signature']).toBe('abc123');
+    expect(reached[0]?.headers['x-razorpay-event-id']).toBe('evt_1');
+    expect(reached[0]?.headers['x-other-header']).toBeUndefined();
+  });
+
+  it('still needs the Origin on every other change, and keeps the signature headers away from it', async () => {
+    const sessionId = await createSession(store.redis, 'user-1');
+
+    const noOrigin = await request(buildApp())
+      .post('/api/billing/orders')
+      .set('Cookie', `gilder_sid=${sessionId}`)
+      .send({ planId: 'starter' });
+    const withOrigin = await request(buildApp())
+      .post('/api/billing/orders')
+      .set('Cookie', `gilder_sid=${sessionId}`)
+      .set('Origin', ORIGIN)
+      .set('x-razorpay-signature', 'sneaky')
+      .send({ planId: 'starter' });
+
+    expect(noOrigin.status).toBe(403);
+    expect(withOrigin.status).toBe(200);
+    expect(reached).toHaveLength(1);
+    expect(reached[0]?.headers['x-razorpay-signature']).toBeUndefined();
+  });
+});

@@ -6,8 +6,9 @@
  * the frontend's own domain.
  */
 
-// What the gateway may see of the browser's request. It needs the cookie (sessions), Origin
-// (its CSRF check) and the forwarded client address (its per-IP rate limit).
+// What the gateway may see of the incoming request. It needs the cookie (sessions), Origin (its
+// CSRF check) and the forwarded client address (its per-IP rate limit). Razorpay's webhook
+// signs its body; the gateway passes these two headers on for that route only.
 const FORWARDED_REQUEST_HEADERS = [
   'accept',
   'accept-language',
@@ -16,6 +17,8 @@ const FORWARDED_REQUEST_HEADERS = [
   'origin',
   'user-agent',
   'x-forwarded-for',
+  'x-razorpay-event-id',
+  'x-razorpay-signature',
 ];
 
 // What the browser may see of the gateway's answer. Set-Cookie is copied separately, because a
