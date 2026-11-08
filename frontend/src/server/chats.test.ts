@@ -1,7 +1,12 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const cookieStore = { value: 'gilder_sid=abc' };
+const requestHeaders = { forwardedFor: '' };
 vi.mock('next/headers', () => ({
+  headers: async () =>
+    new Headers(
+      requestHeaders.forwardedFor ? { 'x-forwarded-for': requestHeaders.forwardedFor } : {},
+    ),
   cookies: async () => ({
     get: (name: string) =>
       cookieStore.value.includes(`${name}=`) ? { name, value: 'x' } : undefined,

@@ -1,4 +1,4 @@
-import { cookies } from 'next/headers';
+import { cookies, headers } from 'next/headers';
 import { gatewayUrlFromEnv } from './gateway-proxy';
 
 export const SESSION_COOKIE = 'gilder_sid';
@@ -13,8 +13,15 @@ export async function gatewayGet(path: string): Promise<Response | null> {
   if (!store.get(SESSION_COOKIE)) {
     return null;
   }
+  // The visitor's own address, as the /api proxy forwards it: without it every server render
+  // would count against the Next.js server's single per-IP limit at the gateway.
+  const forwardedFor = (await headers()).get('x-forwarded-for');
   return fetch(`${gatewayUrlFromEnv().replace(/\/+$/, '')}${path}`, {
-    headers: { cookie: store.toString(), 'x-gilder-client': 'web' },
+    headers: {
+      cookie: store.toString(),
+      'x-gilder-client': 'web',
+      ...(forwardedFor ? { 'x-forwarded-for': forwardedFor } : {}),
+    },
     cache: 'no-store',
   });
 }

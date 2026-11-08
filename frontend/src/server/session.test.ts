@@ -1,7 +1,12 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const cookieStore = { value: '' };
+const requestHeaders = { forwardedFor: '' };
 vi.mock('next/headers', () => ({
+  headers: async () =>
+    new Headers(
+      requestHeaders.forwardedFor ? { 'x-forwarded-for': requestHeaders.forwardedFor } : {},
+    ),
   cookies: async () => ({
     get: (name: string) =>
       cookieStore.value.includes(`${name}=`) ? { name, value: 'x' } : undefined,
@@ -36,6 +41,24 @@ describe('getCurrentUser', () => {
         headers: { cookie: 'gilder_sid=abc; theme=dark', 'x-gilder-client': 'web' },
       }),
     );
+  });
+
+  it("passes the visitor's address on, so the gateway's per-IP limit counts each visitor", async () => {
+    cookieStore.value = 'gilder_sid=abc';
+    requestHeaders.forwardedFor = '203.0.113.7';
+    fetchMock.mockResolvedValue(
+      new Response(JSON.stringify({ user: { id: 'u1' } }), { status: 200 }),
+    );
+
+    await getCurrentUser();
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      'http://gateway.test/api/me',
+      expect.objectContaining({
+        headers: expect.objectContaining({ 'x-forwarded-for': '203.0.113.7' }),
+      }),
+    );
+    requestHeaders.forwardedFor = '';
   });
 
   it('is null without a session cookie, without calling the gateway', async () => {
