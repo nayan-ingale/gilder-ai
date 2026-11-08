@@ -107,7 +107,11 @@ export async function reserveCredits(
         { returnDocument: 'after', session },
       );
       if (!account) {
-        throw new AppError('insufficient_credits', `This answer needs ${amount} credits`);
+        const current = await AccountModel.findById(userId).session(session);
+        throw new AppError(
+          'insufficient_credits',
+          `This answer needs ${amount} ${amount === 1 ? 'credit' : 'credits'}; you have ${current?.balance ?? 0}`,
+        );
       }
       const [reservation] = await ReservationModel.create(
         [{ userId, amount, agent, idempotencyKey }],

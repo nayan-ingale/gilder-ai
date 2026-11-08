@@ -1,9 +1,11 @@
 import {
   type Agent,
+  AGENT_RATE_LIMITS,
   AGENTS,
   AppError,
   CREDIT_COSTS,
   getContext,
+  hitRateLimit,
   type Logger,
   type Redis,
   requireUser,
@@ -261,6 +263,19 @@ async function runTurn(deps: TurnDeps, res: Response, plan: TurnPlan): Promise<v
             deps.llm,
             deps.logger,
           );
+    // Each agent has its own per-minute limit: the costly ones are held tighter than chat.
+    const limit = await hitRateLimit(
+      deps.redis,
+      { scope: `agent-${route.agent}`, limit: AGENT_RATE_LIMITS[route.agent] },
+      userId,
+    );
+    if (!limit.allowed) {
+      res.setHeader('Retry-After', String(limit.retryAfterSeconds));
+      throw new AppError(
+        'rate_limited',
+        `Too many ${route.agent} requests. Try again in ${limit.retryAfterSeconds}s.`,
+      );
+    }
     const { reservation } = await deps.billing.reserve(userId, route.agent, plan.reserveKey);
     if (reservation.status !== 'held') {
       throw new AppError('conflict', 'This message was already answered');
@@ -366,6 +381,7 @@ async function streamAnswer(deps: TurnDeps, res: Response, turn: Turn): Promise<
       memory: turn.memory,
       llm: deps.llm,
       signal: controller.signal,
+      messageId: turn.messageIds.answer,
     })) {
       if (event.type === 'model') {
         model = event.model;

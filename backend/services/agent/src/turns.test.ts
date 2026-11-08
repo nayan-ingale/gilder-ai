@@ -324,6 +324,22 @@ describe('POST /chats/:chatId/turns', () => {
     expect(await historyOf(me, chatId)).toHaveLength(2);
   });
 
+  it('holds each agent to its per-minute limit, before charging anything', async () => {
+    const chatId = await newChat(me);
+    await grantCredits(me);
+    await store.redis.set(`rl:agent-chat:${me}`, '20', 'EX', 60);
+
+    const response = await sendTurn(me, chatId, {
+      content: 'Hello',
+      clientMessageId: 'client-0001',
+    });
+
+    expect(response.status).toBe(429);
+    expect(response.headers['retry-after']).toBeDefined();
+    expect(await balanceOf(me)).toBe(100);
+    expect(await historyOf(me, chatId)).toEqual([]);
+  });
+
   it('refuses a shortcut with no message and malformed bodies', async () => {
     const chatId = await newChat(me);
 

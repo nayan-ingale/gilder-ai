@@ -104,6 +104,7 @@ describe('reserve, commit and release', () => {
     await expect(reserve('u1', 'turn-0001', 'search')).rejects.toMatchObject({
       code: 'insufficient_credits',
       status: 402,
+      message: 'This answer needs 5 credits; you have 4',
     });
     await expect(reserve('nobody', 'turn-0002')).rejects.toMatchObject({ status: 402 });
     expect((await AccountModel.findById('u1'))?.balance).toBe(4);

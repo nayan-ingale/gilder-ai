@@ -18,6 +18,7 @@ import { buildProviders } from './llm/providers.ts';
 import { createMemory } from './memory.ts';
 import { billingService, chatService } from './services.ts';
 import { createStopSignals } from './stops.ts';
+import { llmCallRecorder } from './telemetry.ts';
 
 const logger = createLogger({
   service: 'agent',
@@ -54,6 +55,7 @@ const llm = createLlm({
     gemini: env.GEMINI_API_KEY,
   }),
   logger,
+  onCall: llmCallRecorder(logger),
 });
 logger.info(
   { llmMode: env.LLM_MODE },

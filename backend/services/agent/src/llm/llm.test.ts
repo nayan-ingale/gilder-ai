@@ -1,6 +1,6 @@
 import { createLogger } from '@gilder/shared';
 import { describe, expect, it } from 'vitest';
-import { createLlm } from './llm.ts';
+import { createLlm, type LlmCallRecord } from './llm.ts';
 import { createMockProvider } from './mock.ts';
 import { LlmError, type LlmProvider, type ProviderName, type StreamEvent } from './types.ts';
 
@@ -128,5 +128,65 @@ describe('createLlm', () => {
 
     expect(result.provider).toBe('mock');
     expect(result.text).toContain('mock answer');
+  });
+});
+
+describe('telemetry', () => {
+  it('reports every attempt: the failure that fell back, then the answer', async () => {
+    const records: LlmCallRecord[] = [];
+    let attempt = 0;
+    const flaky: LlmProvider = {
+      name: 'groq',
+      async *stream(): AsyncGenerator<StreamEvent> {
+        attempt += 1;
+        if (attempt === 1) {
+          throw retryable('groq');
+        }
+        yield { type: 'token', text: 'hi' };
+        yield { type: 'usage', inputTokens: 7, outputTokens: 1 };
+      },
+    };
+    const llm = createLlm({
+      mode: 'live',
+      providers: { groq: flaky },
+      logger,
+      onCall: (record) => records.push(record),
+    });
+
+    await llm.complete({ ...call, tags: { agent: 'chat', messageId: 'm1' } });
+
+    expect(records).toMatchObject([
+      { purpose: 'chat', model: 'openai/gpt-oss-120b', status: 'error', error: 'groq is down' },
+      {
+        purpose: 'chat',
+        agent: 'chat',
+        messageId: 'm1',
+        provider: 'groq',
+        model: 'openai/gpt-oss-20b',
+        tokensIn: 7,
+        tokensOut: 1,
+        status: 'ok',
+      },
+    ]);
+    expect(records[1]?.ttftMs).toBeGreaterThanOrEqual(0);
+    expect(records[0]?.ttftMs).toBeUndefined();
+  });
+
+  it('reports an answer the caller stopped reading as stopped', async () => {
+    const records: LlmCallRecord[] = [];
+    const llm = createLlm({
+      mode: 'live',
+      providers: { groq: scripted('groq', ['one', 'two', 'three']) },
+      logger,
+      onCall: (record) => records.push(record),
+    });
+
+    for await (const event of llm.stream(call)) {
+      if (event.type === 'token') {
+        break;
+      }
+    }
+
+    expect(records).toMatchObject([{ status: 'stopped', tokensOut: 0 }]);
   });
 });

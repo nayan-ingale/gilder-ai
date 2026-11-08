@@ -1,6 +1,7 @@
 /** The provider layer's vocabulary: one way to stream an answer, whichever company serves it. */
 
-export type ProviderName = 'groq' | 'openrouter' | 'gemini' | 'mock';
+export const PROVIDER_NAMES = ['groq', 'openrouter', 'gemini', 'mock'] as const;
+export type ProviderName = (typeof PROVIDER_NAMES)[number];
 
 export interface LlmMessage {
   role: 'system' | 'user' | 'assistant';

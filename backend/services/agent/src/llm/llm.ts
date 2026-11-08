@@ -1,4 +1,4 @@
-import { AppError, type Logger } from '@gilder/shared';
+import { type Agent, AppError, type Logger } from '@gilder/shared';
 import { MODEL_ROUTES, type ModelPurpose, type ModelTarget } from './models.ts';
 import {
   LlmError,
@@ -16,11 +16,30 @@ import {
 
 export type LlmMode = 'live' | 'mock';
 
+/** One attempt at one model: what telemetry records. */
+export interface LlmCallRecord {
+  purpose: ModelPurpose;
+  agent?: Agent;
+  messageId?: string;
+  provider: ProviderName;
+  model: string;
+  tokensIn: number;
+  tokensOut: number;
+  /** Time to the first token; undefined when none came. */
+  ttftMs?: number;
+  latencyMs: number;
+  /** ok: finished. error: failed (perhaps followed by a fallback). stopped: aborted or abandoned. */
+  status: 'ok' | 'error' | 'stopped';
+  error?: string;
+}
+
 export interface LlmOptions {
   mode: LlmMode;
   /** The providers that have keys. In mock mode only `mock` is used. */
   providers: Partial<Record<ProviderName, LlmProvider>>;
   logger: Logger;
+  /** Called after every model attempt, for usage telemetry. It must not throw. */
+  onCall?: (record: LlmCallRecord) => void;
 }
 
 export interface LlmCall {
@@ -30,6 +49,8 @@ export interface LlmCall {
   maxTokens?: number;
   temperature?: number;
   signal?: AbortSignal;
+  /** For telemetry: the agent and the answer this call is for. */
+  tags?: { agent?: Agent; messageId?: string };
 }
 
 /** Tells the caller which model is answering, before its first token or usage. */
@@ -77,6 +98,10 @@ export function createLlm(options: LlmOptions): Llm {
         continue;
       }
       let started = false;
+      const attemptStart = Date.now();
+      let firstTokenAt: number | undefined;
+      let tokens = { tokensIn: 0, tokensOut: 0 };
+      let outcome: { status: 'ok' } | { status: 'error'; error: unknown } | undefined;
       try {
         for await (const event of provider.stream({
           model: target.model,
@@ -91,14 +116,21 @@ export function createLlm(options: LlmOptions): Llm {
             started = true;
             yield { type: 'model', provider: target.provider, model: target.model };
           }
+          if (event.type === 'token') {
+            firstTokenAt ??= Date.now();
+          } else {
+            tokens = { tokensIn: event.inputTokens, tokensOut: event.outputTokens };
+          }
           yield event;
         }
         if (!started) {
           // An empty answer is still an answer from this model.
           yield { type: 'model', provider: target.provider, model: target.model };
         }
+        outcome = { status: 'ok' };
         return;
       } catch (error) {
+        outcome = call.signal?.aborted ? undefined : { status: 'error', error };
         const canFallBack =
           !started && !call.signal?.aborted && error instanceof LlmError && error.retryable;
         if (!canFallBack) {
@@ -109,6 +141,25 @@ export function createLlm(options: LlmOptions): Llm {
           'model failed before answering; trying the next one',
         );
         lastError = error;
+      } finally {
+        // No outcome means the caller aborted or stopped reading: the attempt was stopped.
+        options.onCall?.({
+          purpose: call.purpose,
+          ...(call.tags?.agent ? { agent: call.tags.agent } : {}),
+          ...(call.tags?.messageId ? { messageId: call.tags.messageId } : {}),
+          provider: target.provider,
+          model: target.model,
+          ...tokens,
+          ...(firstTokenAt !== undefined ? { ttftMs: firstTokenAt - attemptStart } : {}),
+          latencyMs: Date.now() - attemptStart,
+          status: outcome?.status ?? 'stopped',
+          ...(outcome?.status === 'error'
+            ? {
+                error:
+                  outcome.error instanceof Error ? outcome.error.message.slice(0, 300) : 'failed',
+              }
+            : {}),
+        });
       }
     }
     throw lastError;

@@ -10,6 +10,8 @@ export interface AgentContext {
   memory: LlmMessage[];
   llm: Llm;
   signal: AbortSignal;
+  /** The answer being written, for telemetry. */
+  messageId?: string;
 }
 
 /** What an agent streams back. Later agents add sources, artifacts and files. */

@@ -19,6 +19,7 @@ export const chatAgent: AgentRunner = {
         { role: 'user', content: context.text },
       ],
       signal: context.signal,
+      tags: { agent: 'chat', ...(context.messageId ? { messageId: context.messageId } : {}) },
     });
   },
 };
