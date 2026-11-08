@@ -204,7 +204,7 @@ export async function releaseCredits(userId: string, reservationId: string): Pro
 }
 
 /** Marks one held reservation matching `filter` released and returns its credits. */
-async function releaseHeld(
+export async function releaseHeld(
   filter: Record<string, unknown>,
   session: mongoose.ClientSession,
 ): Promise<ReservationDocument | null> {

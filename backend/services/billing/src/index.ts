@@ -8,6 +8,7 @@ import {
 } from '@gilder/shared';
 import { createApp } from './app.ts';
 import { env } from './env.ts';
+import { startReservationSweeper } from './sweeper.ts';
 
 const logger = createLogger({
   service: 'billing',
@@ -27,10 +28,13 @@ const app = createApp({
   },
 });
 
+const stopSweeper = startReservationSweeper({ logger });
+
 await startService(app, {
   port: env.PORT,
   logger,
   onShutdown: async () => {
+    stopSweeper();
     await disconnectMongo();
   },
 });
