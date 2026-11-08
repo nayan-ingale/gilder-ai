@@ -280,7 +280,7 @@ export const components: ArchComponent[] = [
     kind: 'datastore',
     status: 'verified',
     summary:
-      'The main database, run locally in Docker (mongo:8). It is a single-node replica set named rs0, because MongoDB transactions need a replica set: billing changes every balance in a transaction with its ledger entry or hold.',
+      'The main database, run locally in Docker (mongo:8 by default, or the MONGO_IMAGE setting; CI and production pin mongo:8.2.6). It is a single-node replica set named rs0, because MongoDB transactions need a replica set: billing changes every balance in a transaction with its ledger entry or hold.',
     responsibilities: [
       'Listens on host port 27018, not the usual 27017, so it does not clash with other local projects. Data lives in the mongo-data volume.',
       'The Docker health check creates the rs0 replica set on the first run.',

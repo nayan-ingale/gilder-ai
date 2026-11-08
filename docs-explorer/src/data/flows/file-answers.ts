@@ -488,8 +488,8 @@ const e2eRun: Flow = {
       title: 'A push or a pull request',
       kind: 'trigger',
       status: 'verified',
-      what: "The e2e job ('End-to-end tests (mock mode)') runs beside the quality job on every push to main and every pull request, with a 25-minute limit. It installs the workspace with the frozen lockfile and starts MongoDB (a replica set, for the credit transactions), Redis and Qdrant with docker compose up -d, then polls their health checks every 2 seconds for up to 2 minutes, printing the container logs if one never becomes healthy.",
-      why: 'The same data stores as in development, so the app runs as it does on a laptop. The job waits for the health checks itself because docker compose up --wait gave up on MongoDB while it was still starting on the runner.',
+      what: "The e2e job ('End-to-end tests (mock mode)') runs beside the quality job on every push to main and every pull request, with a 25-minute limit. It installs the workspace with the frozen lockfile and starts MongoDB 8.2.6 (a replica set, for the credit transactions), Redis and Qdrant with docker compose up -d, then polls their health checks every 2 seconds for up to 2 minutes, printing the container logs if one never becomes healthy.",
+      why: 'The same data stores as in development, so the app runs as it does on a laptop. The job pins mongo:8.2.6 (through MONGO_IMAGE), the version the unit tests run, because newer 8.x images refuse to start on the Linux 6.19+ kernel the runner has (MongoDB SERVER-121912). Waiting in the job, with the logs on failure, is what made that cause visible.',
     },
     {
       id: 'configure',

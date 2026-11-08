@@ -231,7 +231,7 @@ export const deploymentPage: DocPage = {
       blocks: [
         {
           kind: 'text',
-          text: 'The e2e package runs Playwright against the whole app, on a desktop and a phone (Pixel 7) screen: behaviour tests (app.spec.ts) and axe accessibility checks (a11y.spec.ts). Each test signs in a fresh user with dev sign-in. In CI the e2e job starts the data stores with `docker compose up -d` and polls their health checks every 2 seconds for up to 2 minutes, printing the container logs if one never becomes healthy (`up --wait` gave up on MongoDB while it was still starting on the runner). It then writes fresh settings in mock mode with dev sign-in on and RATE_LIMIT_PER_IP raised, builds and starts the frontend and the five backend apps, waits for each to answer, installs Chromium and runs the tests; a failed run keeps its report, traces and logs as the e2e-report artifact for 7 days. The job stops after 25 minutes.',
+          text: 'The e2e package runs Playwright against the whole app, on a desktop and a phone (Pixel 7) screen: behaviour tests (app.spec.ts) and axe accessibility checks (a11y.spec.ts). Each test signs in a fresh user with dev sign-in. In CI the e2e job starts the data stores with `docker compose up -d` and polls their health checks every 2 seconds for up to 2 minutes, printing the container logs if one never becomes healthy. It pins `MONGO_IMAGE=mongo:8.2.6`, the version the unit tests run: newer 8.x images refuse to start on the Linux 6.19+ kernel the runner has (MongoDB SERVER-121912). It then writes fresh settings in mock mode with dev sign-in on and RATE_LIMIT_PER_IP raised, builds and starts the frontend and the five backend apps, waits for each to answer, installs Chromium and runs the tests; a failed run keeps its report, traces and logs as the e2e-report artifact for 7 days. The job stops after 25 minutes.',
         },
         {
           kind: 'text',
@@ -288,7 +288,7 @@ export const deploymentPage: DocPage = {
       blocks: [
         {
           kind: 'text',
-          text: '`deploy/compose.yml` (project name `gilder-prod`) runs the whole app on one server: the gateway, the four services and the web server from the two images, plus MongoDB, Redis and Qdrant, all on one internal network. Caddy is the only service reachable from outside, on ports 80 and 443. MongoDB runs as a single-node replica set, which its health check sets up on the first start, because the credits ledger uses transactions, with a 0.25 GB cache for a small server; Redis saves to disk with the `noeviction` policy, as in development. The apps wait until MongoDB and Redis are healthy, and the agent also waits for Qdrant.',
+          text: '`deploy/compose.yml` (project name `gilder-prod`) runs the whole app on one server: the gateway, the four services and the web server from the two images, plus MongoDB, Redis and Qdrant, all on one internal network. Caddy is the only service reachable from outside, on ports 80 and 443. MongoDB (pinned to 8.2.6, so a pull never upgrades the database by surprise) runs as a single-node replica set, which its health check sets up on the first start, because the credits ledger uses transactions, with a 0.25 GB cache for a small server; Redis saves to disk with the `noeviction` policy, as in development. The apps wait until MongoDB and Redis are healthy, and the agent also waits for Qdrant.',
         },
         {
           kind: 'text',
