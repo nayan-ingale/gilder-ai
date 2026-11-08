@@ -14,7 +14,7 @@ const appStartup: Flow = {
   category: 'lifecycle',
   apps: APPS,
   summary:
-    'How a backend app goes from `node src/index.ts` to answering requests. Every app follows the same order in its src/index.ts: check the settings, make the logger, connect to its data stores, build the Express app, then listen. This flow follows auth, which uses both MongoDB and Redis. Agent does exactly the same. The gateway uses Redis only, so it has no MongoDB step. Chat and billing use MongoDB only, so they have no Redis step. If the settings are wrong, MongoDB cannot be reached or the port is taken, the app stops with exit code 1 before it serves anything. A Redis outage does not stop it: the app starts, and /readyz reports Redis as failed.',
+    "How a backend app goes from `node src/index.ts` to answering requests. Every app follows the same order in its src/index.ts: check the settings, make the logger, connect to its data stores, build the Express app, then listen. This flow follows auth, which uses both MongoDB and Redis. Agent does the same, except that only auth picks a Google sign-in check. Chat, agent and billing import the gateway's public key the same way auth does, and the gateway imports its private key instead. The gateway uses Redis only, so it has no MongoDB step. Chat and billing use MongoDB only, so they have no Redis step. If the settings are wrong, MongoDB cannot be reached, a service's public key cannot be read or the port is taken, the app stops with exit code 1 before it serves anything. A Redis outage does not stop it: the app starts, and /readyz reports Redis as failed.",
   status: 'verified',
   steps: [
     {
@@ -33,7 +33,7 @@ const appStartup: Flow = {
       status: 'verified',
       symbol: 'backend/services/auth/src/env.ts#env',
       highlight: 'export const env = loadEnv(',
-      what: "index.ts imports env from ./env.ts. In ES modules an imported file runs before the file that imports it, so this check runs before any line of index.ts. Auth's env.ts is one line, loadEnv(authEnvSchema); the rules live in env-schema.ts, so tests can check them without a real environment. loadEnv parses process.env with that Zod schema: NODE_ENV and LOG_LEVEL from baseEnvSchema, plus PORT (default 8001), MONGODB_URI, REDIS_URL, INTERNAL_PUBLIC_KEY (required, and it must start with -----BEGIN PUBLIC KEY-----; nothing parses the key yet), AUTH_DEV_LOGIN (true or false, default false) and FIREBASE_PROJECT_ID, FIREBASE_CLIENT_EMAIL and FIREBASE_PRIVATE_KEY (optional, all three or none; empty counts as unset). With NODE_ENV production, AUTH_DEV_LOGIN must be false and the three Firebase settings are required. Nothing uses the key, the dev sign-in flag or the Firebase settings yet. The other apps write their schema in env.ts and list only what they use: the gateway has REDIS_URL but no MONGODB_URI, chat and billing have MONGODB_URI but no REDIS_URL, and agent has both.",
+      what: "index.ts imports env from ./env.ts. In ES modules an imported file runs before the file that imports it, so this check runs before any line of index.ts. Auth's env.ts is one line, loadEnv(authEnvSchema); the rules live in env-schema.ts, so tests can check them without a real environment. loadEnv parses process.env with that Zod schema: NODE_ENV and LOG_LEVEL from baseEnvSchema, plus PORT (default 8001), MONGODB_URI, REDIS_URL, INTERNAL_PUBLIC_KEY (the shared internalPublicKeySchema: required, escaped \\n line breaks turned back into real ones, and it must start with -----BEGIN PUBLIC KEY-----; index.ts reads the key itself later), AUTH_DEV_LOGIN (true or false, default false) and FIREBASE_PROJECT_ID, FIREBASE_CLIENT_EMAIL and FIREBASE_PRIVATE_KEY (optional, all three or none; empty counts as unset). With NODE_ENV production, AUTH_DEV_LOGIN must be false and the three Firebase settings are required. Each app lists only what it uses. The gateway's schema is also in its env-schema.ts: REDIS_URL, FRONTEND_ORIGIN (a comma-separated list of origins), the four service URLs, INTERNAL_PRIVATE_KEY (it must parse as an Ed25519 private key) and TRUST_PROXY_HOPS (default 1), but no MONGODB_URI. Chat and billing write theirs in env.ts, with MONGODB_URI and INTERNAL_PUBLIC_KEY; agent adds REDIS_URL.",
       why: 'A wrong setting stops the app at once, with a list of every problem, instead of failing later the first time the value is used.',
       input: 'process.env',
       output:
@@ -126,8 +126,27 @@ const appStartup: Flow = {
       status: 'verified',
       symbol: 'backend/services/auth/src/index.ts#app',
       highlight: 'readinessChecks: { mongo: pingMongo, redis: () => pingRedis(redis) },',
-      what: "createApp (in auth's app.ts) takes the logger and the readiness checks and calls createService({ name: 'auth', logger, readinessChecks }). The checks are only stored here. They run on each GET /readyz: pingMongo checks that the connection is open and pings the server, and pingRedis sends PING. Agent passes the same two checks. The gateway passes only redis, and chat and billing pass only mongo.",
-      why: 'The health code stays shared. Each app only says which dependencies it has.',
+      what: "First, auth picks its Google sign-in check (verifyIdToken in index.ts). When FIREBASE_PROJECT_ID, FIREBASE_CLIENT_EMAIL and FIREBASE_PRIVATE_KEY are all set, it is createFirebaseVerifier, which starts a firebase-admin app with that service account. Otherwise it is googleSignInNotSetUp, which makes every Google sign-in answer 503, and auth logs the warning 'Google sign-in is not set up: the FIREBASE_* settings are empty'. When AUTH_DEV_LOGIN is on, it also logs the warning 'dev sign-in is on: anyone who can reach auth can sign in with just an email'. No token is checked yet: that happens only when a sign-in comes in. Then createApp (in auth's app.ts) gets the logger, the readiness checks, the gateway's public key (imported in the same call with importInternalPublicKey), the Redis client, the Google sign-in check, devLogin (from AUTH_DEV_LOGIN) and secureCookie (on when NODE_ENV is production). It calls createService with the name 'auth', the logger, the checks, `internalAuth: { publicKey, audience: 'auth' }` and routes that add sessionRouter and meRouter. So auth serves POST /sessions, POST /sessions/dev (only with devLogin), DELETE /sessions/current, GET and PATCH /me and GET /internal/users/:id, all behind the internal-token check. The checks are only stored here. They run on each GET /readyz: pingMongo checks that the connection is open and pings the server, and pingRedis sends PING. Agent passes the same two checks, chat and billing pass only mongo, and all three pass their imported public key the same way, but no routes. The gateway passes only redis, plus its Redis client, its imported private key, the four service URLs, the frontend origins and the proxy hops (see its createApp).",
+      why: 'The health code and the token check stay shared. Each app only says which dependencies it has, and auth adds its own routes. Outside production the Firebase settings are optional, so auth starts without them and dev sign-in still works; the warnings make a missing Google sign-in, or an open dev sign-in, show in the startup logs.',
+      sideEffects: [
+        'Logs a warn line when the Firebase settings are empty, and another when AUTH_DEV_LOGIN is on.',
+      ],
+      next: [
+        { to: 'create-service', kind: 'next' },
+        { to: 'key-unreadable', kind: 'error', label: 'the public key cannot be read' },
+      ],
+    },
+    {
+      id: 'key-unreadable',
+      title: 'Unreadable key: exit code 1',
+      kind: 'error',
+      status: 'verified',
+      symbol: 'backend/services/auth/src/index.ts#app',
+      highlight: 'internalPublicKey: await importInternalPublicKey(env.INTERNAL_PUBLIC_KEY),',
+      what: 'The settings check only makes sure INTERNAL_PUBLIC_KEY starts with -----BEGIN PUBLIC KEY-----. importInternalPublicKey then imports it for EdDSA with jose. If the text is not a key it can import, it rejects. The rejection comes out of the top-level await in index.ts, and nothing catches it. Node prints the error to stderr (not through the logger) and exits with code 1. MongoDB had already connected and the Redis client was made; the process ends anyway, before any port is opened. Chat, agent and billing have the same step. The gateway imports its private key the same way with importInternalPrivateKey, but its settings check has already made sure that key parses as Ed25519.',
+      why: 'Without the key a service cannot check internal tokens, so it stops instead of serving its routes.',
+      sideEffects: ['The process exits with code 1.'],
+      next: [],
     },
     {
       id: 'create-service',
@@ -136,7 +155,7 @@ const appStartup: Flow = {
       status: 'verified',
       symbol: 'backend/shared/src/service.ts#createService',
       highlight: 'routes?.(app);',
-      what: "createService makes an Express app and adds the shared middleware in a fixed order: request ID, request logging (pino-http), security headers (helmet), JSON body parsing (up to 64kb, only when parseJson is true, the default), GET /healthz and GET /readyz, the internal-token check (only with the internalAuth option), the app's own routes, the 404 handler, and last the error handler. No app passes routes, internalAuth or parseJson: false yet (each app's app.ts says: 'No routes of its own yet: createService already serves /healthz and /readyz.'), so today every app answers only the two health endpoints and a 404 for everything else.",
+      what: "createService makes an Express app and adds the shared middleware in a fixed order: request ID, request logging (pino-http), security headers (helmet), JSON body parsing (up to 64kb, only when parseJson is true, the default), GET /healthz and GET /readyz, the internal-token check (only with the internalAuth option), the app's own routes, the 404 handler, and last the error handler. Auth passes routes and internalAuth: a request without a valid internal token addressed to auth gets 401 on any path except /healthz and /readyz, and one with a token reaches auth's routes, or a 404. Chat, agent and billing pass internalAuth but no routes (each app.ts says it has no routes of its own yet, but is locked already), so a request with a valid token gets a 404 and one without gets 401. The gateway passes parseJson: false and its /api router as its routes, and no internalAuth.",
       why: 'Every app gets the same request IDs, logging, limits and error format, in the same order.',
       output: 'An Express app, not listening yet.',
     },

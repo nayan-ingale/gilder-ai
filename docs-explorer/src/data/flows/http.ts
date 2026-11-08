@@ -2,7 +2,7 @@ import type { Flow, FlowStep } from '../schema.ts';
 
 /**
  * The HTTP flows every backend app gets from createService: the two health endpoints and the
- * 404 for unknown routes. None of the apps has its own routes yet, so these are all of them.
+ * 404 for unknown routes. The flows of auth's routes through the gateway are in auth-routes.ts.
  */
 
 const APPS = ['gateway', 'auth', 'chat', 'agent', 'billing'];
@@ -298,7 +298,7 @@ const unknownRoute: Flow = {
   category: 'errors',
   apps: APPS,
   summary:
-    'A request that no route matches goes through the shared middleware and the health router, reaches notFoundHandler, and errorHandler turns it into a 404 problem+json reply. The request logger writes it at warn. pino-http skips only health probes (GET or HEAD on /healthz and /readyz), so POST /healthz gets a 404 and a warn line too. No app has its own routes yet, so today every request except GET/HEAD/OPTIONS on /healthz and /readyz ends here, unless its JSON body is rejected first.',
+    'A request that no route matches goes through the shared middleware and the health router, reaches notFoundHandler, and errorHandler turns it into a 404 problem+json reply. The request logger writes it at warn. pino-http skips only health probes (GET or HEAD on /healthz and /readyz), so POST /healthz gets a 404 and a warn line too (on a service, a 401 without an internal token). Auth, chat, agent and billing turn on the internal-token check, so there only a request with a valid internal token reaches the 404; without one it gets 401 first. In the gateway, every path that is not in its route table ends here, after the per-IP rate limit has counted it.',
   status: 'verified',
   steps: [
     {
@@ -306,7 +306,7 @@ const unknownRoute: Flow = {
       title: 'A request for a path no app handles',
       kind: 'trigger',
       status: 'verified',
-      what: 'Any request whose method and path match no route, for example GET /nothing-here, the path the tests use. No app registers its own routes yet, so in all five apps every request except GET/HEAD/OPTIONS on /healthz and /readyz ends here, unless its JSON body is rejected first. HEAD on those two paths is served by the GET routes, and OPTIONS gets an automatic 200 reply with an Allow header from the router. A JSON body that fails to parse, is too big, or uses an unsupported charset or Content-Encoding goes straight to errorHandler as a 400, 413 or 415, before routing.',
+      what: "Any request whose method and path match no route, for example GET /nothing-here, the path the tests use. Chat, agent and billing register no routes of their own, so there every request with a valid internal token ends here. On auth, a request needs a valid internal token to get this far, and then any path outside auth's routes ends here; auth's and chat's app.test.ts send GET /nothing-here with a token and get this 404. In the gateway, any method and path not in its route table ends here, such as /api/internal/users/1 (gateway app.test.ts, SEC-01). HEAD on those two paths is served by the GET routes, and OPTIONS gets an automatic 200 reply with an Allow header from the router. In the services, a JSON body that fails to parse, is too big, or uses an unsupported charset or Content-Encoding goes straight to errorHandler as a 400, 413 or 415, before routing. The gateway reads no body for a path it does not forward.",
       why: "Callers reach unknown paths through typos, old links or routes that are not built yet. They should get a clear, structured error instead of Express's default HTML page.",
       input: 'Any method and path with no route, maybe with a body.',
     },
@@ -318,7 +318,7 @@ const unknownRoute: Flow = {
       status: 'verified',
       symbol: 'backend/shared/src/service.ts#createService',
       highlight: 'autoLogging: { ignore: isHealthProbe },',
-      what: 'pino-http gives the request req.id (copied from the X-Request-Id header) and req.log. It skips only health probes: a GET or HEAD on /healthz or /readyz, with or without a query string (isHealthProbe). For every other request, including POST /healthz, which gets this same 404, it waits for the response to finish, then logs it.',
+      what: 'pino-http gives the request req.id (copied from the X-Request-Id header) and req.log. It skips only health probes: a GET or HEAD on /healthz or /readyz, with or without a query string (isHealthProbe). For every other request, including POST /healthz, which gets this same 404 (on a service, only with a valid internal token), it waits for the response to finish, then logs it.',
       why: 'One line per request, written once the response is done, records the status and how long it took.',
     },
     securityHeadersStep,
@@ -329,7 +329,7 @@ const unknownRoute: Flow = {
       status: 'verified',
       symbol: 'backend/shared/src/service.ts#createService',
       highlight: 'app.use(express.json({ limit: bodyLimit }));',
-      what: 'express.json only reads a body when there is one and its Content-Type is JSON; anything else passes straight on. createService adds it only when parseJson is true, the default, and no app turns it off. The limit is 64kb, because no app sets bodyLimit. If a JSON body is broken or too big, the parser fails here, before routing, so the caller gets 400 or 413 from errorHandler instead of 404. A JSON body with an unsupported charset (for example charset=latin1) or an unknown Content-Encoding fails here too: toAppError turns it into a 415 unsupported_media_type, with a fixed message that never repeats the header. Like any 4xx, errorHandler does not log it, and pino-http logs the request at warn.',
+      what: 'express.json only reads a body when there is one and its Content-Type is JSON; anything else passes straight on. createService adds it only when parseJson is true, the default; the gateway turns it off, so there no body is parsed and the request goes on to the health router as it is. The limit is 64kb, because no app sets bodyLimit. If a JSON body is broken or too big, the parser fails here, before routing, so the caller gets 400 or 413 from errorHandler instead of 404. A JSON body with an unsupported charset (for example charset=latin1) or an unknown Content-Encoding fails here too: toAppError turns it into a 415 unsupported_media_type, with a fixed message that never repeats the header. Like any 4xx, errorHandler does not log it, and pino-http logs the request at warn.',
       why: 'It runs before every route so handlers get req.body ready to use.',
     },
     {
@@ -339,17 +339,17 @@ const unknownRoute: Flow = {
       status: 'verified',
       symbol: 'backend/shared/src/service.ts#createService',
       highlight: 'app.use(healthRouter(name, readinessChecks, logger));',
-      what: 'The health router only has GET /healthz and GET /readyz. It also answers HEAD (through the GET routes) and OPTIONS on those two paths. Any other request falls through to the next middleware. With the internalAuth option, createService would put requireInternalToken next, and a request without a valid internal token would get 401 there, before routing, so an unknown path would get 401 and not 404 (a JSON body the parser rejects is answered before that, since the body parser comes first). No app passes internalAuth yet, so the request goes straight on to the routes.',
+      what: 'The health router only has GET /healthz and GET /readyz. It also answers HEAD (through the GET routes) and OPTIONS on those two paths. Any other request falls through to the next middleware. With the internalAuth option, createService puts requireInternalToken next, and a request without a valid internal token gets 401 there, before routing, so an unknown path gets 401 and not 404 (a JSON body the parser rejects is answered before that, since the body parser comes first). Auth, chat, agent and billing pass internalAuth, so there only a request with a valid token goes on; the gateway has no token check, and the request goes straight on to its routes.',
       why: 'The health routes are shared by every app, so they come before the app routes.',
     },
     {
       id: 'app-routes',
-      title: "The app's own routes (none yet)",
+      title: "The app's own routes (no match)",
       kind: 'middleware',
       status: 'verified',
       symbol: 'backend/shared/src/service.ts#createService',
       highlight: 'routes?.(app);',
-      what: "This is where createService lets an app add its routes. Today no app passes a routes function: each app's createApp (in its app.ts) only passes its name, logger and readiness checks, with the comment 'No routes of its own yet: createService already serves /healthz and /readyz.' So nothing can match.",
+      what: "This is where createService lets an app add its routes. Auth passes sessionRouter (POST /sessions, POST /sessions/dev when dev sign-in is on, DELETE /sessions/current) and meRouter (GET and PATCH /me, GET /internal/users/:id); a request for any other method and path passes through them. The gateway passes its /api router: ipRateLimit counts the request (and answers 429 over the limit), then matchRoute finds no entry in the route table and next('router') leaves the router. Chat, agent and billing pass no routes (each app.ts says it has no routes of its own yet, but is locked already), so in those apps nothing can match.",
       why: 'Adding app routes at this point puts them after the shared middleware and before the 404 and error handlers. Every route then gets request IDs, logging, security headers and the shared error format.',
     },
     {

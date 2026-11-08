@@ -116,6 +116,7 @@ describe('filterTree', () => {
 
   it('needs every word to match, in the file path or the symbol', () => {
     expect(shown(filterTree(tree, 'gateway redis'))).toEqual({
+      'backend/gateway/src/guards.ts': ['sessionLookup', 'ipRateLimit', 'userRateLimit'],
       'backend/gateway/src/index.ts': ['redis'],
     });
   });

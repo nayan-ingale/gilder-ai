@@ -98,11 +98,19 @@ export const deploymentPage: DocPage = {
         },
         {
           kind: 'text',
-          text: "`pnpm setup:keys` then writes the key pair for internal tokens into those files: the gateway's private key as `INTERNAL_PRIVATE_KEY`, and the matching public key as `INTERNAL_PUBLIC_KEY` for each service. Key values are never printed. Run again, it keeps the gateway's key and only fixes a service whose public key is missing or does not match; `pnpm setup:keys --rotate` makes a new pair for all of them. It stops if an env file is missing, so `pnpm setup:env` comes first. Auth refuses to start without its public key; the other apps do not read their key yet.",
+          text: "`pnpm setup:keys` then writes the key pair for internal tokens into those files: the gateway's private key as `INTERNAL_PRIVATE_KEY`, and the matching public key as `INTERNAL_PUBLIC_KEY` for each service. Key values are never printed. Run again, it keeps the gateway's key and only fixes a service whose public key is missing or does not match; `pnpm setup:keys --rotate` makes a new pair for all of them. It stops if an env file is missing, so `pnpm setup:env` comes first. Auth, chat, agent and billing refuse to start without the public key and import it at startup for their internal-token check; the gateway refuses to start unless its private key parses as an Ed25519 key.",
         },
         {
           kind: 'text',
           text: "Each backend app loads its `.env` with Node's `--env-file-if-exists` flag, then checks every variable with `loadEnv` before anything else runs. A missing or invalid value stops the app with a list of every problem.",
+        },
+        {
+          kind: 'text',
+          text: "The gateway's own settings: `FRONTEND_ORIGIN` lists the frontend origins that may send requests that change something, one or several separated by commas, each just an origin such as `http://localhost:3000`. `AUTH_SERVICE_URL`, `CHAT_SERVICE_URL`, `AGENT_SERVICE_URL` and `BILLING_SERVICE_URL` say where each service listens; trailing slashes are dropped. `INTERNAL_PRIVATE_KEY` signs the internal tokens. `TRUST_PROXY_HOPS`, a whole number from 0 to 5 and 1 when not set, says how many proxies in front of the gateway to trust for the client's IP address, which the per-IP rate limit counts; its `.env.example` sets 1, for the Next.js server meant to sit in front of it, and more is needed behind a load balancer.",
+        },
+        {
+          kind: 'text',
+          text: "Auth's `.env.example` leaves the three Firebase settings empty and `AUTH_DEV_LOGIN` false. With the Firebase settings empty, auth still starts, logs the warning 'Google sign-in is not set up: the FIREBASE_* settings are empty', and answers Google sign-ins with 503. Setting `AUTH_DEV_LOGIN=true` turns on sign-in with just an email, and auth logs a warning about it at startup.",
         },
         {
           kind: 'quote',
@@ -114,6 +122,8 @@ export const deploymentPage: DocPage = {
         { file: 'package.json' },
         { file: '.gitignore' },
         { file: 'backend/shared/scripts/setup-keys.ts' },
+        { symbol: 'backend/gateway/src/env-schema.ts#gatewayEnvSchema' },
+        { component: 'auth' },
         { symbol: 'backend/shared/src/env.ts#loadEnv' },
         { flow: 'app-startup' },
       ],
@@ -152,7 +162,7 @@ export const deploymentPage: DocPage = {
       blocks: [
         {
           kind: 'text',
-          text: "Every backend app answers `GET /healthz` (the process is up) and `GET /readyz` (its data stores answer, or 503 if one does not). On SIGTERM or SIGINT it stops taking new connections, waits up to 10 seconds for requests in progress, closes its database connections and exits; if the cleanup hangs, it exits with code 1 after 15 seconds. Under `pnpm dev` one Ctrl+C reaches each backend app twice: from the terminal, and again from `node --watch`, which passes it on. The app logs the second as 'already shutting down' and finishes its cleanup. Nothing calls the health endpoints automatically yet: the Docker health checks cover only the data stores.",
+          text: "Every backend app answers `GET /healthz` (the process is up) and `GET /readyz` (its data stores answer, or 503 if one does not), without an internal token, even on the services, which need one for every other path. The gateway answers them before its rate limits, so probes are never limited. On SIGTERM or SIGINT it stops taking new connections, waits up to 10 seconds for requests in progress, closes its database connections and exits; if the cleanup hangs, it exits with code 1 after 15 seconds. Under `pnpm dev` one Ctrl+C reaches each backend app twice: from the terminal, and again from `node --watch`, which passes it on. The app logs the second as 'already shutting down' and finishes its cleanup. Nothing calls the health endpoints automatically yet: the Docker health checks cover only the data stores.",
         },
       ],
       refs: [

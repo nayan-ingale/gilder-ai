@@ -3,9 +3,11 @@ import type { ArchComponent, ArchLink } from './schema.ts';
 /**
  * The system map: every app, data store and outside service, and how they connect.
  *
- * Today only the skeleton is built: five backend apps that answer health checks, a starter
- * frontend page, and local MongoDB, Redis and Qdrant in Docker. Everything else is marked
- * `planned`, with the roadmap feature that adds it.
+ * Built today: the gateway, which checks each /api request and forwards the sign-in, logout and
+ * profile routes to auth; auth, which serves them; chat, agent and billing, locked behind the
+ * internal-token check but with no routes yet; a starter frontend page; and local MongoDB, Redis
+ * and Qdrant in Docker. Everything else is marked `planned`, with the roadmap feature that adds
+ * it.
  *
  * Link kinds used here: `http` for HTTP calls between programs, `internal` for an app importing
  * the shared library (same process, no network), `data` for a connection to a data store, and
@@ -49,16 +51,26 @@ export const components: ArchComponent[] = [
     kind: 'app',
     status: 'verified',
     summary:
-      'Planned to be the one public door into the backend: it will check sessions and rate limits, then forward each call to a service with a short-lived signed internal token (from Sign-in and sessions). Today it only serves the shared health checks, and it is not the only way in: every service listens on all network interfaces and none checks an internal token, so each one can be reached directly.',
+      'The one public entry to the backend. Each /api request goes through its checks (rate limits, the route allowlist, the origin check and the session lookup) and is then forwarded to its service with a fresh signed internal token. Its route table lists only the auth routes so far. The services also listen on their own ports, but each one answers 401 to anything without a valid token except its health checks.',
     responsibilities: [
-      'Builds its Express app with createService: the shared middleware plus GET /healthz and GET /readyz. It has no routes of its own yet.',
+      "Builds its Express app with createService, with parseJson: false and its /api router as its routes, after the shared middleware and GET /healthz and GET /readyz. Express's trust proxy is set to TRUST_PROXY_HOPS, so req.ip is the client's address.",
+      'Limits each IP address to 120 requests a minute (ipRateLimit), for every request that reaches the router, and each signed-in user to 60 (userRateLimit). Over the limit is a 429 with Retry-After.',
+      "Forwards only what its route table (PUBLIC_ROUTES) lists: POST /api/auth/session, POST /api/auth/dev-session, DELETE /api/auth/session, and GET and PATCH /api/me, all to auth. Anything else gets the gateway's own 404 and never reaches a service.",
+      'Refuses a request that changes something (any method but GET, HEAD and OPTIONS) unless its Origin is one of FRONTEND_ORIGIN, with 403 (originCheck).',
+      'Looks the session cookie up in Redis on every matched request, which renews it (sessionLookup), and answers 401 itself for a route that needs a session when there is none (requireSession).',
+      'Forwards the request (proxyToService) with fetch: raw body up to 1 MB, a few allowed headers, the cookie only to auth, X-Request-Id, and an internal token signed for that service that names the user. It passes back the status, a few headers, every Set-Cookie and the streamed body. A service that is down or does not start answering within 10 seconds gives 503.',
+      'Checks its settings at startup (rules in env-schema.ts) and refuses to start if one is missing or invalid: REDIS_URL, FRONTEND_ORIGIN (one origin or a comma-separated list), the four service URLs and INTERNAL_PRIVATE_KEY, which must parse as an Ed25519 private key. PORT, NODE_ENV, LOG_LEVEL and TRUST_PROXY_HOPS (1) have defaults.',
       'Opens a Redis client at startup. /readyz says ready only when Redis answers PING.',
-      'Checks its settings at startup and refuses to start if a required variable (REDIS_URL) is missing, or if any value is invalid. PORT, NODE_ENV and LOG_LEVEL have defaults. Its .env.example also lists FRONTEND_ORIGIN, the four service URLs and INTERNAL_PRIVATE_KEY (written by pnpm setup:keys) for later features, but env.ts does not read them yet.',
       'On SIGTERM or SIGINT, finishes in-flight requests and then closes the Redis client.',
     ],
     path: 'backend/gateway',
     port: 8000,
-    entryPoints: ['backend/gateway/src/index.ts#(module)', 'backend/gateway/src/app.ts#createApp'],
+    entryPoints: [
+      'backend/gateway/src/index.ts#(module)',
+      'backend/gateway/src/app.ts#createApp',
+      'backend/gateway/src/route-table.ts#PUBLIC_ROUTES',
+      'backend/gateway/src/proxy.ts#proxyToService',
+    ],
   },
   {
     id: 'auth',
@@ -66,17 +78,20 @@ export const components: ArchComponent[] = [
     kind: 'app',
     status: 'verified',
     summary:
-      'Will handle sign-in. Today it only answers health checks. Its users model and its Google sign-in token check are built and tested, but no route uses them yet.',
+      "Handles sign-in, logout and the user's profile. Its session and /me routes sit behind the internal-token check, so a direct call to any path except the health checks gets 401. The gateway forwards the public sign-in, logout and /me routes to it, each with a token it signs.",
     responsibilities: [
-      'Builds its Express app with createService: the shared middleware plus GET /healthz and GET /readyz. It has no routes of its own yet.',
+      'Builds its Express app with createService: the shared middleware, GET /healthz and GET /readyz, then the internal-token check (the internalAuth option, audience auth) in front of its own routes. A call without a valid token gets 401 on any path except the health checks; an unknown path with a valid token gets 404.',
       'Connects to MongoDB at startup and does not start serving until the connection works.',
       'Opens a Redis client at startup. /readyz says ready only when both MongoDB and Redis answer.',
-      'Defines the users collection (UserModel, with a unique Firebase ID and a unique lowercase email) and toProfile, the public shape of a user. No route uses them yet.',
-      'Has the Google sign-in token check (firebase.ts): the Firebase Admin SDK checks an ID token, including whether it was revoked. A bad token gives 401, and a server-side failure stays a 500. Without the Firebase settings, Google sign-in answers 503. No route uses it yet.',
-      'Has the sign-in routes (sessionRouter): POST /sessions for Google, POST /sessions/dev only when AUTH_DEV_LOGIN is on, and DELETE /sessions/current for logout. They create the session in Redis and set or clear the gilder_sid cookie. createApp does not add them yet.',
-      "Has the profile routes (meRouter): GET /me, PATCH /me to change the theme, and GET /internal/users/:id, which returns only the token's own user. createApp does not add them yet.",
-      'Checks its settings at startup (rules in env-schema.ts) and refuses to start if a required variable (MONGODB_URI, REDIS_URL, INTERNAL_PUBLIC_KEY) is missing, or if any value is invalid. INTERNAL_PUBLIC_KEY must start with -----BEGIN PUBLIC KEY-----, and nothing parses the key yet; the message says to run pnpm setup:keys and never repeats the value. PORT, NODE_ENV, LOG_LEVEL and AUTH_DEV_LOGIN (false) have defaults.',
-      'In production it also refuses AUTH_DEV_LOGIN=true and requires FIREBASE_PROJECT_ID, FIREBASE_CLIENT_EMAIL and FIREBASE_PRIVATE_KEY; elsewhere the three are optional, but all three or none. Nothing uses the key, the dev sign-in flag or the Firebase settings yet.',
+      'Imports INTERNAL_PUBLIC_KEY with importInternalPublicKey at startup. A key it cannot read stops startup with exit code 1.',
+      "Is reached through the gateway's route table: POST /api/auth/session → POST /sessions, POST /api/auth/dev-session → POST /sessions/dev, DELETE /api/auth/session → DELETE /sessions/current, GET and PATCH /api/me → /me. GET /internal/users/:id has no public route.",
+      'Serves the sign-in routes (sessionRouter): POST /sessions for Google, POST /sessions/dev only when AUTH_DEV_LOGIN is on (otherwise the path is a 404), and DELETE /sessions/current for logout. They create or delete the session in Redis and set or clear the gilder_sid cookie, marked Secure when NODE_ENV is production.',
+      "Serves the profile routes (meRouter): GET /me, PATCH /me to change the theme, and GET /internal/users/:id, which returns only the token's own user.",
+      'Keeps users in MongoDB (UserModel, with a unique Firebase ID and a unique lowercase email); toProfile is the public shape of a user.',
+      "Checks Google sign-in tokens with the Firebase Admin SDK (createFirebaseVerifier) when all three FIREBASE_* settings are set, including whether a token was revoked. A bad token gives 401, and a server-side failure stays a 500. Without the settings it uses googleSignInNotSetUp, so Google sign-in answers 503, and startup logs the warning 'Google sign-in is not set up: the FIREBASE_* settings are empty'.",
+      "With AUTH_DEV_LOGIN on, startup logs the warning 'dev sign-in is on: anyone who can reach auth can sign in with just an email'.",
+      'Checks its settings at startup (rules in env-schema.ts) and refuses to start if a required variable (MONGODB_URI, REDIS_URL, INTERNAL_PUBLIC_KEY) is missing, or if any value is invalid. INTERNAL_PUBLIC_KEY (the shared internalPublicKeySchema; escaped \\n line breaks are fine) must start with -----BEGIN PUBLIC KEY-----; the message says to run pnpm setup:keys and never repeats the value. PORT, NODE_ENV, LOG_LEVEL and AUTH_DEV_LOGIN (false) have defaults.',
+      'In production it also refuses AUTH_DEV_LOGIN=true and requires FIREBASE_PROJECT_ID, FIREBASE_CLIENT_EMAIL and FIREBASE_PRIVATE_KEY; elsewhere the three are optional, but all three or none.',
       'On SIGTERM or SIGINT, finishes in-flight requests, then disconnects MongoDB and closes Redis.',
     ],
     path: 'backend/services/auth',
@@ -92,11 +107,12 @@ export const components: ArchComponent[] = [
     kind: 'app',
     status: 'verified',
     summary:
-      'Will own chats and their messages. Today it only answers health checks. Planned: its chat routes, reached through the gateway (Chats).',
+      'Will own chats and their messages. Today it answers health checks, and 401 to anything else without a valid internal token. Planned: its chat routes, reached through the gateway (Chats).',
     responsibilities: [
-      'Builds its Express app with createService: the shared middleware plus GET /healthz and GET /readyz. It has no routes of its own yet.',
+      'Builds its Express app with createService: the shared middleware, GET /healthz and GET /readyz, then the internal-token check (audience chat). It has no routes of its own yet, so a request with a valid token gets 404.',
       'Connects to MongoDB at startup and does not start serving until the connection works. /readyz pings it.',
-      'Checks its settings at startup and refuses to start if a required variable (MONGODB_URI) is missing, or if any value is invalid. PORT, NODE_ENV and LOG_LEVEL have defaults. Its .env.example also lists INTERNAL_PUBLIC_KEY, which pnpm setup:keys writes, but env.ts does not read it yet.',
+      'Imports INTERNAL_PUBLIC_KEY with importInternalPublicKey at startup. A key it cannot read stops startup with exit code 1.',
+      'Checks its settings at startup and refuses to start if a required variable (MONGODB_URI, INTERNAL_PUBLIC_KEY) is missing, or if any value is invalid. PORT, NODE_ENV and LOG_LEVEL have defaults.',
       'On SIGTERM or SIGINT, finishes in-flight requests and then disconnects MongoDB.',
     ],
     path: 'backend/services/chat',
@@ -112,12 +128,13 @@ export const components: ArchComponent[] = [
     kind: 'app',
     status: 'verified',
     summary:
-      'Will run the AI agents. Today it only answers health checks. Planned: LLM calls through Groq, OpenRouter and Gemini (AI answers), web search with Tavily (Web search and code), files in S3 and vectors in Qdrant (PDF and image Q&A), and images from Pollinations (File generation).',
+      'Will run the AI agents. Today it answers health checks, and 401 to anything else without a valid internal token. Planned: LLM calls through Groq, OpenRouter and Gemini (AI answers), web search with Tavily (Web search and code), files in S3 and vectors in Qdrant (PDF and image Q&A), and images from Pollinations (File generation).',
     responsibilities: [
-      'Builds its Express app with createService: the shared middleware plus GET /healthz and GET /readyz. It has no routes of its own yet.',
+      'Builds its Express app with createService: the shared middleware, GET /healthz and GET /readyz, then the internal-token check (audience agent). It has no routes of its own yet, so a request with a valid token gets 404.',
       'Connects to MongoDB at startup and does not start serving until the connection works.',
       'Opens a Redis client at startup. /readyz says ready only when both MongoDB and Redis answer.',
-      'Checks its settings at startup and refuses to start if a required variable (MONGODB_URI, REDIS_URL) is missing, or if any value is invalid. PORT, NODE_ENV and LOG_LEVEL have defaults. Its .env.example also lists QDRANT_URL, CHAT_SERVICE_URL, BILLING_SERVICE_URL, INTERNAL_PUBLIC_KEY, the AI provider keys (GROQ_API_KEY, OPENROUTER_API_KEY, GEMINI_API_KEY, TAVILY_API_KEY) and the S3 settings (AWS_REGION, S3_BUCKET, AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY) for later features, but env.ts does not read them yet.',
+      'Imports INTERNAL_PUBLIC_KEY with importInternalPublicKey at startup. A key it cannot read stops startup with exit code 1.',
+      'Checks its settings at startup and refuses to start if a required variable (MONGODB_URI, REDIS_URL, INTERNAL_PUBLIC_KEY) is missing, or if any value is invalid. PORT, NODE_ENV and LOG_LEVEL have defaults. Its .env.example also lists QDRANT_URL, CHAT_SERVICE_URL, BILLING_SERVICE_URL, the AI provider keys (GROQ_API_KEY, OPENROUTER_API_KEY, GEMINI_API_KEY, TAVILY_API_KEY) and the S3 settings (AWS_REGION, S3_BUCKET, AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY) for later features, but env.ts does not read them yet.',
       'On SIGTERM or SIGINT, finishes in-flight requests, then disconnects MongoDB and closes Redis.',
     ],
     path: 'backend/services/agent',
@@ -133,11 +150,12 @@ export const components: ArchComponent[] = [
     kind: 'app',
     status: 'verified',
     summary:
-      'Will own credits and payments. Today it only answers health checks. Planned: its routes (Credits), with credits kept in a ledger, and Razorpay payments (Payments and usage).',
+      'Will own credits and payments. Today it answers health checks, and 401 to anything else without a valid internal token. Planned: its routes (Credits), with credits kept in a ledger, and Razorpay payments (Payments and usage).',
     responsibilities: [
-      'Builds its Express app with createService: the shared middleware plus GET /healthz and GET /readyz. It has no routes of its own yet.',
+      'Builds its Express app with createService: the shared middleware, GET /healthz and GET /readyz, then the internal-token check (audience billing). It has no routes of its own yet, so a request with a valid token gets 404.',
       'Connects to MongoDB at startup and does not start serving until the connection works. /readyz pings it.',
-      'Checks its settings at startup and refuses to start if a required variable (MONGODB_URI) is missing, or if any value is invalid. PORT, NODE_ENV and LOG_LEVEL have defaults. Its .env.example also lists INTERNAL_PUBLIC_KEY, which pnpm setup:keys writes, and the Razorpay settings (RAZORPAY_KEY_ID, RAZORPAY_KEY_SECRET, RAZORPAY_WEBHOOK_SECRET) for later features, but env.ts does not read them yet.',
+      'Imports INTERNAL_PUBLIC_KEY with importInternalPublicKey at startup. A key it cannot read stops startup with exit code 1.',
+      'Checks its settings at startup and refuses to start if a required variable (MONGODB_URI, INTERNAL_PUBLIC_KEY) is missing, or if any value is invalid. PORT, NODE_ENV and LOG_LEVEL have defaults. Its .env.example also lists the Razorpay settings (RAZORPAY_KEY_ID, RAZORPAY_KEY_SECRET, RAZORPAY_WEBHOOK_SECRET) for later features, but env.ts does not read them yet.',
       'On SIGTERM or SIGINT, finishes in-flight requests and then disconnects MongoDB.',
     ],
     path: 'backend/services/billing',
@@ -161,7 +179,10 @@ export const components: ArchComponent[] = [
       'createLogger makes a pino logger that hides secrets such as tokens, cookies and passwords.',
       'connectMongo, pingMongo, createRedis and pingRedis open the database connections and provide the checks behind /readyz.',
       "Its setup:keys script (pnpm setup:keys) writes the gateway's private key and each service's matching public key into their .env files, without printing them.",
-      "Built and tested, but not used by any app yet: the internal-token helpers (signInternalToken, requireInternalToken, requireUser), sessions (createSession, resolveSession, deleteSession), rate limits (hitRateLimit, rateLimit), createService's internalAuth option and parseJson: false, the validate request middleware, and shared constants such as agents, credit costs, rate limits and plans.",
+      "Internal tokens: the gateway imports its private key and signs a token for each forwarded request (importInternalPrivateKey, signInternalToken); auth, chat, agent and billing import the public key (internalPublicKeySchema, importInternalPublicKey) and check every token (createService's internalAuth option, requireInternalToken). Auth's user routes add requireUser.",
+      'Sessions: auth creates and deletes them (createSession, deleteSession); the gateway looks them up on each request (sessionIdFromCookies, resolveSession).',
+      "Rate limits: the gateway's per-IP and per-user limits (rateLimit, hitRateLimit, GATEWAY_RATE_LIMITS). The validate request middleware checks auth's request bodies and params.",
+      'Built and tested, but not used by any app yet: shared constants such as agents, credit costs, per-agent rate limits and plans.',
       'createTestRedis gives each test a client on a real Redis (database 15) with its own random key prefix, and deletes its keys afterwards.',
     ],
     path: 'backend/shared',
@@ -185,7 +206,7 @@ export const components: ArchComponent[] = [
       'Listens on host port 27018, not the usual 27017, so it does not clash with other local projects. Data lives in the mongo-data volume.',
       'The Docker health check creates the rs0 replica set on the first run.',
       'auth, chat, agent and billing connect at startup. Each .env.example points the app at its own database: gilder_auth, gilder_chat, gilder_agent and gilder_billing.',
-      'Auth defines a users model (unique Firebase ID and email), but no route reads or writes it yet, so nothing is stored.',
+      'Auth keeps its users here (a unique Firebase ID and email each): its sign-in routes create or update them, and the /me routes read and save them.',
     ],
     port: 27018,
     entryPoints: ['backend/shared/src/mongo.ts#connectMongo'],
@@ -196,12 +217,12 @@ export const components: ArchComponent[] = [
     kind: 'datastore',
     status: 'verified',
     summary:
-      'A fast key-value store, run locally in Docker (redis:7-alpine). Set up so keys are never dropped silently, because sessions will live here.',
+      'A fast key-value store, run locally in Docker (redis:7-alpine). Set up so keys are never dropped silently, because sessions live here.',
     responsibilities: [
       'Listens on host port 6380, not the usual 6379. It saves to disk (append-only file) in the redis-data volume.',
       'Sets the noeviction policy, so if a memory limit is added later, Redis will refuse new writes instead of quietly deleting keys. No memory limit (--maxmemory) is set today, so the policy does not come into play yet.',
-      'gateway, auth and agent open a client at startup and send PING for /readyz. No app reads or writes keys yet.',
-      'The shared library stores sessions as sess:<SHA-256 of the session ID>, with a 7-day expiry that each lookup renews, and rate-limit counters as rl:<scope>:<id>, whose expiry is set with the count in one MULTI. No app calls this code yet.',
+      'gateway, auth and agent open a client at startup and send PING for /readyz. Agent reads and writes no keys yet.',
+      "The shared library stores sessions as sess:<SHA-256 of the session ID>, with a 7-day expiry that each lookup renews, and rate-limit counters as rl:<scope>:<id>, whose expiry is set with the count in one MULTI. Auth's sign-in creates sessions and its logout deletes them; the gateway looks a session up on each request and counts requests per IP (rl:ip:...) and per user (rl:user:...).",
       'Tests run against a real Redis on port 6380, using database 15: the local container, or a Redis service in CI.',
     ],
     port: 6380,
@@ -232,7 +253,7 @@ export const components: ArchComponent[] = [
   },
 
   // -------------------------------------------------------------------------------------------
-  // Outside services (none is called by the code yet)
+  // Outside services (only Firebase, from auth, is called by the code today)
 
   {
     id: 'llm-providers',
@@ -275,9 +296,9 @@ export const components: ArchComponent[] = [
     id: 'firebase',
     name: 'Firebase Authentication',
     kind: 'external',
-    status: 'not-wired',
+    status: 'verified',
     summary:
-      'Google sign-in. Auth has the code to check Google sign-in tokens with the Firebase Admin SDK, but no route uses it yet. The browser will sign in with Firebase in Sign-in page and app shell.',
+      "Google sign-in. Auth's POST /sessions checks Google sign-in tokens with the Firebase Admin SDK when its three FIREBASE_* settings are set. The gateway forwards POST /api/auth/session to that route. The browser will sign in with Firebase in Sign-in page and app shell.",
     responsibilities: [],
   },
 ];
@@ -416,26 +437,36 @@ export const links: ArchLink[] = [
     from: 'gateway',
     to: 'redis',
     kind: 'data',
-    label: 'Opens a client at startup; /readyz sends PING. No keys are read or written yet',
+    label:
+      'Opens a client at startup; /readyz sends PING. Each request is counted for the rate limits, and its session cookie is looked up (which renews the session)',
     status: 'verified',
     evidence: [
       'backend/gateway/src/index.ts#redis',
       'backend/gateway/src/index.ts#app',
       'backend/shared/src/redis.ts#createRedis',
       'backend/shared/src/redis.ts#pingRedis',
+      'backend/gateway/src/guards.ts#ipRateLimit',
+      'backend/gateway/src/guards.ts#userRateLimit',
+      'backend/gateway/src/guards.ts#sessionLookup',
+      'backend/shared/src/rateLimit.ts#hitRateLimit',
+      'backend/shared/src/sessions.ts#resolveSession',
     ],
   },
   {
     from: 'auth',
     to: 'redis',
     kind: 'data',
-    label: 'Opens a client at startup; /readyz sends PING. No keys are read or written yet',
+    label:
+      'Opens a client at startup; /readyz sends PING. Sign-in writes session keys and logout deletes them',
     status: 'verified',
     evidence: [
       'backend/services/auth/src/index.ts#redis',
       'backend/services/auth/src/index.ts#app',
       'backend/shared/src/redis.ts#createRedis',
       'backend/shared/src/redis.ts#pingRedis',
+      'backend/services/auth/src/session-routes.ts#sessionRouter',
+      'backend/shared/src/sessions.ts#createSession',
+      'backend/shared/src/sessions.ts#deleteSession',
     ],
   },
   {
@@ -449,6 +480,39 @@ export const links: ArchLink[] = [
       'backend/services/agent/src/index.ts#app',
       'backend/shared/src/redis.ts#createRedis',
       'backend/shared/src/redis.ts#pingRedis',
+    ],
+  },
+
+  // Firebase: auth checks Google sign-in tokens with the Firebase Admin SDK.
+  {
+    from: 'auth',
+    to: 'firebase',
+    kind: 'external',
+    label:
+      'Checks Google sign-in tokens with the Firebase Admin SDK, including revocation, when the FIREBASE_* settings are set',
+    status: 'verified',
+    evidence: [
+      'backend/services/auth/src/index.ts#verifyIdToken',
+      'backend/services/auth/src/firebase.ts#createFirebaseVerifier',
+      'backend/services/auth/src/firebase.ts#verifierFrom',
+      'backend/services/auth/src/session-routes.ts#sessionRouter',
+    ],
+  },
+
+  // Gateway → auth: the public sign-in, logout and /me routes, forwarded with a signed token.
+  {
+    from: 'gateway',
+    to: 'auth',
+    kind: 'http',
+    label:
+      'Sign-in, logout and /me requests from the route table, each with a fresh internal token for auth; the session cookie goes along, and Set-Cookie comes back',
+    status: 'verified',
+    evidence: [
+      'backend/gateway/src/route-table.ts#PUBLIC_ROUTES',
+      'backend/gateway/src/app.ts#createApp',
+      'backend/gateway/src/proxy.ts#proxyToService',
+      'backend/shared/src/internalToken.ts#signInternalToken',
+      'backend/gateway/src/index.ts#app',
     ],
   },
 
@@ -470,25 +534,6 @@ export const links: ArchLink[] = [
     label: 'Every /api/* call, forwarded by the Next.js server so secrets stay off the browser',
     status: 'planned',
     plannedIn: 'Sign-in page and app shell',
-  },
-  {
-    from: 'gateway',
-    to: 'auth',
-    kind: 'http',
-    label: 'Auth requests, each with a short-lived signed internal token',
-    status: 'planned',
-    plannedIn: 'Sign-in and sessions',
-  },
-  {
-    from: 'auth',
-    to: 'firebase',
-    kind: 'external',
-    label: 'Checks Google sign-in tokens with the Firebase Admin SDK, including revocation',
-    status: 'not-wired',
-    evidence: [
-      'backend/services/auth/src/firebase.ts#createFirebaseVerifier',
-      'backend/services/auth/src/firebase.ts#verifierFrom',
-    ],
   },
   {
     from: 'gateway',

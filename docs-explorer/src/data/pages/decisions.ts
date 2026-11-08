@@ -9,7 +9,7 @@ export const decisionsPage: DocPage = {
     {
       id: 'gateway-and-services',
       title: 'One gateway in front of separate services',
-      status: 'partial',
+      status: 'verified',
       blocks: [
         {
           kind: 'fields',
@@ -20,7 +20,7 @@ export const decisionsPage: DocPage = {
             },
             {
               label: 'Why',
-              text: 'Each service owns one area (sign-in, chats, AI agents, credits) and its own database, so it can change and restart on its own. Checks every request needs, such as sessions and rate limits, will live in one place: the gateway.',
+              text: 'Each service owns one area (sign-in, chats, AI agents, credits) and its own database, so it can change and restart on its own. Checks every request needs, such as sessions and rate limits, live in one place: the gateway.',
             },
             {
               label: 'Trade-off',
@@ -30,7 +30,7 @@ export const decisionsPage: DocPage = {
         },
         {
           kind: 'text',
-          text: "Built today: the five apps, each answering only its health checks. The shared library already has the pieces the gateway will use: sessions, rate limits and internal tokens. Not built yet: the gateway's routes, session checks and forwarding (Sign-in and sessions). Until then, no service turns on the internal-token check, so each one can be reached directly on its own port.",
+          text: 'Built today: the gateway checks every /api request (rate limits, its route table, the Origin and the session) and forwards the sign-in, logout and /me routes to auth with a signed internal token. Every service turns on the internal-token check, so a direct call to any service path except the health checks gets 401, even though each service listens on its own port. The route table has no routes for chat, agent or billing yet: each comes with its own feature (Chats, AI answers, Credits).',
         },
         {
           kind: 'quote',
@@ -46,6 +46,9 @@ export const decisionsPage: DocPage = {
         { component: 'agent' },
         { component: 'billing' },
         { symbol: 'backend/gateway/src/app.ts#createApp' },
+        { symbol: 'backend/gateway/src/route-table.ts#PUBLIC_ROUTES' },
+        { flow: 'read-profile' },
+        { flow: 'direct-service-call' },
       ],
     },
     {
@@ -58,11 +61,11 @@ export const decisionsPage: DocPage = {
           fields: [
             {
               label: 'Decision',
-              text: 'What the backend apps have in common lives in one library, `@gilder/shared`: settings, logging, errors, request IDs, health checks, database connections, startup and shutdown, and the internal tokens, sessions and rate limits that no app uses yet.',
+              text: 'What the backend apps have in common lives in one library, `@gilder/shared`: settings, logging, errors, request IDs, health checks, database connections, startup and shutdown, internal tokens, sessions and rate limits.',
             },
             {
               label: 'Why',
-              text: "All five apps start, log, check health and fail in the same way, and a fix in one place reaches every app. Each app's own code stays small: today it is just `env.ts`, `app.ts` and `index.ts`, plus `env-schema.ts` in auth for its settings rules.",
+              text: "All five apps start, log, check health and fail in the same way, and a fix in one place reaches every app. Each app's own code stays small: chat, agent and billing are just `env.ts`, `app.ts` and `index.ts`; auth adds its settings rules (`env-schema.ts`), its users model, its Google sign-in check and its routes; and the gateway adds its settings rules, its route table, its checks and its proxy.",
             },
             {
               label: 'Trade-off',
@@ -88,14 +91,14 @@ export const decisionsPage: DocPage = {
     {
       id: 'internal-tokens',
       title: 'Short-lived tokens between the gateway and services',
-      status: 'not-wired',
+      status: 'verified',
       blocks: [
         {
           kind: 'fields',
           fields: [
             {
               label: 'Decision',
-              text: 'For each request it forwards, the gateway will sign a token (a JWT) addressed to the target service that expires after 60 seconds. A valid token proves the request came through the gateway; its subject, when present, is the signed-in user. Requests with no session, such as a sign-in, get a token without a user. A service will accept a request only with a valid token addressed to it, and routes that act for a user also need the token to name one.',
+              text: 'For each request it forwards, the gateway signs a token (a JWT) addressed to the target service that expires after 60 seconds. A valid token proves the request came through the gateway; its subject, when present, is the signed-in user. Requests with no session, such as a sign-in, get a token without a user. A service accepts a request only with a valid token addressed to it, and routes that act for a user also need the token to name one.',
             },
             {
               label: 'Why',
@@ -109,7 +112,7 @@ export const decisionsPage: DocPage = {
         },
         {
           kind: 'text',
-          text: "`signInternalToken`, `verifyInternalToken`, `requireInternalToken` and `requireUser` are built and tested, and `createService` can put the token check in front of every route except `/healthz` and `/readyz` with its `internalAuth` option. No app uses any of them yet. Auth's settings require `INTERNAL_PUBLIC_KEY`, written by `pnpm setup:keys`, but nothing uses the key yet. The gateway is planned to start signing tokens in Sign-in and sessions.",
+          text: "Both sides are wired. The gateway imports `INTERNAL_PRIVATE_KEY` with `importInternalPrivateKey` (its settings check makes sure it is an Ed25519 key), and `proxyToService` calls `signInternalToken` for every request it forwards: the audience is the service, the subject is the user from the session, and `rid` is the request ID. Auth, chat, agent and billing import `INTERNAL_PUBLIC_KEY` with `importInternalPublicKey` and pass `createService` the `internalAuth` option, which puts `requireInternalToken` (with `verifyInternalToken`) in front of every route except `/healthz` and `/readyz`. Auth's routes that act for a user add `requireUser`. A missing, garbage, forged, misaddressed or expired token gets 401 (SEC-02).",
         },
         {
           kind: 'quote',
@@ -123,8 +126,128 @@ export const decisionsPage: DocPage = {
         { symbol: 'backend/shared/src/internalToken.ts#verifyInternalToken' },
         { symbol: 'backend/shared/src/internalToken.ts#requireInternalToken' },
         { symbol: 'backend/shared/src/internalToken.ts#requireUser' },
+        { symbol: 'backend/gateway/src/proxy.ts#proxyToService' },
+        { symbol: 'backend/services/auth/src/app.ts#createApp' },
         { file: 'backend/shared/scripts/setup-keys.ts' },
         { component: 'gateway' },
+        { component: 'auth' },
+        { flow: 'direct-service-call' },
+      ],
+    },
+    {
+      id: 'route-allowlist',
+      title: 'The gateway forwards only the routes it lists',
+      status: 'verified',
+      blocks: [
+        {
+          kind: 'fields',
+          fields: [
+            {
+              label: 'Decision',
+              text: "The gateway has a route table (`PUBLIC_ROUTES`): each public `/api` route names its service, the path to call there and whether a session is needed. A request that matches no entry gets the gateway's own 404 and never reaches a service.",
+            },
+            {
+              label: 'Why',
+              text: "Services have routes meant only for other services, such as auth's `GET /internal/users/:id`. With an allowlist, a new service route is unreachable from outside until someone adds it to the table on purpose. Route params must be 1 to 64 letters, digits, `-` or `_`, so `..` or an encoded slash cannot change the service path.",
+            },
+            {
+              label: 'Trade-off',
+              text: 'Every new public route has to be added in two places: the service and the table.',
+            },
+          ],
+        },
+        {
+          kind: 'text',
+          text: 'The table lists only the auth routes today. The gateway tests and journey.test.ts check that internal paths, such as `/api/internal/users/<id>`, get 404 without reaching a service (SEC-01).',
+        },
+        {
+          kind: 'quote',
+          file: 'backend/gateway/src/route-table.ts',
+          text: "  { method: 'GET', path: '/api/me', service: 'auth', target: '/me', session: 'required' },",
+          caption: 'One entry of PUBLIC_ROUTES',
+        },
+      ],
+      refs: [
+        { symbol: 'backend/gateway/src/route-table.ts#PUBLIC_ROUTES' },
+        { symbol: 'backend/gateway/src/route-table.ts#matchRoute' },
+        { symbol: 'backend/gateway/src/app.ts#createApp' },
+        { flow: 'unknown-route' },
+      ],
+    },
+    {
+      id: 'csrf-origin-check',
+      title: 'Requests that change something must come from the app',
+      status: 'verified',
+      blocks: [
+        {
+          kind: 'fields',
+          fields: [
+            {
+              label: 'Decision',
+              text: 'The session cookie is `SameSite=Lax`, and on top of that the gateway refuses any request other than GET, HEAD or OPTIONS unless its `Origin` header is one of the `FRONTEND_ORIGIN` origins (`originCheck`), with 403.',
+            },
+            {
+              label: 'Why',
+              text: "A cookie goes along with requests the browser sends, even ones another site starts. Browsers set `Origin` themselves and pages cannot change it, so checking it stops a form or script on another site from acting with the user's session (cross-site request forgery).",
+            },
+            {
+              label: 'Trade-off',
+              text: 'Every client that changes something must send an allowed `Origin`, including tools and tests, and each frontend address has to be listed in `FRONTEND_ORIGIN`, which takes several origins separated by commas.',
+            },
+          ],
+        },
+        {
+          kind: 'quote',
+          file: 'backend/gateway/src/guards.ts',
+          text: 'if (!origin || !allowedOrigins.includes(origin)) {',
+          caption: 'originCheck: a missing Origin is refused too',
+        },
+      ],
+      refs: [
+        { symbol: 'backend/gateway/src/guards.ts#originCheck' },
+        { symbol: 'backend/gateway/src/env-schema.ts#gatewayEnvSchema' },
+        { symbol: 'backend/services/auth/src/session-routes.ts#sessionRouter' },
+        { flow: 'logout' },
+      ],
+    },
+    {
+      id: 'rate-limits',
+      title: 'Rate limits per IP address and per user, counted in Redis',
+      status: 'verified',
+      blocks: [
+        {
+          kind: 'fields',
+          fields: [
+            {
+              label: 'Decision',
+              text: 'The gateway allows 120 requests a minute from one IP address and 60 from one signed-in user. Counts live in Redis in fixed one-minute windows; over a limit, the answer is 429 with `Retry-After`.',
+            },
+            {
+              label: 'Why',
+              text: 'Counting in Redis means every copy of the gateway shares the same counts. The per-IP limit covers everyone, signed in or not; the per-user limit holds one account to its share however many devices or addresses it uses.',
+            },
+            {
+              label: 'Trade-off',
+              text: "A fixed window lets a client send up to twice the limit around the moment one window ends and the next starts. If Redis fails, the request gets a 500: it is refused, not let through. The client's address comes from `X-Forwarded-For` across `TRUST_PROXY_HOPS` proxies, so that number must match how the gateway is deployed.",
+            },
+          ],
+        },
+        {
+          kind: 'text',
+          text: 'The per-IP limit runs first, for every request that reaches the `/api` router, including paths the gateway does not forward. The per-user limit runs after the session lookup, so a request without a session is counted only per IP. The per-agent limits in the shared constants are not used yet.',
+        },
+        {
+          kind: 'quote',
+          file: 'backend/shared/src/constants.ts',
+          text: 'export const GATEWAY_RATE_LIMITS = { perIp: 120, perUser: 60 } as const;',
+        },
+      ],
+      refs: [
+        { symbol: 'backend/gateway/src/guards.ts#ipRateLimit' },
+        { symbol: 'backend/gateway/src/guards.ts#userRateLimit' },
+        { symbol: 'backend/shared/src/rateLimit.ts#rateLimit' },
+        { symbol: 'backend/shared/src/rateLimit.ts#hitRateLimit' },
+        { symbol: 'backend/shared/src/constants.ts#GATEWAY_RATE_LIMITS' },
       ],
     },
     {
@@ -206,7 +329,7 @@ export const decisionsPage: DocPage = {
     {
       id: 'redis-noeviction',
       title: 'Redis never drops keys on its own',
-      status: 'partial',
+      status: 'verified',
       blocks: [
         {
           kind: 'fields',
@@ -217,7 +340,7 @@ export const decisionsPage: DocPage = {
             },
             {
               label: 'Why',
-              text: 'Sessions will live in Redis. With an eviction policy, a full Redis would quietly delete keys and sign users out at random. With `noeviction` it refuses new writes instead, and TTLs stop old keys from filling it up.',
+              text: 'Sessions live in Redis. With an eviction policy, a full Redis would quietly delete keys and sign users out at random. With `noeviction` it refuses new writes instead, and TTLs stop old keys from filling it up.',
             },
             {
               label: 'Trade-off',
@@ -227,7 +350,7 @@ export const decisionsPage: DocPage = {
         },
         {
           kind: 'text',
-          text: 'The policy is set in Docker Compose. The shared code sets a TTL on every key it writes: a session (`sess:` and the SHA-256 of its ID) lasts 7 days, renewed on each lookup, and a rate-limit counter (`rl:<scope>:<id>`) gets its expiry in the same MULTI as its count. No app calls that code yet, and no memory limit (`--maxmemory`) is set, so the policy does not come into play today. Sessions come with Sign-in and sessions.',
+          text: "The policy is set in Docker Compose. The shared code sets a TTL on every key it writes: a session (`sess:` and the SHA-256 of its ID) lasts 7 days, renewed on each lookup, and a rate-limit counter (`rl:<scope>:<id>`) gets its expiry in the same MULTI as its count. Auth's sign-in writes sessions and its logout deletes them; the gateway renews a session on each lookup and counts every request per IP and per signed-in user. No memory limit (`--maxmemory`) is set, so the policy does not come into play today.",
         },
         {
           kind: 'quote',
@@ -239,6 +362,7 @@ export const decisionsPage: DocPage = {
       refs: [
         { component: 'redis' },
         { file: 'backend/docker-compose.yml' },
+        { symbol: 'backend/services/auth/src/session-routes.ts#sessionRouter' },
         { symbol: 'backend/shared/src/sessions.ts#createSession' },
         { symbol: 'backend/shared/src/sessions.ts#resolveSession' },
         { symbol: 'backend/shared/src/rateLimit.ts#hitRateLimit' },
@@ -258,7 +382,7 @@ export const decisionsPage: DocPage = {
             },
             {
               label: 'Why',
-              text: 'One ID ties a response to its log lines: a user can quote it, and a developer can find what happened. Passed from app to app, it will follow one request through the frontend, the gateway and a service.',
+              text: 'One ID ties a response to its log lines: a user can quote it, and a developer can find what happened. Passed from app to app, it follows one request through the gateway and a service.',
             },
             {
               label: 'Trade-off',
@@ -268,7 +392,7 @@ export const decisionsPage: DocPage = {
         },
         {
           kind: 'text',
-          text: 'Passing the ID from one app to the next is not built yet, because no app calls another yet.',
+          text: "The gateway passes its ID on: `proxyToService` sends it in `X-Request-Id` and in the internal token's `rid`, and the service's `requestId` middleware reuses it, so the gateway and auth log the same ID for one request. The frontend does not send one yet.",
         },
         {
           kind: 'quote',
@@ -323,7 +447,7 @@ export const decisionsPage: DocPage = {
     {
       id: 'zod-at-the-edges',
       title: 'Zod checks data where it comes in',
-      status: 'partial',
+      status: 'verified',
       blocks: [
         {
           kind: 'fields',
@@ -344,20 +468,22 @@ export const decisionsPage: DocPage = {
         },
         {
           kind: 'text',
-          text: "The settings check is wired: every app's `env.ts` calls `loadEnv`, and a bad setting stops the app at startup. `validate` is built and tested, but no route uses it yet, because no app has routes of its own.",
+          text: "Both are wired. Every app's `env.ts` calls `loadEnv`, and a bad setting stops the app at startup. Auth's routes check their input with `validate`: the sign-in bodies, the `PATCH /me` body and the user ID in `GET /internal/users/:id`.",
         },
         {
           kind: 'quote',
-          file: 'backend/gateway/src/env.ts',
-          text: '    PORT: portSchema(8000),\n    REDIS_URL: z.string().min(1),',
-          caption: "The gateway's settings schema",
+          file: 'backend/gateway/src/env-schema.ts',
+          text: '  TRUST_PROXY_HOPS: z.coerce.number().int().min(0).max(5).default(1),',
+          caption:
+            "One of the gateway's settings: a whole number from 0 to 5, 1 when it is not set",
         },
       ],
       refs: [
         { symbol: 'backend/shared/src/env.ts#loadEnv' },
         { symbol: 'backend/shared/src/env.ts#baseEnvSchema' },
-        { symbol: 'backend/gateway/src/env.ts#env' },
+        { symbol: 'backend/gateway/src/env-schema.ts#gatewayEnvSchema' },
         { symbol: 'backend/shared/src/validate.ts#validate' },
+        { symbol: 'backend/services/auth/src/session-routes.ts#sessionRouter' },
         { flow: 'app-startup' },
       ],
     },

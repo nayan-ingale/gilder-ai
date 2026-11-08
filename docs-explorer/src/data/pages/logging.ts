@@ -45,10 +45,13 @@ export const loggingPage: DocPage = {
               'error',
               "Requests that ended with a 5xx, 'request failed', 'redis error', 'shutdown failed', 'shutdown timed out'",
             ],
-            ['warn', "Requests that ended with a 4xx, 'readiness check failed'"],
+            [
+              'warn',
+              "Requests that ended with a 4xx, 'readiness check failed', and at auth's startup 'Google sign-in is not set up: the FIREBASE_* settings are empty' and 'dev sign-in is on: anyone who can reach auth can sign in with just an email'",
+            ],
             [
               'info',
-              "Other requests, 'listening', 'mongodb connected', 'shutting down', 'already shutting down', 'shut down cleanly'",
+              "Other requests, 'listening', 'mongodb connected', 'shutting down', 'already shutting down', 'shut down cleanly', and auth's 'signed in' (with the method and whether the user is new) and 'signed out'",
             ],
           ],
         },
@@ -123,7 +126,7 @@ export const loggingPage: DocPage = {
       blocks: [
         {
           kind: 'text',
-          text: "The `requestId` middleware runs first in every app. It takes the caller's `X-Request-Id` when it looks safe, or makes a new UUID, and starts a request context with `runWithContext`. The context lives in Node's `AsyncLocalStorage`, so it follows the request through every `await` and callback. The logger's `mixin` reads it with `getContext` and adds `requestId` to each line written during the request, so no code has to pass the ID around. Lines written outside a request, such as 'listening', have none.",
+          text: "The `requestId` middleware runs first in every app. It takes the caller's `X-Request-Id` when it looks safe, or makes a new UUID, and starts a request context with `runWithContext`. The context lives in Node's `AsyncLocalStorage`, so it follows the request through every `await` and callback. The logger's `mixin` reads it with `getContext` and adds `requestId` to each line written during the request, so no code has to pass the ID around. Lines written outside a request, such as 'listening', have none. The gateway sends its request ID on to the service it calls, in `X-Request-Id`, and the service reuses it, so the lines of both apps for one request share one ID.",
         },
         {
           kind: 'quote',
@@ -142,11 +145,11 @@ export const loggingPage: DocPage = {
     {
       id: 'user-id',
       title: 'The user on every line',
-      status: 'not-wired',
+      status: 'verified',
       blocks: [
         {
           kind: 'text',
-          text: 'The same context can hold the user. `setContextUserId` records the user ID, and from then on the mixin adds `userId` next to `requestId`. Only `requireInternalToken` calls it, after checking the token from the gateway, and only when the token names a user: a request with no session, such as a sign-in, gets a token without one. No app uses that middleware yet, so today no log line carries a user. It is planned to be wired in Sign-in and sessions.',
+          text: "The same context can hold the user. `setContextUserId` records the user ID, and from then on the mixin adds `userId` next to `requestId`. Three places call it. In the gateway, `sessionLookup` calls it once the session cookie names a user, so the gateway's later lines for that request carry the user. In a service, `requireInternalToken` calls it after checking the token from the gateway, when the token names a user: a request with no session, such as a sign-in, gets a token without one. Auth's sign-in calls it once it knows who signed in, so its 'signed in' line carries the user.",
         },
         {
           kind: 'quote',
@@ -157,6 +160,7 @@ export const loggingPage: DocPage = {
       ],
       refs: [
         { symbol: 'backend/shared/src/context.ts#setContextUserId' },
+        { symbol: 'backend/gateway/src/guards.ts#sessionLookup' },
         { symbol: 'backend/shared/src/internalToken.ts#requireInternalToken' },
       ],
     },
@@ -167,7 +171,7 @@ export const loggingPage: DocPage = {
       blocks: [
         {
           kind: 'text',
-          text: "`createService` adds pino-http right after the request ID. When a response finishes, it writes one line with the request (`req`: ID, method, URL and headers, with secrets hidden), the response (`res`: status and headers), `responseTime` in milliseconds and the message 'request completed' ('request errored' for a 5xx). pino-http 11 also writes 'request aborted' when the client disconnects before the response ends. The level follows the status: error for 5xx, warn for 4xx, info otherwise. pino-http takes its `req.id` from the `X-Request-Id` response header, so it matches `requestId`. pino-http skips only health probes: a GET or HEAD on `/healthz` or `/readyz`, with or without a query string (`isHealthProbe`). Every other request gets one line, including any other method on those paths: `POST /healthz` gets a 404 and a warn line. This keeps health checks from flooding the logs, while calls that use those paths by mistake still show.",
+          text: "`createService` adds pino-http right after the request ID. When a response finishes, it writes one line with the request (`req`: ID, method, URL and headers, with secrets hidden), the response (`res`: status and headers), `responseTime` in milliseconds and the message 'request completed' ('request errored' for a 5xx). pino-http 11 also writes 'request aborted' when the client disconnects before the response ends. The level follows the status: error for 5xx, warn for 4xx, info otherwise. pino-http takes its `req.id` from the `X-Request-Id` response header, so it matches `requestId`. pino-http skips only health probes: a GET or HEAD on `/healthz` or `/readyz`, with or without a query string (`isHealthProbe`). Every other request gets one line, including any other method on those paths: `POST /healthz` gets a 404 (on auth, a 401 without an internal token) and a warn line. This keeps health checks from flooding the logs, while calls that use those paths by mistake still show.",
         },
         {
           kind: 'quote',

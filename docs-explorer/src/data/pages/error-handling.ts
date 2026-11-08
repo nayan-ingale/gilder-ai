@@ -26,7 +26,7 @@ export const errorHandlingPage: DocPage = {
         },
         {
           kind: 'text',
-          text: "No app has routes of its own yet, so in a running app errors come only from the 404 handler and the JSON body parser. Errors thrown by routes are covered by the shared library's tests.",
+          text: "Auth, chat, agent and billing raise 401 from their internal-token check, and auth also raises errors from its routes. The gateway raises errors from its checks (429, 403, 401), from its body reader (413) and from its proxy (503), and passes each service's own error replies back unchanged: status, Content-Type and body.",
         },
         {
           kind: 'quote',
@@ -37,8 +37,10 @@ export const errorHandlingPage: DocPage = {
       ],
       refs: [
         { flow: 'error-handling' },
+        { flow: 'direct-service-call' },
         { symbol: 'backend/shared/src/service.ts#createService' },
         { symbol: 'backend/shared/src/errors.ts#errorHandler' },
+        { symbol: 'backend/gateway/src/proxy.ts#proxyToService' },
       ],
     },
     {
@@ -70,7 +72,7 @@ export const errorHandlingPage: DocPage = {
         },
         {
           kind: 'text',
-          text: 'A running app only produces `not_found`, `bad_request`, `payload_too_large`, `unsupported_media_type` and `internal_error` today. `validation_failed` comes from `validate`, `unauthorized` from `requireInternalToken` and `requireUser`, and `rate_limited` from `rateLimit`; no app uses those yet. The other codes are ready for later features.',
+          text: 'Every app can produce `not_found`, `payload_too_large`, `unsupported_media_type` and `internal_error`, and the services also `bad_request` from their JSON body parser, which the gateway does not use. The services produce `unauthorized` from `requireInternalToken`. Auth also produces `validation_failed` (from `validate`), `unauthorized` (from `requireUser` and its own sign-in and `/me` checks) and `service_unavailable` (Google sign-in without the Firebase settings). The gateway produces `rate_limited` (its rate limits), `forbidden` (`originCheck`), `unauthorized` (`requireSession`) and `service_unavailable` (a service that is down or slow). `insufficient_credits` and `conflict` are ready for later features.',
         },
       ],
       refs: [
@@ -91,7 +93,7 @@ export const errorHandlingPage: DocPage = {
             "A body that is not valid JSON becomes `bad_request` (400), with the detail 'The request body is not valid JSON'.",
             "A JSON body in a charset the parser cannot read (such as `charset=latin1`) or with an unknown `Content-Encoding` becomes `unsupported_media_type` (415), with the detail 'The request body uses an unsupported charset' or 'The request body uses an unsupported Content-Encoding'. The messages are fixed, so the client's header values are never echoed back.",
             'Anything else becomes `internal_error` (500), keeping the original error as its `cause`. In a running app that includes a body-parser failure the handler does not map, such as a body sent with `Content-Encoding: gzip` that is not valid gzip.',
-            'If the response has already started, an error body can no longer be sent, so the handler passes the error on to Express, which closes the connection. No app streams responses yet, so this does not happen today.',
+            'If the response has already started, an error body can no longer be sent, so the handler passes the error on to Express, which closes the connection. The gateway streams answers back from the services, but it throws nothing once it has started writing (a failed stream destroys the response instead), so no code is known to reach this.',
           ],
         },
         {
@@ -114,7 +116,7 @@ export const errorHandlingPage: DocPage = {
       blocks: [
         {
           kind: 'text',
-          text: "When no route matches, `notFoundHandler` passes on an `AppError('not_found')` with a message such as 'No route for GET /nothing'. The client gets the same problem+json body as for any other error, not Express's default HTML page. Since no app has its own routes yet, every request except GET, HEAD and OPTIONS on `/healthz` and `/readyz` ends here, unless its JSON body is rejected first.",
+          text: "When no route matches, `notFoundHandler` passes on an `AppError('not_found')` with a message such as 'No route for GET /nothing'. The client gets the same problem+json body as for any other error, not Express's default HTML page. In the gateway, every path that is not in its route table ends here, so it never reaches a service (SEC-01). In auth, chat, agent and billing only a request with a valid internal token gets this far; without one it gets a 401.",
         },
         {
           kind: 'quote',
@@ -127,11 +129,11 @@ export const errorHandlingPage: DocPage = {
     {
       id: 'validation',
       title: 'Validation errors: 400',
-      status: 'not-wired',
+      status: 'verified',
       blocks: [
         {
           kind: 'text',
-          text: "`validate` checks a request's params, query and body with Zod schemas and collects every problem at once. It then passes on one `AppError('validation_failed')` with the field errors. The client gets a 400 whose `errors` list holds a `path` (such as `body.name`) and a `message` for each bad field. It is built and tested, but no route uses it yet.",
+          text: "`validate` checks a request's params, query and body with Zod schemas and collects every problem at once. It then passes on one `AppError('validation_failed')` with the field errors. The client gets a 400 whose `errors` list holds a `path` (such as `body.name`) and a `message` for each bad field. Auth's routes use it, so a sign-in without a Google token, a dev sign-in with a bad email, an unknown theme for `PATCH /me` or a malformed user ID gets this 400.",
         },
         {
           kind: 'quote',
@@ -141,6 +143,8 @@ export const errorHandlingPage: DocPage = {
       ],
       refs: [
         { symbol: 'backend/shared/src/validate.ts#validate' },
+        { symbol: 'backend/services/auth/src/session-routes.ts#sessionRouter' },
+        { symbol: 'backend/services/auth/src/me-routes.ts#meRouter' },
         { file: 'backend/shared/src/service.test.ts' },
       ],
     },
@@ -176,7 +180,7 @@ export const errorHandlingPage: DocPage = {
         },
         {
           kind: 'text',
-          text: "For example, `GET /nothing` on any app answers 404 with `{ type: '/errors/not_found', title: 'Not found', status: 404, code: 'not_found', detail: 'No route for GET /nothing', requestId }`.",
+          text: "For example, `GET /nothing` on the gateway answers 404 with `{ type: '/errors/not_found', title: 'Not found', status: 404, code: 'not_found', detail: 'No route for GET /nothing', requestId }`. On a service the same request without an internal token gets a 401 with the code `unauthorized` and the detail 'Missing internal token'.",
         },
         {
           kind: 'quote',
@@ -201,7 +205,7 @@ export const errorHandlingPage: DocPage = {
           items: [
             "For a status of 500 or more, `errorHandler` logs 'request failed' at error level, with the original error and its stack.",
             'For a 4xx error, the handler logs nothing itself.',
-            "In both cases the request logger (pino-http) then writes its line for the finished request: at warn for a 4xx (a 415 for an unreadable body included), and at error with the message 'request errored' for a 5xx. It skips only health probes, a GET or HEAD on `/healthz` or `/readyz`, so `POST /healthz` gets a 404 and a warn line.",
+            "In both cases the request logger (pino-http) then writes its line for the finished request: at warn for a 4xx (a 415 for an unreadable body included), and at error with the message 'request errored' for a 5xx. It skips only health probes, a GET or HEAD on `/healthz` or `/readyz`, so `POST /healthz` gets a 404 (on a service, a 401 without an internal token) and a warn line. A 503 from the gateway's proxy is a 5xx, so it is logged as 'request failed'.",
             'All these lines carry the request ID, the same one the client sees in the body.',
           ],
         },
@@ -224,7 +228,7 @@ export const errorHandlingPage: DocPage = {
       blocks: [
         {
           kind: 'text',
-          text: "Errors before an app is listening are not HTTP errors. A missing or invalid setting makes `loadEnv` throw an `EnvError` that lists every problem, naming each variable but never its value. Auth also stops when its settings break a rule between them, such as `AUTH_DEV_LOGIN=true` in production. If MongoDB does not answer within 5 seconds, or the port is taken, the app stops too. In each case nothing catches the error, so Node prints it and exits with code 1. A Redis outage does not stop an app: the client logs 'redis error', and `/readyz` reports Redis as failed.",
+          text: "Errors before an app is listening are not HTTP errors. A missing or invalid setting makes `loadEnv` throw an `EnvError` that lists every problem, naming each variable but never its value. Auth also stops when its settings break a rule between them, such as `AUTH_DEV_LOGIN=true` in production. If MongoDB does not answer within 5 seconds, a service's `INTERNAL_PUBLIC_KEY` cannot be imported as a key, or the port is taken, the app stops too. In each case nothing catches the error, so Node prints it and exits with code 1. A Redis outage does not stop an app: the client logs 'redis error', and `/readyz` reports Redis as failed.",
         },
       ],
       refs: [

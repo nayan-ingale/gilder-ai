@@ -13,15 +13,15 @@ export const stackPage: DocPage = {
       blocks: [
         {
           kind: 'text',
-          text: 'A request is meant to go from the browser to the Next.js server, then to the gateway, then to one service, which reads and writes its data stores. Today each piece runs on its own, but the links between the apps are not built yet: the frontend is a starter page, and every backend app only answers its health checks.',
+          text: 'A request is meant to go from the browser to the Next.js server, then to the gateway, then to one service, which reads and writes its data stores. Today the gateway forwards the sign-in, logout and profile routes to auth, but the frontend is still a starter page that makes no API calls, and chat, agent and billing have no routes yet.',
         },
         {
           kind: 'list',
           items: [
             'Browser → Next.js server (port 3000): the browser only ever talks to the frontend app.',
             'Next.js server → gateway (port 8000): the Next.js server will forward every `/api/*` call to the gateway, so backend addresses and secrets never reach the browser. Planned in Sign-in page and app shell.',
-            "Gateway → services: the gateway will check sessions and rate limits, then call auth (8001), chat (8002), agent (8003) or billing (8004) with a short-lived signed token. The shared library already has the sessions, rate limits and token checks for this, but no app uses them yet. The gateway's part is planned in Sign-in and sessions; each service's routes come with its own feature.",
-            'Services → data stores: auth, chat, agent and billing connect to MongoDB at startup, and the gateway, auth and agent open a Redis client. Qdrant runs in Docker, but nothing connects to it yet. AWS S3 will hold files.',
+            'Gateway → services: the gateway checks the rate limits, its route table, the Origin and the session, then calls the service with fetch and a short-lived signed token: today auth (8001), for the routes in its table. Chat (8002), agent (8003) and billing (8004) already refuse any call without a valid token; their routes come with their own features.',
+            'Services → data stores: auth, chat, agent and billing connect to MongoDB at startup, and the gateway, auth and agent open a Redis client. Auth keeps its users in MongoDB and its sessions in Redis. Qdrant runs in Docker, but nothing connects to it yet. AWS S3 will hold files.',
             'Every backend app is built from the shared library, `@gilder/shared`, so they all start, log and fail in the same way.',
           ],
         },
@@ -128,22 +128,22 @@ export const packageNotes: PackageNote[] = [
   {
     name: 'zod',
     layer: 'backend',
-    why: "Checks data against schemas: each app's settings at startup (`loadEnv`), and request input with `validate`, which no route uses yet.",
+    why: "Checks data against schemas: each app's settings at startup (`loadEnv`), and request input with `validate`, which auth's routes use.",
   },
   {
     name: 'jose',
     layer: 'backend',
-    why: 'Signs and checks the short-lived internal tokens between the gateway and services, and makes the private key that `pnpm setup:keys` writes when the gateway has none. No app signs or checks a token yet.',
+    why: 'Signs and checks the short-lived internal tokens between the gateway and services, and makes the private key that `pnpm setup:keys` writes when the gateway has none. The gateway signs a token with it for every request it forwards, and auth, chat, agent and billing check them.',
   },
   {
     name: 'firebase-admin',
     layer: 'backend',
-    why: 'Checks Google sign-in tokens in the auth service (`createFirebaseVerifier`), including whether a token was revoked. Built and tested, but no route uses it yet.',
+    why: "Checks Google sign-in tokens in the auth service (`createFirebaseVerifier`), including whether a token was revoked. Auth's `POST /sessions` uses it when the three FIREBASE_* settings are set.",
   },
   {
     name: 'cookie',
     layer: 'backend',
-    why: "Installed in the shared library. `sessionIdFromCookies` uses it to read the session cookie from a request, for auth's logout route and, later, the gateway. No running app calls it yet.",
+    why: "Installed in the shared library. `sessionIdFromCookies` uses it to read the session cookie from a request, for the gateway's session lookup on every forwarded request and for auth's logout route.",
   },
   {
     name: 'pino',
@@ -170,7 +170,7 @@ export const packageNotes: PackageNote[] = [
   {
     name: 'ioredis',
     layer: 'data',
-    why: 'The Redis client. `createRedis` makes one for the gateway, auth and agent, and `pingRedis` checks it for `/readyz`. The shared sessions and rate limits use it too, but no app calls them yet; their tests run against a real Redis.',
+    why: 'The Redis client. `createRedis` makes one for the gateway, auth and agent, and `pingRedis` checks it for `/readyz`. The shared sessions and rate limits use it too: auth creates and deletes sessions, and the gateway looks them up and counts requests. Their tests run against a real Redis.',
   },
 
   // Quality
