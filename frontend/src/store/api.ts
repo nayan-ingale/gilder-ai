@@ -2,6 +2,7 @@ import type { FetchBaseQueryError } from '@reduxjs/toolkit/query';
 import { createApi, fetchBaseQuery } from '@reduxjs/toolkit/query/react';
 import type { Account, Payment, Plan, UsageEvent, UsageSummary } from '@/lib/billing';
 import type { ChatSummary, Page } from '@/lib/chats';
+import type { UploadedFile } from '@/lib/uploads';
 
 /**
  * The browser's data layer: every call goes to the app's own /api (the Next.js proxy forwards it
@@ -94,6 +95,11 @@ export const api = createApi({
       providesTags: ['Usage'],
     }),
 
+    /** A file's name and state, for the chips on sent messages. */
+    getFile: build.query<{ file: UploadedFile }, string>({
+      query: (id) => `/files/${encodeURIComponent(id)}`,
+    }),
+
     createChat: build.mutation<{ chat: ChatSummary }, { title?: string }>({
       query: (body) => ({ url: '/chats', method: 'POST', body }),
       invalidatesTags: [LIST],
@@ -149,6 +155,7 @@ export const {
   useSearchChatsQuery,
   useGetChatQuery,
   useGetAccountQuery,
+  useGetFileQuery,
   useGetPlansQuery,
   useGetPaymentsQuery,
   useCreateOrderMutation,

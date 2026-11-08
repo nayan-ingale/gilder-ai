@@ -11,6 +11,14 @@ import { readServerEvents } from './sse';
 
 export const BUILT_AGENTS = ['chat', 'search', 'code'] as const;
 
+/** A PDF passage an answer cites as [p. N]. */
+export interface Citation {
+  documentId: string;
+  name: string;
+  page: number;
+  quote: string;
+}
+
 /** A web source a search answer cites as [n]. */
 export interface Source {
   n: number;
@@ -25,6 +33,7 @@ export type TurnEvent =
   | { event: 'agent'; data: { agent: string; reason: string } }
   | { event: 'sources'; data: { items: Source[] } }
   | { event: 'artifact'; data: { files: CodeFile[] } }
+  | { event: 'citations'; data: { items: Citation[] } }
   | { event: 'token'; data: { text: string } }
   | { event: 'usage'; data: { creditsCharged: number; balance: number } }
   | { event: 'title'; data: { title: string } }
@@ -32,7 +41,14 @@ export type TurnEvent =
   | { event: 'done'; data: Record<string, never> };
 
 export type TurnRequest =
-  | { kind: 'send'; chatId: string; content: string; clientMessageId: string; agent?: string }
+  | {
+      kind: 'send';
+      chatId: string;
+      content: string;
+      clientMessageId: string;
+      agent?: string;
+      attachments?: string[];
+    }
   | { kind: 'regenerate'; chatId: string; messageId: string; clientMessageId: string }
   | {
       kind: 'edit';
@@ -53,6 +69,7 @@ function pathAndBody(request: TurnRequest): { path: string; body: Record<string,
           content: request.content,
           clientMessageId: request.clientMessageId,
           ...(request.agent ? { agent: request.agent } : {}),
+          ...(request.attachments?.length ? { attachments: request.attachments } : {}),
         },
       };
     case 'regenerate':
@@ -150,4 +167,8 @@ export type ThreadMessage = Pick<ChatMessage, 'role' | 'content' | 'status'> & {
   sources?: Source[];
   /** Files a code answer made. */
   files?: CodeFile[];
+  /** Files the user sent with the message, by ID. */
+  attachments?: string[];
+  /** PDF pages an answer is based on. */
+  citations?: Citation[];
 };

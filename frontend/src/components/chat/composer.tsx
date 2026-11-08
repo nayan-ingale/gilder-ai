@@ -1,6 +1,6 @@
 'use client';
 
-import { ArrowUp, ChevronDown, Square } from 'lucide-react';
+import { ArrowUp, ChevronDown, FileText, ImageIcon, Paperclip, Square, X } from 'lucide-react';
 import { type FormEvent, type KeyboardEvent, useEffect, useRef, useState } from 'react';
 import { IconButton } from '@/components/ui/button';
 import { cn } from '@/components/ui/cn';
@@ -12,6 +12,7 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { BUILT_AGENTS } from '@/lib/turns';
+import { ACCEPTED_TYPES } from '@/lib/uploads';
 import { useGetAccountQuery } from '@/store/api';
 
 /** The agents a user can pick, and the `/` shortcut for each. Only built ones are offered. */
@@ -28,6 +29,22 @@ const built = new Set<string>(BUILT_AGENTS);
 const OFFERED = AGENT_OPTIONS.filter((option) => built.has(option.id));
 const MAX_LENGTH = 20_000;
 
+/** A file being attached to the next message. */
+export interface PendingAttachment {
+  key: string;
+  name: string;
+  kind: 'pdf' | 'image';
+  status: 'uploading' | 'reading' | 'ready' | 'failed';
+  fileId?: string;
+}
+
+const ATTACHMENT_STATUS: Record<PendingAttachment['status'], string> = {
+  uploading: 'Uploading…',
+  reading: 'Reading…',
+  ready: '',
+  failed: 'Failed',
+};
+
 export interface ComposerProps {
   /** Sends the message; resolves false when it was refused, so the text comes back. */
   onSend: (content: string, agent?: string) => Promise<boolean>;
@@ -40,6 +57,10 @@ export interface ComposerProps {
   initialText?: string;
   placeholder?: string;
   autoFocus?: boolean;
+  /** Files attached to the next message; with onAttach, the paperclip is shown. */
+  attachments?: PendingAttachment[];
+  onAttach?: (files: File[]) => void;
+  onRemoveAttachment?: (key: string) => void;
 }
 
 export function Composer({
@@ -50,7 +71,12 @@ export function Composer({
   initialText = '',
   placeholder = 'Ask anything',
   autoFocus = false,
+  attachments = [],
+  onAttach,
+  onRemoveAttachment,
 }: ComposerProps) {
+  const filePicker = useRef<HTMLInputElement>(null);
+  const attachmentsReady = attachments.every((attachment) => attachment.status === 'ready');
   const [text, setText] = useState(initialText);
   const [agent, setAgent] = useState<string | undefined>(undefined);
   const textarea = useRef<HTMLTextAreaElement>(null);
@@ -87,7 +113,8 @@ export function Composer({
   }, [running, onStop]);
 
   const trimmed = text.trim();
-  const canSend = trimmed !== '' && !running && !outOfCredits && trimmed.length <= MAX_LENGTH;
+  const canSend =
+    trimmed !== '' && !running && !outOfCredits && trimmed.length <= MAX_LENGTH && attachmentsReady;
   const shortcutHints =
     /^\/\w*$/.test(text) && !running
       ? OFFERED.filter((option) => option.shortcut?.startsWith(text.toLowerCase()))
@@ -148,6 +175,41 @@ export function Composer({
         </p>
       ) : null}
       <div className="rounded-xl border border-line-strong bg-raised p-2 shadow-sm focus-within:border-accent">
+        {attachments.length > 0 ? (
+          <ul aria-label="Attached files" className="mb-2 flex flex-wrap gap-2 px-1">
+            {attachments.map((attachment) => (
+              <li
+                key={attachment.key}
+                className={cn(
+                  'flex max-w-60 items-center gap-1.5 rounded-md border px-2 py-1 text-xs',
+                  attachment.status === 'failed'
+                    ? 'border-danger text-danger'
+                    : 'border-line bg-surface text-fg-muted',
+                )}
+              >
+                {attachment.kind === 'pdf' ? (
+                  <FileText size={14} aria-hidden="true" />
+                ) : (
+                  <ImageIcon size={14} aria-hidden="true" />
+                )}
+                <span className="truncate text-fg">{attachment.name}</span>
+                {ATTACHMENT_STATUS[attachment.status] ? (
+                  <span className="shrink-0">{ATTACHMENT_STATUS[attachment.status]}</span>
+                ) : null}
+                {onRemoveAttachment ? (
+                  <button
+                    type="button"
+                    aria-label={`Remove ${attachment.name}`}
+                    onClick={() => onRemoveAttachment(attachment.key)}
+                    className="shrink-0 rounded hover:text-fg"
+                  >
+                    <X size={12} aria-hidden="true" />
+                  </button>
+                ) : null}
+              </li>
+            ))}
+          </ul>
+        ) : null}
         <label htmlFor="composer-input" className="sr-only">
           Message
         </label>
@@ -163,32 +225,59 @@ export function Composer({
           className="block max-h-60 w-full resize-none bg-transparent px-2 py-1.5 text-sm text-fg outline-none placeholder:text-fg-subtle"
         />
         <div className="mt-1 flex items-center justify-between">
-          <DropdownMenu>
-            <DropdownMenuTrigger
-              className="inline-flex h-8 items-center gap-1 rounded-md px-2 text-xs text-fg-muted hover:bg-surface hover:text-fg"
-              aria-label={`Agent: ${agentLabel}`}
-            >
-              {agentLabel}
-              <ChevronDown size={14} aria-hidden="true" />
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="start" side="top">
-              <DropdownMenuLabel>Answer with</DropdownMenuLabel>
-              <DropdownMenuItem onSelect={() => setAgent(undefined)}>
-                <span className="flex flex-col">
-                  <span>Auto</span>
-                  <span className="text-xs text-fg-subtle">Picks the best agent</span>
-                </span>
-              </DropdownMenuItem>
-              {OFFERED.map((option) => (
-                <DropdownMenuItem key={option.id} onSelect={() => setAgent(option.id)}>
+          <div className="flex items-center gap-0.5">
+            {onAttach ? (
+              <>
+                <IconButton
+                  label="Attach a PDF or image"
+                  icon={<Paperclip size={16} />}
+                  size="sm"
+                  disabled={running}
+                  onClick={() => filePicker.current?.click()}
+                />
+                <input
+                  ref={filePicker}
+                  type="file"
+                  accept={ACCEPTED_TYPES.join(',')}
+                  multiple
+                  hidden
+                  onChange={(event) => {
+                    const picked = [...(event.target.files ?? [])];
+                    event.target.value = '';
+                    if (picked.length > 0) {
+                      onAttach(picked);
+                    }
+                  }}
+                />
+              </>
+            ) : null}
+            <DropdownMenu>
+              <DropdownMenuTrigger
+                className="inline-flex h-8 items-center gap-1 rounded-md px-2 text-xs text-fg-muted hover:bg-surface hover:text-fg"
+                aria-label={`Agent: ${agentLabel}`}
+              >
+                {agentLabel}
+                <ChevronDown size={14} aria-hidden="true" />
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="start" side="top">
+                <DropdownMenuLabel>Answer with</DropdownMenuLabel>
+                <DropdownMenuItem onSelect={() => setAgent(undefined)}>
                   <span className="flex flex-col">
-                    <span>{option.label}</span>
-                    <span className="text-xs text-fg-subtle">{option.hint}</span>
+                    <span>Auto</span>
+                    <span className="text-xs text-fg-subtle">Picks the best agent</span>
                   </span>
                 </DropdownMenuItem>
-              ))}
-            </DropdownMenuContent>
-          </DropdownMenu>
+                {OFFERED.map((option) => (
+                  <DropdownMenuItem key={option.id} onSelect={() => setAgent(option.id)}>
+                    <span className="flex flex-col">
+                      <span>{option.label}</span>
+                      <span className="text-xs text-fg-subtle">{option.hint}</span>
+                    </span>
+                  </DropdownMenuItem>
+                ))}
+              </DropdownMenuContent>
+            </DropdownMenu>
+          </div>
           {running ? (
             <IconButton
               label="Stop the answer"

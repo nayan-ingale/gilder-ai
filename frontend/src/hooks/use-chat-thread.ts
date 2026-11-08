@@ -7,6 +7,7 @@ import { ApiError } from '@/lib/api';
 import type { ChatMessage } from '@/lib/chats';
 import type { CodeFile } from '@/lib/code-files';
 import {
+  type Citation,
   type Source,
   newClientMessageId,
   stopTurn,
@@ -33,6 +34,8 @@ export function toThreadMessage(message: ChatMessage): ThreadMessage {
     agent: message.agent,
     ...(message.sources.length > 0 ? { sources: message.sources as Source[] } : {}),
     ...(filesOf(message) ? { files: filesOf(message) } : {}),
+    ...(message.attachments.length > 0 ? { attachments: message.attachments } : {}),
+    ...(message.citations.length > 0 ? { citations: message.citations as Citation[] } : {}),
   };
 }
 
@@ -50,7 +53,12 @@ interface Running {
 export interface ChatThread {
   messages: ThreadMessage[];
   running: boolean;
-  send(content: string, agent?: string, clientMessageId?: string): Promise<boolean>;
+  send(
+    content: string,
+    agent?: string,
+    clientMessageId?: string,
+    attachments?: string[],
+  ): Promise<boolean>;
   regenerate(): Promise<void>;
   edit(content: string, agent?: string): Promise<boolean>;
   stop(): void;
@@ -120,6 +128,9 @@ export function useChatThread(chatId: string, initial: ChatMessage[]): ChatThrea
               );
               break;
             }
+            case 'citations':
+              updateAnswer((message) => ({ ...message, citations: turnEvent.data.items }));
+              break;
             case 'artifact':
               updateAnswer((message) => ({ ...message, files: turnEvent.data.files }));
               break;
@@ -208,12 +219,30 @@ export function useChatThread(chatId: string, initial: ChatMessage[]): ChatThrea
   );
 
   const send = useCallback(
-    (content: string, agent?: string, clientMessageId = newClientMessageId()) =>
+    (
+      content: string,
+      agent?: string,
+      clientMessageId = newClientMessageId(),
+      attachments: string[] = [],
+    ) =>
       run(
-        { kind: 'send', chatId, content, clientMessageId, ...(agent ? { agent } : {}) },
+        {
+          kind: 'send',
+          chatId,
+          content,
+          clientMessageId,
+          ...(agent ? { agent } : {}),
+          ...(attachments.length > 0 ? { attachments } : {}),
+        },
         (current) => [
           ...current,
-          { key: `user-${clientMessageId}`, role: 'user', content, status: 'complete' },
+          {
+            key: `user-${clientMessageId}`,
+            role: 'user',
+            content,
+            status: 'complete',
+            ...(attachments.length > 0 ? { attachments } : {}),
+          },
         ],
       ),
     [chatId, run],

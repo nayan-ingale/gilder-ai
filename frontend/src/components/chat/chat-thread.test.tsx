@@ -215,3 +215,63 @@ describe('ChatThread', () => {
     expect(screen.getByRole('button', { name: 'Send' })).toHaveProperty('disabled', true);
   });
 });
+
+describe('attachments', () => {
+  it('uploads an attached image, then sends its ID with the message', async () => {
+    const stored: string[] = [];
+    answer = (call) => {
+      if (call.url?.startsWith('https://bucket')) {
+        stored.push(call.url);
+        return new Response(null, { status: 204 });
+      }
+      if (call.path === '/api/billing/account') {
+        return account(100);
+      }
+      if (call.path === '/api/files/uploads') {
+        return json(
+          {
+            file: { id: 'file-1', name: 'cat.png', status: 'pending', purpose: 'image' },
+            upload: {
+              url: 'https://bucket.s3.amazonaws.com/',
+              fields: { key: 'users/u1/uploads/file-1' },
+            },
+          },
+          201,
+        );
+      }
+      if (call.path === '/api/files/file-1/complete') {
+        return json({ file: { id: 'file-1', name: 'cat.png', status: 'ready', purpose: 'image' } });
+      }
+      if (call.path === '/api/files/file-1') {
+        return json({
+          file: { id: 'file-1', name: 'cat.png', status: 'ready', purpose: 'image' },
+          indexing: null,
+        });
+      }
+      if (call.method === 'POST' && call.path === `/api/chats/${CHAT}/messages`) {
+        return happyAnswer();
+      }
+      return json({ items: [], nextCursor: null });
+    };
+    renderThread();
+
+    const picker = document.querySelector('input[type=file]') as HTMLInputElement;
+    await userEvent.upload(picker, new File(['png'], 'cat.png', { type: 'image/png' }));
+    const chips = await screen.findByRole('list', { name: 'Attached files' });
+    await waitFor(() => expect(within(chips).queryByText('Uploading…')).toBeNull());
+
+    await userEvent.type(screen.getByRole('textbox', { name: 'Message' }), 'What is this?{Enter}');
+
+    await waitFor(() =>
+      expect(calls.find((call) => call.path === `/api/chats/${CHAT}/messages`)?.body).toMatchObject(
+        {
+          content: 'What is this?',
+          attachments: ['file-1'],
+        },
+      ),
+    );
+    expect(stored).toHaveLength(1);
+    expect(await screen.findByRole('button', { name: 'cat.png' })).toBeTruthy();
+    expect(screen.queryByRole('list', { name: 'Attached files' })).toBeNull();
+  });
+});

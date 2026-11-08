@@ -4,11 +4,14 @@ import { useEffect, useRef, useState } from 'react';
 import { useDispatch, useSelector } from 'react-redux';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/input';
+import { useToast } from '@/components/ui/toast';
 import { useChatThread } from '@/hooks/use-chat-thread';
 import type { ChatMessage } from '@/lib/chats';
+import { ApiError } from '@/lib/api';
+import { pdfReadingState, uploadFile, uploadProblem } from '@/lib/uploads';
 import { clearFirstMessage } from '@/store/pending-slice';
 import type { AppDispatch, RootState } from '@/store/store';
-import { Composer } from './composer';
+import { Composer, type PendingAttachment } from './composer';
 import { MessageItem } from './message-item';
 
 /** A chat's conversation and its composer. A new chat's first message is sent on arrival. */
@@ -24,6 +27,73 @@ export function ChatThread({
   const queued = useSelector((state: RootState) => state.pending[chatId]);
   const startedQueued = useRef(false);
   const [editing, setEditing] = useState(false);
+  const toast = useToast();
+  const [attachments, setAttachments] = useState<PendingAttachment[]>([]);
+  const update = (key: string, change: Partial<PendingAttachment>) =>
+    setAttachments((current) =>
+      current.map((item) => (item.key === key ? { ...item, ...change } : item)),
+    );
+
+  // Upload each picked file; a PDF is then read for questions before it can be sent.
+  async function attach(files: File[]) {
+    for (const file of files) {
+      const problem = uploadProblem(file);
+      if (problem) {
+        toast({ title: 'Could not attach the file', description: problem, tone: 'danger' });
+        continue;
+      }
+      const key = crypto.randomUUID();
+      const kind = file.type === 'application/pdf' ? 'pdf' : 'image';
+      setAttachments((current) => [
+        ...current,
+        { key, name: file.name, kind, status: 'uploading' },
+      ]);
+      try {
+        const uploaded = await uploadFile(file, chatId);
+        update(key, {
+          fileId: uploaded.id,
+          name: uploaded.name,
+          status: kind === 'pdf' ? 'reading' : 'ready',
+        });
+        if (kind === 'pdf') {
+          for (let tries = 0; tries < 90; tries += 1) {
+            await new Promise((resolve) => setTimeout(resolve, 2_000));
+            const state = await pdfReadingState(uploaded.id);
+            if (state === 'ready' || state === 'failed') {
+              update(key, { status: state });
+              if (state === 'failed') {
+                toast({
+                  title: 'Could not read the PDF',
+                  description: uploaded.name,
+                  tone: 'danger',
+                });
+              }
+              break;
+            }
+          }
+        }
+      } catch (error) {
+        update(key, { status: 'failed' });
+        toast({
+          title: 'The upload failed',
+          description: error instanceof ApiError ? error.message : 'Try again.',
+          tone: 'danger',
+          ...(error instanceof ApiError && error.requestId ? { requestId: error.requestId } : {}),
+        });
+      }
+    }
+  }
+
+  async function sendWithAttachments(content: string, agent?: string): Promise<boolean> {
+    const ids = attachments.flatMap((item) =>
+      item.status === 'ready' && item.fileId ? [item.fileId] : [],
+    );
+    const accepted = await thread.send(content, agent, undefined, ids);
+    if (accepted) {
+      setAttachments([]);
+    }
+    return accepted;
+  }
   const bottom = useRef<HTMLDivElement>(null);
   const followBottom = useRef(true);
 
@@ -119,7 +189,12 @@ export function ChatThread({
       <div className="sticky bottom-0 bg-gradient-to-t from-canvas from-70% to-transparent px-4 pt-6 pb-4">
         <div className="mx-auto w-full max-w-3xl">
           <Composer
-            onSend={thread.send}
+            onSend={sendWithAttachments}
+            attachments={attachments}
+            onAttach={(files) => void attach(files)}
+            onRemoveAttachment={(key) =>
+              setAttachments((current) => current.filter((item) => item.key !== key))
+            }
             onStop={thread.stop}
             running={thread.running}
             onEditLast={lastUser?.id ? () => setEditing(true) : undefined}

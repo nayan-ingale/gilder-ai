@@ -5,6 +5,8 @@ export interface ApiCall {
   method: string;
   path: string;
   body: unknown;
+  /** The full address, for calls that leave the app (such as uploads to storage). */
+  url?: string;
 }
 
 export type ApiAnswer = (call: ApiCall) => Response;
@@ -35,13 +37,16 @@ export function mockApi(answer: () => ApiAnswer): ApiCall[] {
       const request = input instanceof Request ? input : new Request(input, init);
       const url = new URL(request.url);
       const text = await request.text();
-      const call = {
-        method: request.method,
-        path: `${url.pathname}${url.search}`,
-        body: text ? JSON.parse(text) : undefined,
-      };
+      let body: unknown;
+      try {
+        body = text ? JSON.parse(text) : undefined;
+      } catch {
+        // Not JSON (a multipart upload form): keep it as text.
+        body = text;
+      }
+      const call = { method: request.method, path: `${url.pathname}${url.search}`, body };
       calls.push(call);
-      return answer()(call);
+      return answer()({ ...call, url: url.href });
     }),
   );
   return calls;
