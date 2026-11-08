@@ -94,7 +94,7 @@ export const deploymentPage: DocPage = {
       blocks: [
         {
           kind: 'text',
-          text: 'Each app reads its settings from environment variables. `pnpm setup:env` creates the files they come from: for each backend app it copies `.env.example` to `.env`, and for the frontend it copies `.env.example` to `.env.local`. It never overwrites a file that already exists. Only the examples are committed; the real env files are ignored by git.',
+          text: 'Each app reads its settings from environment variables. `pnpm setup:env` creates the files they come from: for each backend app it copies `.env.example` to `.env`, and for the frontend it copies `.env.example` to `.env.local`. It never overwrites a file that already exists. Only the examples are committed; the real env files are ignored by git. The examples also list, empty, the keys for outside services that later features use: the Firebase web config and service account, the AI providers, S3 and Razorpay.',
         },
         {
           kind: 'text',

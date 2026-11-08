@@ -37,7 +37,7 @@ export const components: ArchComponent[] = [
       'The Next.js app the user opens. Today it is only the create-next-app starter page. Planned: its server proxies /api/* calls to the gateway, so secrets never reach the browser (Sign-in page and app shell).',
     responsibilities: [
       'Serves the starter page (Home) inside the root layout (RootLayout).',
-      'Makes no API calls yet. Its .env.example already lists GATEWAY_URL, but no code reads it.',
+      'Makes no API calls yet. Its .env.example lists GATEWAY_URL, and for later features the public Firebase web config (NEXT_PUBLIC_FIREBASE_*) and the Razorpay key ID (NEXT_PUBLIC_RAZORPAY_KEY_ID), but no code reads them.',
     ],
     path: 'frontend',
     port: 3000,
@@ -115,7 +115,7 @@ export const components: ArchComponent[] = [
       'Builds its Express app with createService: the shared middleware plus GET /healthz and GET /readyz. It has no routes of its own yet.',
       'Connects to MongoDB at startup and does not start serving until the connection works.',
       'Opens a Redis client at startup. /readyz says ready only when both MongoDB and Redis answer.',
-      'Checks its settings at startup and refuses to start if a required variable (MONGODB_URI, REDIS_URL) is missing, or if any value is invalid. PORT, NODE_ENV and LOG_LEVEL have defaults. Its .env.example also lists QDRANT_URL, CHAT_SERVICE_URL, BILLING_SERVICE_URL and INTERNAL_PUBLIC_KEY for later features, but env.ts does not read them yet.',
+      'Checks its settings at startup and refuses to start if a required variable (MONGODB_URI, REDIS_URL) is missing, or if any value is invalid. PORT, NODE_ENV and LOG_LEVEL have defaults. Its .env.example also lists QDRANT_URL, CHAT_SERVICE_URL, BILLING_SERVICE_URL, INTERNAL_PUBLIC_KEY, the AI provider keys (GROQ_API_KEY, OPENROUTER_API_KEY, GEMINI_API_KEY, TAVILY_API_KEY) and the S3 settings (AWS_REGION, S3_BUCKET, AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY) for later features, but env.ts does not read them yet.',
       'On SIGTERM or SIGINT, finishes in-flight requests, then disconnects MongoDB and closes Redis.',
     ],
     path: 'backend/services/agent',
@@ -135,7 +135,7 @@ export const components: ArchComponent[] = [
     responsibilities: [
       'Builds its Express app with createService: the shared middleware plus GET /healthz and GET /readyz. It has no routes of its own yet.',
       'Connects to MongoDB at startup and does not start serving until the connection works. /readyz pings it.',
-      'Checks its settings at startup and refuses to start if a required variable (MONGODB_URI) is missing, or if any value is invalid. PORT, NODE_ENV and LOG_LEVEL have defaults. Its .env.example also lists INTERNAL_PUBLIC_KEY, which pnpm setup:keys writes, but env.ts does not read it yet.',
+      'Checks its settings at startup and refuses to start if a required variable (MONGODB_URI) is missing, or if any value is invalid. PORT, NODE_ENV and LOG_LEVEL have defaults. Its .env.example also lists INTERNAL_PUBLIC_KEY, which pnpm setup:keys writes, and the Razorpay settings (RAZORPAY_KEY_ID, RAZORPAY_KEY_SECRET, RAZORPAY_WEBHOOK_SECRET) for later features, but env.ts does not read them yet.',
       'On SIGTERM or SIGINT, finishes in-flight requests and then disconnects MongoDB.',
     ],
     path: 'backend/services/billing',
