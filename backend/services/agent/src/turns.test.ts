@@ -1,0 +1,405 @@
+import { randomUUID } from 'node:crypto';
+import { request as httpRequest } from 'node:http';
+import { createApp as createBillingApp } from '@gilder/billing/app';
+import { createApp as createChatApp } from '@gilder/chat/app';
+import {
+  createInternalClient,
+  createLogger,
+  generateInternalKeyPair,
+  importInternalPrivateKey,
+  importInternalPublicKey,
+  INTERNAL_TOKEN_HEADER,
+  type InternalKey,
+  type RunningService,
+  signInternalToken,
+  startService,
+} from '@gilder/shared';
+import {
+  createTestRedis,
+  startTestMongo,
+  type TestMongo,
+  type TestRedis,
+} from '@gilder/shared/testing';
+import request from 'supertest';
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import { chatAgent } from './agents/chat.ts';
+import { createApp } from './app.ts';
+import { createLlm } from './llm/llm.ts';
+import { createMockProvider } from './llm/mock.ts';
+import { LlmError, type LlmProvider, type StreamRequest } from './llm/types.ts';
+import { createMemory } from './memory.ts';
+import { billingService, chatService } from './services.ts';
+
+// A whole turn: the agent app with real chat and billing services on their own ports, real
+// Redis, and a scripted AI provider.
+const logger = createLogger({ service: 'agent', level: 'silent' });
+let mongo: TestMongo;
+let store: TestRedis;
+let chatApp: RunningService;
+let billingApp: RunningService;
+let gatewayKey: InternalKey;
+let gatewayPublicKey: InternalKey;
+let agentKey: InternalKey;
+let authKey: InternalKey;
+
+/** What the AI is asked, and what it answers. Each test sets `script`. */
+let aiCalls: StreamRequest[] = [];
+/** A fresh user per test, so balances and chats never carry over between tests. */
+let me = '';
+let script: { answer?: (request: StreamRequest) => string; fail?: LlmError; delayMs?: number } = {};
+
+const scriptedProvider: LlmProvider = {
+  name: 'mock',
+  async *stream(streamRequest) {
+    aiCalls.push(streamRequest);
+    if (
+      script.fail &&
+      !streamRequest.json &&
+      !streamRequest.messages[0]?.content.includes('title')
+    ) {
+      throw script.fail;
+    }
+    const mock = createMockProvider({
+      delayMs: script.delayMs ?? 0,
+      ...(script.answer ? { respond: script.answer } : {}),
+    });
+    yield* mock.stream(streamRequest);
+  },
+};
+
+beforeAll(async () => {
+  mongo = await startTestMongo({ replicaSet: true });
+  const [gateway, agent, auth] = await Promise.all([
+    generateInternalKeyPair(),
+    generateInternalKeyPair(),
+    generateInternalKeyPair(),
+  ]);
+  gatewayKey = await importInternalPrivateKey(gateway.privateKey);
+  gatewayPublicKey = await importInternalPublicKey(gateway.publicKey);
+  agentKey = await importInternalPrivateKey(agent.privateKey);
+  authKey = await importInternalPrivateKey(auth.privateKey);
+  const agentPublicKey = await importInternalPublicKey(agent.publicKey);
+  chatApp = await startService(
+    createChatApp({ logger, internalPublicKey: gatewayPublicKey, agentPublicKey }),
+    { port: 0, logger, handleSignals: false },
+  );
+  billingApp = await startService(
+    createBillingApp({
+      logger,
+      internalPublicKey: gatewayPublicKey,
+      callerKeys: { agent: agentPublicKey, auth: await importInternalPublicKey(auth.publicKey) },
+    }),
+    { port: 0, logger, handleSignals: false },
+  );
+}, 120_000);
+
+afterAll(async () => {
+  await chatApp.close();
+  await billingApp.close();
+  await mongo.stop();
+});
+
+beforeEach(async () => {
+  store = await createTestRedis();
+  aiCalls = [];
+  script = {};
+  me = `user-${randomUUID()}`;
+});
+
+afterEach(async () => {
+  await store.cleanup();
+});
+
+function agentApp() {
+  const client = (service: 'chat' | 'billing', port: number) =>
+    createInternalClient({
+      caller: 'agent',
+      privateKey: agentKey,
+      service,
+      baseUrl: `http://localhost:${port}`,
+    });
+  const chat = chatService(client('chat', chatApp.port));
+  return createApp({
+    logger,
+    internalPublicKey: gatewayPublicKey,
+    turns: {
+      llm: createLlm({ mode: 'mock', providers: { mock: scriptedProvider }, logger }),
+      chat,
+      billing: billingService(client('billing', billingApp.port)),
+      memory: createMemory(store.redis, (chatId, userId) => chat.recentMessages(userId, chatId)),
+      redis: store.redis,
+      agents: { chat: chatAgent },
+      available: new Set(['chat']),
+    },
+  });
+}
+
+const gatewayToken = (userId: string, audience: string) =>
+  signInternalToken(gatewayKey, audience, { userId });
+
+async function newChat(userId: string): Promise<string> {
+  const response = await request(`http://localhost:${chatApp.port}`)
+    .post('/chats')
+    .set(INTERNAL_TOKEN_HEADER, await gatewayToken(userId, 'chat'))
+    .send({});
+  return response.body.chat.id as string;
+}
+
+async function grantCredits(userId: string) {
+  await request(`http://localhost:${billingApp.port}`)
+    .post('/internal/accounts')
+    .set(
+      INTERNAL_TOKEN_HEADER,
+      await signInternalToken(authKey, 'billing', { userId }, 60, 'auth'),
+    );
+}
+
+async function balanceOf(userId: string): Promise<number> {
+  const response = await request(`http://localhost:${billingApp.port}`)
+    .get('/account')
+    .set(INTERNAL_TOKEN_HEADER, await gatewayToken(userId, 'billing'));
+  return response.body.account.balance as number;
+}
+
+async function historyOf(userId: string, chatId: string) {
+  const response = await request(`http://localhost:${chatApp.port}`)
+    .get(`/chats/${chatId}/messages`)
+    .set(INTERNAL_TOKEN_HEADER, await gatewayToken(userId, 'chat'));
+  return response.body.items as { role: string; content: string; status: string; agent: string }[];
+}
+
+interface SseEvent {
+  event: string;
+  data: Record<string, unknown>;
+}
+
+function parseEvents(text: string): SseEvent[] {
+  return text
+    .split('\n\n')
+    .filter((block) => block.startsWith('event: '))
+    .map((block) => {
+      const [eventLine, dataLine] = block.split('\n');
+      return {
+        event: eventLine?.slice('event: '.length) ?? '',
+        data: JSON.parse(dataLine?.slice('data: '.length) ?? '{}') as Record<string, unknown>,
+      };
+    });
+}
+
+async function sendTurn(userId: string, chatId: string, body: Record<string, unknown>) {
+  return request(agentApp())
+    .post(`/chats/${chatId}/turns`)
+    .set(INTERNAL_TOKEN_HEADER, await gatewayToken(userId, 'agent'))
+    .send(body);
+}
+
+describe('POST /chats/:chatId/turns', () => {
+  it('streams the answer, saves both messages, charges the credits and titles the chat', async () => {
+    const chatId = await newChat(me);
+    await grantCredits(me);
+    script.answer = (streamRequest) =>
+      streamRequest.json
+        ? '{"agent":"chat","confidence":0.9}'
+        : streamRequest.messages[0]?.content.includes('title')
+          ? '"Goa Trip Plan."'
+          : 'Day 1: beaches. Day 2: forts.';
+
+    const response = await sendTurn(me, chatId, {
+      content: 'Plan a 2-day Goa trip',
+      clientMessageId: 'client-0001',
+    });
+
+    expect(response.status).toBe(200);
+    expect(response.headers['content-type']).toMatch(/^text\/event-stream/);
+    const events = parseEvents(response.text);
+    expect(events.map((event) => event.event).filter((name) => name !== 'token')).toEqual([
+      'meta',
+      'agent',
+      'usage',
+      'title',
+      'done',
+    ]);
+    const answer = events
+      .filter((event) => event.event === 'token')
+      .map((event) => event.data.text)
+      .join('');
+    expect(answer).toBe('Day 1: beaches. Day 2: forts.');
+    expect(events.find((event) => event.event === 'agent')?.data).toEqual({
+      agent: 'chat',
+      reason: 'router',
+    });
+    expect(events.find((event) => event.event === 'usage')?.data).toEqual({
+      creditsCharged: 1,
+      balance: 99,
+    });
+    expect(events.find((event) => event.event === 'title')?.data).toEqual({
+      title: 'Goa Trip Plan',
+    });
+
+    const history = await historyOf(me, chatId);
+    expect(history).toMatchObject([
+      { role: 'user', content: 'Plan a 2-day Goa trip', status: 'complete' },
+      { role: 'assistant', content: answer, status: 'complete', agent: 'chat' },
+    ]);
+    expect(await balanceOf(me)).toBe(99);
+    expect(await store.redis.exists(`turn-lock:${chatId}:client-0001`)).toBe(0);
+  });
+
+  it('sends the earlier conversation as memory on the next turn', async () => {
+    const chatId = await newChat(me);
+    await grantCredits(me);
+    script.answer = (streamRequest) =>
+      streamRequest.json ? '{"agent":"chat","confidence":1}' : 'ok';
+    await sendTurn(me, chatId, { content: 'My name is Nayan', clientMessageId: 'client-0001' });
+    aiCalls = [];
+
+    await sendTurn(me, chatId, { content: 'What is my name?', clientMessageId: 'client-0002' });
+
+    const answerCall = aiCalls.find(
+      (call) => !call.json && call.messages.at(-1)?.content === 'What is my name?',
+    );
+    expect(answerCall?.messages.slice(1)).toEqual([
+      { role: 'user', content: 'My name is Nayan' },
+      { role: 'assistant', content: 'ok' },
+      { role: 'user', content: 'What is my name?' },
+    ]);
+  });
+
+  it('refuses with 402 and calls no AI at all when the user has no credits (SEC-03)', async () => {
+    const chatId = await newChat('broke');
+
+    const response = await sendTurn('broke', chatId, {
+      content: 'Hello',
+      clientMessageId: 'client-0001',
+    });
+
+    expect(response.status).toBe(402);
+    expect(response.body.code).toBe('insufficient_credits');
+    expect(aiCalls).toEqual([]);
+    expect(await historyOf('broke', chatId)).toEqual([]);
+  });
+
+  it("gives a 404 for someone else's chat, before any AI call or charge", async () => {
+    const chatId = await newChat('owner');
+    await grantCredits('intruder');
+
+    const response = await sendTurn('intruder', chatId, {
+      content: 'Hello',
+      clientMessageId: 'client-0001',
+    });
+
+    expect(response.status).toBe(404);
+    expect(aiCalls).toEqual([]);
+    expect(await balanceOf('intruder')).toBe(100);
+  });
+
+  it('answers a message once: a resend gets 409, and one in progress is locked', async () => {
+    const chatId = await newChat(me);
+    await grantCredits(me);
+    const body = { content: 'Hello', clientMessageId: 'client-0001' };
+    await sendTurn(me, chatId, body);
+
+    const resend = await sendTurn(me, chatId, body);
+    await store.redis.set(`turn-lock:${chatId}:client-0002`, '1');
+    const parallel = await sendTurn(me, chatId, { ...body, clientMessageId: 'client-0002' });
+
+    expect(resend.status).toBe(409);
+    expect(resend.body.detail).toBe('This message was already answered');
+    expect(parallel.status).toBe(409);
+    expect(parallel.body.detail).toBe('This message is already being answered');
+    expect(await balanceOf(me)).toBe(99);
+    expect(await historyOf(me, chatId)).toHaveLength(2);
+  });
+
+  it('refuses a shortcut with no message and malformed bodies', async () => {
+    const chatId = await newChat(me);
+
+    for (const body of [
+      { content: '/search', clientMessageId: 'client-0001' },
+      { content: '', clientMessageId: 'client-0001' },
+      { content: 'hi', clientMessageId: 'bad id!' },
+      { content: 'hi', clientMessageId: 'client-0001', agent: 'robot' },
+    ]) {
+      expect((await sendTurn(me, chatId, body)).status).toBe(400);
+    }
+  });
+
+  it('gives the credits back and says why when the AI fails before answering', async () => {
+    const chatId = await newChat(me);
+    await grantCredits(me);
+    script.fail = new LlmError('mock', 'provider down', { retryable: false, status: 400 });
+
+    const response = await sendTurn(me, chatId, {
+      content: 'Hello',
+      clientMessageId: 'client-0001',
+    });
+
+    const events = parseEvents(response.text);
+    expect(events.map((event) => event.event)).toEqual(['meta', 'agent', 'error', 'done']);
+    expect(events[2]?.data).toMatchObject({
+      code: 'answer_failed',
+      message: 'The answer failed. Your credits were not charged.',
+    });
+    expect(await balanceOf(me)).toBe(100);
+    expect((await historyOf(me, chatId)).at(-1)).toMatchObject({
+      role: 'assistant',
+      status: 'failed',
+    });
+  });
+
+  it('charges a stop after text started, keeping the partial answer as stopped', async () => {
+    const chatId = await newChat(me);
+    await grantCredits(me);
+    script.delayMs = 20;
+    script.answer = (streamRequest) =>
+      streamRequest.json ? '{"agent":"chat","confidence":1}' : 'one two three four five six seven';
+
+    // A real HTTP client that hangs up after the first token, like a closed tab or a stop.
+    const server = await startService(agentApp(), { port: 0, logger, handleSignals: false });
+    try {
+      const token = await gatewayToken(me, 'agent');
+      await new Promise<void>((resolve, reject) => {
+        const req = httpRequest(
+          {
+            port: server.port,
+            method: 'POST',
+            path: `/chats/${chatId}/turns`,
+            headers: { 'content-type': 'application/json', [INTERNAL_TOKEN_HEADER]: token },
+          },
+          (res) => {
+            res.on('data', (chunk: Buffer) => {
+              if (chunk.toString().includes('event: token')) {
+                req.destroy();
+                resolve();
+              }
+            });
+          },
+        );
+        req.on('error', (error) => {
+          if (!req.destroyed) {
+            reject(error);
+          }
+        });
+        req.end(JSON.stringify({ content: 'Count to seven', clientMessageId: 'client-0001' }));
+      });
+
+      await expect
+        .poll(async () => (await historyOf(me, chatId)).at(-1)?.status, { timeout: 5_000 })
+        .toBe('stopped');
+      const answer = (await historyOf(me, chatId)).at(-1)?.content ?? '';
+      expect(answer.length).toBeGreaterThan(0);
+      expect(answer).not.toBe('one two three four five six seven');
+      await expect.poll(() => balanceOf(me), { timeout: 5_000 }).toBe(99);
+    } finally {
+      await server.close();
+    }
+  });
+});
+
+describe('the agent app', () => {
+  it('refuses a direct call without the gateway token', async () => {
+    const response = await request(agentApp()).post('/chats/x/turns').send({});
+
+    expect(response.status).toBe(401);
+  });
+});

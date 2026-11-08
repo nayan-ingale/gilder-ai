@@ -1,15 +1,22 @@
 import {
   connectMongo,
+  createInternalClient,
   createLogger,
   createRedis,
   disconnectMongo,
+  importInternalPrivateKey,
   importInternalPublicKey,
   pingMongo,
   pingRedis,
   startService,
 } from '@gilder/shared';
+import { AGENT_RUNNERS, AVAILABLE_AGENTS } from './agents/index.ts';
 import { createApp } from './app.ts';
 import { env } from './env.ts';
+import { createLlm } from './llm/llm.ts';
+import { buildProviders } from './llm/providers.ts';
+import { createMemory } from './memory.ts';
+import { billingService, chatService } from './services.ts';
 
 const logger = createLogger({
   service: 'agent',
@@ -20,10 +27,52 @@ const logger = createLogger({
 await connectMongo(env.MONGODB_URI, logger);
 const redis = createRedis(env.REDIS_URL, logger);
 
+const signingKey = await importInternalPrivateKey(env.SERVICE_PRIVATE_KEY);
+const chat = chatService(
+  createInternalClient({
+    caller: 'agent',
+    privateKey: signingKey,
+    service: 'chat',
+    baseUrl: env.CHAT_SERVICE_URL,
+  }),
+);
+const billing = billingService(
+  createInternalClient({
+    caller: 'agent',
+    privateKey: signingKey,
+    service: 'billing',
+    baseUrl: env.BILLING_SERVICE_URL,
+  }),
+);
+
+const llm = createLlm({
+  mode: env.LLM_MODE,
+  providers: buildProviders({
+    groq: env.GROQ_API_KEY,
+    openrouter: env.OPENROUTER_API_KEY,
+    gemini: env.GEMINI_API_KEY,
+  }),
+  logger,
+});
+logger.info(
+  { llmMode: env.LLM_MODE },
+  'AI answers are %s',
+  env.LLM_MODE === 'live' ? 'live' : 'mocked',
+);
+
 const app = createApp({
   logger,
   readinessChecks: { mongo: pingMongo, redis: () => pingRedis(redis) },
   internalPublicKey: await importInternalPublicKey(env.INTERNAL_PUBLIC_KEY),
+  turns: {
+    llm,
+    chat,
+    billing,
+    memory: createMemory(redis, (chatId, userId) => chat.recentMessages(userId, chatId)),
+    redis,
+    agents: AGENT_RUNNERS,
+    available: AVAILABLE_AGENTS,
+  },
 });
 
 await startService(app, {

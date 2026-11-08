@@ -123,6 +123,8 @@ export interface UsageMetadata {
 }
 
 export interface BillingService {
+  /** The user's balance now; 0 when they have no account yet. */
+  balance(userId: string): Promise<number>;
   /** Holds an answer's credits; a 402 AppError when the user has too few. */
   reserve(userId: string, agent: Agent, idempotencyKey: string): Promise<CreditResult>;
   commit(userId: string, reservationId: string, metadata: UsageMetadata): Promise<CreditResult>;
@@ -132,6 +134,17 @@ export interface BillingService {
 export function billingService(client: InternalClient): BillingService {
   // Every credit call is idempotent (a key, or a reservation's fixed outcome), so all may retry.
   return {
+    async balance(userId) {
+      const { account } = await client.request<{ account: { balance: number } }>(
+        'GET',
+        '/account',
+        {
+          userId,
+          retry: true,
+        },
+      );
+      return account.balance;
+    },
     reserve: (userId, agent, idempotencyKey) =>
       client.request('POST', '/internal/credits/reserve', {
         userId,
