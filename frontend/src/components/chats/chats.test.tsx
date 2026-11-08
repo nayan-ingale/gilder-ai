@@ -132,7 +132,8 @@ describe('ChatList', () => {
 
     await userEvent.click(await screen.findByRole('button', { name: 'Options for Goa' }));
     await userEvent.click(screen.getByRole('menuitem', { name: 'Rename' }));
-    const field = screen.getByRole('textbox', { name: 'Title' });
+    // The dialog opens once the menu has closed and returned focus, a tick later.
+    const field = await screen.findByRole('textbox', { name: 'Title' });
     await userEvent.clear(field);
     await userEvent.type(field, 'Goa trip{Enter}');
 
@@ -173,7 +174,7 @@ describe('ChatList', () => {
 
     await userEvent.click(await screen.findByRole('button', { name: 'Options for Goa' }));
     await userEvent.click(screen.getByRole('menuitem', { name: 'Delete' }));
-    const dialog = screen.getByRole('dialog', { name: 'Delete chat?' });
+    const dialog = await screen.findByRole('dialog', { name: 'Delete chat?' });
     await userEvent.click(within(dialog).getByRole('button', { name: 'Delete' }));
 
     await waitFor(() => expect(router.push).toHaveBeenCalledWith('/'));
