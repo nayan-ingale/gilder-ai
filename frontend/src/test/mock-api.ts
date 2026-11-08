@@ -30,7 +30,9 @@ export function mockApi(answer: () => ApiAnswer): ApiCall[] {
   );
   vi.stubGlobal(
     'fetch',
-    vi.fn(async (request: Request) => {
+    vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      // RTK Query passes a Request; plain fetch calls pass a path and options.
+      const request = input instanceof Request ? input : new Request(input, init);
       const url = new URL(request.url);
       const text = await request.text();
       const call = {

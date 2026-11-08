@@ -4,10 +4,13 @@ import { configureStore, type UnknownAction } from '@reduxjs/toolkit';
 import { type ReactNode, useState } from 'react';
 import { Provider } from 'react-redux';
 import { api } from './api';
+import { pendingSlice } from './pending-slice';
 
 type ApiState = ReturnType<typeof api.reducer>;
+type PendingState = ReturnType<typeof pendingSlice.reducer>;
 export interface RootState {
   [api.reducerPath]: ApiState;
+  pending: PendingState;
 }
 
 /**
@@ -16,9 +19,11 @@ export interface RootState {
  * refuses random values while it prerenders the static shell.
  */
 function rootReducer(state: RootState | undefined, action: UnknownAction): RootState {
-  const previous = state?.[api.reducerPath];
-  const next = api.reducer(previous, action);
-  return state && next === previous ? state : { [api.reducerPath]: next };
+  const apiState = api.reducer(state?.[api.reducerPath], action);
+  const pending = pendingSlice.reducer(state?.pending, action);
+  return state && apiState === state[api.reducerPath] && pending === state.pending
+    ? state
+    : { [api.reducerPath]: apiState, pending };
 }
 
 export function makeStore() {
@@ -42,3 +47,5 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   const [store] = useState(makeStore);
   return <Provider store={store}>{children}</Provider>;
 }
+
+export type AppDispatch = AppStore['dispatch'];
