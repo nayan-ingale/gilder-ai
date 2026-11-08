@@ -98,7 +98,7 @@ export const deploymentPage: DocPage = {
         },
         {
           kind: 'text',
-          text: "`pnpm setup:keys` then writes the key pair for internal tokens into those files: the gateway's private key as `INTERNAL_PRIVATE_KEY`, and the matching public key as `INTERNAL_PUBLIC_KEY` for each service. Key values are never printed. Run again, it keeps the gateway's key and only fixes a service whose public key is missing or does not match; `pnpm setup:keys --rotate` makes a new pair for all of them. It stops if an env file is missing, so `pnpm setup:env` comes first. Auth, chat, agent and billing refuse to start without the public key and import it at startup for their internal-token check; the gateway refuses to start unless its private key parses as an Ed25519 key.",
+          text: "`pnpm setup:keys` then writes the key pairs for internal tokens into those files: the gateway's private key as `INTERNAL_PRIVATE_KEY` and its public key as `INTERNAL_PUBLIC_KEY` for each service; auth's own key as `SERVICE_PRIVATE_KEY` and its public key as `AUTH_PUBLIC_KEY` for billing; and the agent's own key as `SERVICE_PRIVATE_KEY` and its public key as `AGENT_PUBLIC_KEY` for chat and billing. Key values are never printed. Run again, it keeps existing private keys and only fixes public keys that are missing or do not match; `pnpm setup:keys --rotate` makes new pairs for all of them. It stops if an env file is missing, so `pnpm setup:env` comes first. Each app refuses to start without the keys it needs, and every private key must parse as an Ed25519 key.",
         },
         {
           kind: 'text',
@@ -111,6 +111,10 @@ export const deploymentPage: DocPage = {
         {
           kind: 'text',
           text: "Auth's `.env.example` leaves the three Firebase settings empty and `AUTH_DEV_LOGIN` false. With the Firebase settings empty, auth still starts, logs the warning 'Google sign-in is not set up: the FIREBASE_* settings are empty', and answers Google sign-ins with 503. Setting `AUTH_DEV_LOGIN=true` turns on sign-in with just an email, and auth logs a warning about it at startup.",
+        },
+        {
+          kind: 'text',
+          text: "Service URLs for calls between services default to localhost: auth's `BILLING_SERVICE_URL`, and the agent's `CHAT_SERVICE_URL` and `BILLING_SERVICE_URL`. The agent's `LLM_MODE` is `mock` by default, so it answers with canned text and needs no AI keys; `live` calls the real providers and needs `GROQ_API_KEY`. `OPENROUTER_API_KEY` and `GEMINI_API_KEY` are optional, and empty counts as unset.",
         },
         {
           kind: 'quote',

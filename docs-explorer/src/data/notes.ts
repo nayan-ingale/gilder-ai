@@ -8,6 +8,7 @@ import type { SymbolNote } from './schema.ts';
 const CONSTANTS_TEST = 'backend/shared/src/constants.test.ts';
 const ENV_TEST = 'backend/shared/src/env.test.ts';
 const INTERNAL_TOKEN_TEST = 'backend/shared/src/internalToken.test.ts';
+const INTERNAL_CLIENT_TEST = 'backend/shared/src/internalClient.test.ts';
 const LOGGER_TEST = 'backend/shared/src/logger.test.ts';
 const MONGO_TEST = 'backend/shared/src/mongo.test.ts';
 const RATE_LIMIT_TEST = 'backend/shared/src/rateLimit.test.ts';
@@ -20,8 +21,8 @@ const GATEWAY_ROUTE_TABLE_TEST = 'backend/gateway/src/route-table.test.ts';
 const GATEWAY_GUARDS_TEST = 'backend/gateway/src/guards.test.ts';
 const GATEWAY_PROXY_TEST = 'backend/gateway/src/proxy.test.ts';
 /**
- * The real auth and chat apps on their own ports behind the real gateway: sign-in, profile,
- * logout, chats, SEC-01/02/04/06.
+ * The real auth, chat and billing apps on their own ports behind the real gateway: sign-in with
+ * the sign-up grant, profile, logout, chats, the balance, SEC-01/02/04/06.
  */
 const JOURNEY_TEST = 'backend/gateway/src/journey.test.ts';
 const AUTH_TEST = 'backend/services/auth/src/app.test.ts';
@@ -30,12 +31,31 @@ const AUTH_USERS_TEST = 'backend/services/auth/src/users.test.ts';
 const AUTH_FIREBASE_TEST = 'backend/services/auth/src/firebase.test.ts';
 const AUTH_SESSION_ROUTES_TEST = 'backend/services/auth/src/session-routes.test.ts';
 const AUTH_ME_ROUTES_TEST = 'backend/services/auth/src/me-routes.test.ts';
+const AUTH_BILLING_TEST = 'backend/services/auth/src/billing.test.ts';
 const CHAT_TEST = 'backend/services/chat/src/app.test.ts';
 const CHAT_MODELS_TEST = 'backend/services/chat/src/models.test.ts';
 const CHAT_ROUTES_TEST = 'backend/services/chat/src/chat-routes.test.ts';
 const CHAT_INTERNAL_ROUTES_TEST = 'backend/services/chat/src/internal-routes.test.ts';
 const AGENT_TEST = 'backend/services/agent/src/app.test.ts';
+const AGENT_ENV_SCHEMA_TEST = 'backend/services/agent/src/env-schema.test.ts';
+const AGENT_LLM_TEST = 'backend/services/agent/src/llm/llm.test.ts';
+const AGENT_MOCK_TEST = 'backend/services/agent/src/llm/mock.test.ts';
+const AGENT_OPENAI_TEST = 'backend/services/agent/src/llm/openai-compatible.test.ts';
+const AGENT_SSE_TEST = 'backend/services/agent/src/llm/sse.test.ts';
+const AGENT_STRUCTURED_TEST = 'backend/services/agent/src/structured.test.ts';
+const AGENT_ROUTING_TEST = 'backend/services/agent/src/routing.test.ts';
+const AGENT_CHAT_TEST = 'backend/services/agent/src/agents/chat.test.ts';
+const AGENT_MEMORY_TEST = 'backend/services/agent/src/memory.test.ts';
+const AGENT_SERVICES_TEST = 'backend/services/agent/src/services.test.ts';
+/** The turn route with the real chat and billing apps, a test Redis and a scripted mock model. */
+const AGENT_TURNS_TEST = 'backend/services/agent/src/turns.test.ts';
 const BILLING_TEST = 'backend/services/billing/src/app.test.ts';
+const BILLING_MODELS_TEST = 'backend/services/billing/src/models.test.ts';
+/** The sign-up grant, POST /internal/accounts and GET /account. */
+const BILLING_CREDITS_TEST = 'backend/services/billing/src/credits.test.ts';
+/** Reserve, commit and release, the ledger invariant, SEC-08 and the credit routes. */
+const BILLING_RESERVATIONS_TEST = 'backend/services/billing/src/reservations.test.ts';
+const BILLING_SWEEPER_TEST = 'backend/services/billing/src/sweeper.test.ts';
 
 /** Each app's test sends /healthz, /readyz and an unknown route through the shared middleware. */
 const APP_TESTS = [GATEWAY_TEST, AUTH_TEST, CHAT_TEST, AGENT_TEST, BILLING_TEST];
@@ -44,6 +64,7 @@ const FRONTEND_CHATS_TEST = 'frontend/src/components/chats/chats.test.tsx';
 const FRONTEND_CHATS_LIB_TEST = 'frontend/src/lib/chats.test.ts';
 const FRONTEND_SERVER_CHATS_TEST = 'frontend/src/server/chats.test.ts';
 const FRONTEND_SESSION_TEST = 'frontend/src/server/session.test.ts';
+const FRONTEND_CREDITS_TEST = 'frontend/src/components/billing/credits-card.test.tsx';
 
 export const notes: SymbolNote[] = [
   // -------------------------------------------------------------------------------------------
@@ -60,11 +81,11 @@ export const notes: SymbolNote[] = [
   },
   {
     symbol: 'backend/shared/src/constants.ts#CREDIT_COSTS',
-    status: 'not-wired',
+    status: 'verified',
     summary: 'How many credits one answer from each agent costs.',
-    why: 'Prices live in one place, next to the agent list. It is typed as a record over every agent, so adding an agent without a price fails the typecheck. Its comment notes that choosing the agent (the router call) is free. Nothing outside the tests reads it yet.',
+    why: "Prices live in one place, next to the agent list. It is typed as a record over every agent, so adding an agent without a price fails the typecheck. Its comment notes that choosing the agent (the router call) is free. Billing's reserveCredits takes the amount from it, so a caller names the agent, never the price; the agent's turn route refuses a user with less than the chat price before any AI call.",
     returns: 'chat costs 1 credit, search 5, and every other agent 10.',
-    tests: [CONSTANTS_TEST],
+    tests: [CONSTANTS_TEST, BILLING_RESERVATIONS_TEST, AGENT_TURNS_TEST],
   },
   {
     symbol: 'backend/shared/src/constants.ts#AGENT_RATE_LIMITS',
@@ -76,11 +97,11 @@ export const notes: SymbolNote[] = [
   },
   {
     symbol: 'backend/shared/src/constants.ts#SIGNUP_CREDITS',
-    status: 'not-wired',
+    status: 'verified',
     summary: 'The credits every new account starts with.',
-    why: 'Named once so the sign-up grant and the Free plan cannot drift apart: PLANS.free uses it for its credits. Only PLANS and the tests read it, and nothing uses PLANS yet.',
+    why: "Named once so the sign-up grant and the Free plan cannot drift apart: PLANS.free uses it for its credits. Billing's grantSignupCredits adds exactly this many, with a signup_grant ledger entry, and journey.test.ts checks the balance after a first sign-in.",
     returns: 'The number 100.',
-    tests: [CONSTANTS_TEST],
+    tests: [CONSTANTS_TEST, BILLING_CREDITS_TEST, JOURNEY_TEST],
   },
   {
     symbol: 'backend/shared/src/constants.ts#GATEWAY_RATE_LIMITS',
@@ -92,17 +113,17 @@ export const notes: SymbolNote[] = [
   },
   {
     symbol: 'backend/shared/src/constants.ts#PLANS',
-    status: 'not-wired',
+    status: 'verified',
     summary: 'The three plans a user can have: Free, Starter and Pro.',
     how: [
       'Prices are in paise (₹1 = 100 paise), the unit Razorpay works in.',
       '`satisfies Record<string, Plan>` checks that each plan has every field of Plan.',
       '`as const` keeps the exact values, so code can rely on them as types.',
     ],
-    why: 'Whole numbers of paise avoid rounding errors with money. Per its comment, `validityDays` is how long a plan badge lasts; purchased credits never expire. Nothing outside the tests reads it yet.',
+    why: "Whole numbers of paise avoid rounding errors with money. Per its comment, `validityDays` is how long a plan badge lasts; purchased credits never expire. Billing takes its plan names from it (PLAN_IDS), so an account's plan can only be one of these. Prices are not used yet: payments are not built.",
     returns:
       'Free: 0 paise and 100 credits. Starter: 19,900 paise (₹199) and 500 credits. Pro: 49,900 paise (₹499) and 1,000 credits. Each lasts 30 days.',
-    tests: [CONSTANTS_TEST],
+    tests: [CONSTANTS_TEST, BILLING_MODELS_TEST],
   },
 
   // -------------------------------------------------------------------------------------------
@@ -158,7 +179,7 @@ export const notes: SymbolNote[] = [
     symbol: 'backend/shared/src/env.ts#baseEnvSchema',
     status: 'verified',
     summary: 'The Zod schema for the variables every app reads: NODE_ENV and LOG_LEVEL.',
-    why: 'Every app needs these two, so they are defined once. Each app extends this schema with its own variables: in its src/env.ts, or for the gateway and auth in src/env-schema.ts.',
+    why: 'Every app needs these two, so they are defined once. Each app extends this schema with its own variables: in its src/env.ts, or for the gateway, auth and the agent in src/env-schema.ts.',
     returns:
       'A Zod object schema. NODE_ENV is development, test or production (default development). LOG_LEVEL is a pino level from fatal to trace, or silent (default info).',
     tests: [ENV_TEST],
@@ -173,9 +194,39 @@ export const notes: SymbolNote[] = [
       'Escaped `\\n` line breaks are turned back into real ones, so the key works with or without double quotes in .env.',
       "The result must start with -----BEGIN PUBLIC KEY-----, or it fails with 'is not a PEM public key: run pnpm setup:keys'.",
     ],
-    why: 'Auth, chat, agent and billing all check internal tokens, so they share one rule for the key that checks them. Neither message repeats the value. It looks only at the PEM header: whether the rest is a usable key shows when index.ts imports it with importInternalPublicKey.',
+    why: "Auth, chat, agent and billing all check internal tokens, so they share one rule for the keys that check them: the gateway's INTERNAL_PUBLIC_KEY everywhere, and AUTH_PUBLIC_KEY and AGENT_PUBLIC_KEY where those services may call. Neither message repeats the value. It looks only at the PEM header: whether the rest is a usable key shows when index.ts imports it with importInternalPublicKey.",
     returns: 'A Zod schema whose parsed value is the PEM text, with real line breaks.',
     tests: [AUTH_ENV_SCHEMA_TEST],
+  },
+  {
+    symbol: 'backend/shared/src/env.ts#isEd25519PrivateKey',
+    status: 'verified',
+    summary: 'Says whether a text parses as an Ed25519 private key.',
+    why: "It asks Node's createPrivateKey to read the text and checks the key type, the kind `pnpm setup:keys` writes. Anything that fails to parse is simply false, so the settings check reports one clear message instead of a crypto error.",
+    returns: 'true or false.',
+    tests: [GATEWAY_ENV_SCHEMA_TEST, AUTH_ENV_SCHEMA_TEST],
+  },
+  {
+    symbol: 'backend/shared/src/env.ts#internalPrivateKeySchema',
+    status: 'verified',
+    summary: 'The Zod schema for a private key that signs internal tokens.',
+    how: [
+      "A missing value fails with 'is missing: run pnpm setup:keys'.",
+      'Escaped `\\n` line breaks are turned back into real ones.',
+      "The result must parse as an Ed25519 private key (isEd25519PrivateKey), or it fails with 'is not a valid Ed25519 private key: run pnpm setup:keys'.",
+    ],
+    why: 'Three apps sign tokens: the gateway with INTERNAL_PRIVATE_KEY, and auth and the agent with their own SERVICE_PRIVATE_KEY. The key is parsed, not just matched on its header, so a corrupt key stops the app at startup. Neither message repeats the value.',
+    returns: 'A Zod schema whose parsed value is the PEM text, with real line breaks.',
+    tests: [GATEWAY_ENV_SCHEMA_TEST, AUTH_ENV_SCHEMA_TEST, AGENT_ENV_SCHEMA_TEST],
+  },
+  {
+    symbol: 'backend/shared/src/env.ts#serviceUrlSchema',
+    status: 'verified',
+    summary:
+      "The Zod schema for another service's base URL: an http(s) URL, without trailing slashes.",
+    why: "Callers build each URL as the base followed by a path, so a trailing slash would double the slash. Any other protocol fails with 'must be an http(s) URL'. The gateway uses it for its four service URLs, auth for BILLING_SERVICE_URL, and the agent for CHAT_SERVICE_URL and BILLING_SERVICE_URL, each with a localhost default.",
+    returns: 'A Zod schema whose parsed value is the URL text without trailing slashes.',
+    tests: [GATEWAY_ENV_SCHEMA_TEST, AUTH_ENV_SCHEMA_TEST],
   },
   {
     symbol: 'backend/shared/src/env.ts#portSchema',
@@ -384,16 +435,24 @@ export const notes: SymbolNote[] = [
     symbol: 'backend/shared/src/internalToken.ts#INTERNAL_TOKEN_HEADER',
     status: 'verified',
     summary: 'The name of the header that carries the internal token.',
-    why: "The gateway and the services must agree on the header name, so it is defined once. The logger separately redacts this header, so tokens never reach the logs. The gateway's proxyToService sets it on every request it forwards, and requireInternalToken reads it in auth, chat, agent and billing.",
+    why: "The signers and the services must agree on the header name, so it is defined once. The logger separately redacts this header, so tokens never reach the logs. The gateway's proxyToService sets it on every request it forwards, createInternalClient on every call one service makes to another, and requireInternalToken reads it in auth, chat, agent and billing.",
     returns: "The string 'x-internal-token'.",
+    tests: [INTERNAL_TOKEN_TEST, INTERNAL_CLIENT_TEST],
+  },
+  {
+    symbol: 'backend/shared/src/internalToken.ts#INTERNAL_CALLERS',
+    status: 'verified',
+    summary: 'Who can sign internal tokens: the gateway, auth and the agent.',
+    why: 'The gateway signs for every request it forwards. Auth and the agent also call other services, each with its own key: auth asks billing for the sign-up grant, and the agent reads and saves chats and holds and charges credits. A service trusts exactly the callers it needs, and a route can name the callers allowed to use it (requireCaller). The types InternalCaller and ServiceCaller (every caller but the gateway) come from this list.',
+    returns: "A read-only array: 'gateway', 'auth', 'agent'.",
     tests: [INTERNAL_TOKEN_TEST],
   },
   {
-    symbol: 'backend/shared/src/internalToken.ts#ISSUER',
+    symbol: 'backend/shared/src/internalToken.ts#issuerOf',
     status: 'verified',
-    summary: 'The issuer written into, and required on, every internal token.',
-    why: 'signInternalToken writes it into every token and verifyInternalToken rejects a token with any other issuer. The name says the gateway is the one that signs them.',
-    returns: "The string 'gilder-gateway'.",
+    summary: "The issuer a caller writes into its tokens: 'gilder-' and its name.",
+    why: 'signInternalToken writes it into every token, and verifyInternalToken reads it back to choose which public key to check the signature with. jose then checks the issuer again against that caller, so a token that claims one signer but is signed by another fails.',
+    returns: "A string such as 'gilder-gateway' or 'gilder-agent'.",
     tests: [INTERNAL_TOKEN_TEST],
   },
   {
@@ -408,7 +467,7 @@ export const notes: SymbolNote[] = [
     symbol: 'backend/shared/src/internalToken.ts#importInternalPrivateKey',
     status: 'verified',
     summary: 'Turns a private key in PEM text into a key object that can sign internal tokens.',
-    why: "Keys are kept as PEM text, for example in .env files, but jose signs with a key object. It always imports the key for EdDSA. The gateway's index.ts imports INTERNAL_PRIVATE_KEY with it at startup and passes the key to createApp, which signs every forwarded request with it. The gateway's settings check has already made sure the text parses as an Ed25519 private key.",
+    why: "Keys are kept as PEM text, for example in .env files, but jose signs with a key object. It always imports the key for EdDSA. The gateway's index.ts imports INTERNAL_PRIVATE_KEY with it, and auth's and the agent's index.ts import their own SERVICE_PRIVATE_KEY, which createInternalClient signs their calls with. The settings checks (internalPrivateKeySchema) have already made sure each text parses as an Ed25519 private key.",
     returns: 'A promise of the key object (InternalKey).',
     tests: [INTERNAL_TOKEN_TEST],
   },
@@ -416,7 +475,7 @@ export const notes: SymbolNote[] = [
     symbol: 'backend/shared/src/internalToken.ts#importInternalPublicKey',
     status: 'verified',
     summary: 'Turns a public key in PEM text into a key object that can verify internal tokens.',
-    why: 'Services only need the public key: it can check a token but cannot make one. It always imports the key for EdDSA. Auth, chat, agent and billing each import INTERNAL_PUBLIC_KEY with it in index.ts at startup and pass the key to createApp for the internal-token check. Their settings check only looks at the PEM header, so a key that has the header but cannot be read makes it reject; nothing catches that, so the service exits with code 1 before it listens.',
+    why: "Services only need public keys: one can check a token but cannot make one. It always imports the key for EdDSA. Auth, chat, agent and billing each import the gateway's INTERNAL_PUBLIC_KEY with it at startup; billing also imports AUTH_PUBLIC_KEY and AGENT_PUBLIC_KEY, and chat AGENT_PUBLIC_KEY, for the services allowed to call them. The settings checks only look at the PEM header, so a key that has the header but cannot be read makes it reject; nothing catches that, so the service exits with code 1 before it listens.",
     returns: 'A promise of the key object (InternalKey).',
     tests: [INTERNAL_TOKEN_TEST, AUTH_TEST, CHAT_TEST, AGENT_TEST, BILLING_TEST],
   },
@@ -428,7 +487,7 @@ export const notes: SymbolNote[] = [
       'It generates the pair with jose, marked extractable so it can be exported.',
       'It exports the private key as PKCS8 PEM and the public key as SPKI PEM.',
     ],
-    why: 'Its comment says it is for .env files and tests. The private key signs tokens and the public key checks them. The `pnpm setup:keys` script (backend/shared/scripts/setup-keys.ts) calls it when the gateway has no signing key yet, or with --rotate; the tests call it too.',
+    why: 'Its comment says it is for .env files and tests. The private key signs tokens and the public key checks them. The `pnpm setup:keys` script (backend/shared/scripts/setup-keys.ts) calls it for each signer that has no key yet, or for all of them with --rotate: the gateway, auth and the agent. The tests make a pair for each signer they need.',
     returns: 'A promise of { privateKey, publicKey }, both PEM strings.',
     tests: [INTERNAL_TOKEN_TEST],
   },
@@ -436,30 +495,36 @@ export const notes: SymbolNote[] = [
     symbol: 'backend/shared/src/internalToken.ts#signInternalToken',
     status: 'verified',
     summary:
-      'Signs a short-lived token that proves a forwarded request came through the gateway, and names its user when there is one.',
+      'Signs a short-lived token for one service, naming who signed it and, when there is one, the user.',
     how: [
       'The subject (`sub`) is the user ID, set only when a user ID is given. A token for a request with no session, such as a sign-in, has no `sub`.',
       'The request ID, when given, goes in a `rid` claim.',
-      'The issuer is gilder-gateway and the audience is the service the token is for.',
+      "The issuer names the caller (issuerOf): 'gilder-gateway' unless a service signs, and the audience is the service the token is for.",
       'It expires after `ttlSeconds` (60 by default) and is signed with EdDSA.',
     ],
-    why: "Services never trust a plain user-ID header, because anything that can reach a service could claim to be any user. So services accept only a signed token addressed to them. A token without a user still proves the request came through the gateway, so no service route has to be open to direct calls. The audience stops a token for one service being used against another, and the short life limits the harm if one leaks. The gateway's proxyToService signs a fresh one for every request it forwards, with the default 60 seconds.",
+    why: "Services never trust a plain user-ID header, because anything that can reach a service could claim to be any user. So services accept only a signed token addressed to them. A token without a user still proves the request came through a trusted signer, so no service route has to be open to direct calls. The audience stops a token for one service being used against another, and the short life limits the harm if one leaks. The gateway's proxyToService signs one for every request it forwards, and createInternalClient for every call auth or the agent makes, with the caller's own key.",
     returns: 'A promise of the signed token, a JWT string.',
-    tests: [INTERNAL_TOKEN_TEST, GATEWAY_PROXY_TEST, GATEWAY_TEST, JOURNEY_TEST],
+    tests: [
+      INTERNAL_TOKEN_TEST,
+      INTERNAL_CLIENT_TEST,
+      GATEWAY_PROXY_TEST,
+      GATEWAY_TEST,
+      JOURNEY_TEST,
+    ],
   },
   {
     symbol: 'backend/shared/src/internalToken.ts#verifyInternalToken',
     status: 'verified',
-    summary: 'Checks an internal token and reads the user and request ID from it, when present.',
+    summary:
+      'Checks an internal token against the keys this service trusts, and reads the signer, the user and the request ID.',
     how: [
-      'jose checks the signature, the issuer, the audience and the expiry, and accepts only EdDSA.',
+      "It reads the token's issuer without checking anything, only to pick the key: an issuer that is no known caller, or a caller with no key in `trusted`, is refused straight away.",
+      "jose then checks the signature with that caller's key, the issuer, the audience and the expiry, and accepts only EdDSA.",
       '`currentDate` lets tests pretend time has passed.',
-      'It returns `userId` only when `sub` is a non-empty string, and `requestId` only when the `rid` claim is a string.',
-      'A valid token with no subject is accepted; the result just has no `userId`.',
+      'It returns the caller always, `userId` only when `sub` is a non-empty string, and `requestId` only when the `rid` claim is a string.',
     ],
-    why: 'A service must reject a token that is missing, forged, expired or addressed to another service. Whether a route needs a user is a separate check, requireUser. Only requireInternalToken calls it, which auth, chat, agent and billing put in front of their routes.',
-    returns:
-      'A promise of { userId?, requestId? }, an empty object for a valid token with neither. It rejects when any check fails.',
+    why: "A service must reject a token that is missing, forged, expired, addressed to another service or signed by a caller it does not trust. Each signer has its own key, so a service's key cannot pass for the gateway's, nor the other way round. Whether a route needs a user or a particular caller is checked separately (requireUser, requireCaller). Only requireInternalToken calls it.",
+    returns: 'A promise of { caller, userId?, requestId? }. It rejects when any check fails.',
     tests: [INTERNAL_TOKEN_TEST, SERVICE_TEST],
   },
   {
@@ -470,14 +535,14 @@ export const notes: SymbolNote[] = [
       'It reads the x-internal-token header.',
       "A missing header throws AppError('unauthorized', 'Missing internal token').",
       "A token that fails verifyInternalToken throws AppError('unauthorized', 'Invalid internal token'), keeping the original error as `cause`.",
-      'When the token names a user, it stores the user ID in `res.locals.userId` and in the request context.',
+      'It stores the signer in `res.locals.caller`, and, when the token names a user, the user ID in `res.locals.userId` and in the request context.',
       'A valid token with no user passes too, with no user set. It does not require one: routes that act for a user add requireUser() after it.',
       'Express 5 passes errors thrown in async middleware to the error handler, which answers 401.',
     ],
-    why: 'It is how a service knows that a request really came through the gateway, and which user it is for. A direct call without a valid token gets 401. With the `internalAuth` option, createService puts it in front of every route except /healthz and /readyz. Auth, chat, agent and billing pass that option, each with its own name as the audience. The gateway signs the tokens it checks.',
+    why: "It is how a service knows that a request came from a signer it trusts, which one, and which user it is for. A direct call without a valid token gets 401. With the `internalAuth` option, createService puts it in front of every route except /healthz and /readyz, with the gateway's key and the keys in `callers`. Auth, chat, agent and billing pass that option, each with its own name as the audience; chat also trusts the agent, and billing auth and the agent.",
     returns: 'An async Express middleware function.',
     sideEffects: [
-      'Sets res.locals.userId when the token names a user.',
+      'Sets res.locals.caller, and res.locals.userId when the token names a user.',
       'Adds that user ID to the request context, so later log lines carry it.',
     ],
     tests: [
@@ -500,9 +565,78 @@ export const notes: SymbolNote[] = [
       "Without `res.locals.userId`, it passes AppError('unauthorized', 'This route needs a signed-in user') to the error handler, which answers 401.",
       'Otherwise it calls next().',
     ],
-    why: 'A valid internal token only proves that a request came through the gateway; requests with no session, such as a sign-in, carry one too. Routes that must know the user add this check on top: in auth, DELETE /sessions/current, GET and PATCH /me and GET /internal/users/:id; in chat, every /chats and /internal route.',
+    why: "A valid internal token only proves that a request came from a trusted signer; requests with no session, such as a sign-in, carry one too. Routes that must know the user add this check on top: in auth, DELETE /sessions/current, GET and PATCH /me and GET /internal/users/:id; in chat, every /chats and /internal route; in billing, GET /account and every /internal route; and the agent's turn route.",
     returns: 'An Express middleware function.',
-    tests: [INTERNAL_TOKEN_TEST, CHAT_ROUTES_TEST, CHAT_INTERNAL_ROUTES_TEST],
+    tests: [
+      INTERNAL_TOKEN_TEST,
+      CHAT_ROUTES_TEST,
+      CHAT_INTERNAL_ROUTES_TEST,
+      BILLING_CREDITS_TEST,
+      AGENT_TURNS_TEST,
+    ],
+  },
+  {
+    symbol: 'backend/shared/src/internalToken.ts#requireCaller',
+    status: 'verified',
+    summary:
+      'Middleware for internal routes meant for one service: answers 403 unless the token was signed by one of the named callers.',
+    how: [
+      'It runs after requireInternalToken, which sets `res.locals.caller`.',
+      "A caller not in the list, the gateway included, gets AppError('forbidden', 'This route is not open to this caller'): 403.",
+    ],
+    why: "The gateway never forwards /internal routes, but a service that trusts two callers would otherwise let either one use every route. Chat's /internal routes take only the agent; billing's POST /internal/accounts takes only auth, and its credit routes only the agent. So auth's key cannot reserve credits, and the agent's cannot grant them.",
+    returns: 'An Express middleware function.',
+    tests: [
+      INTERNAL_TOKEN_TEST,
+      CHAT_INTERNAL_ROUTES_TEST,
+      BILLING_CREDITS_TEST,
+      BILLING_RESERVATIONS_TEST,
+    ],
+  },
+
+  // -------------------------------------------------------------------------------------------
+  // backend/shared/src/internalClient.ts
+
+  {
+    symbol: 'backend/shared/src/internalClient.ts#createInternalClient',
+    status: 'verified',
+    summary:
+      'How one service calls another: a fresh token signed with its own key, for the same user and request, with a time limit.',
+    how: [
+      "Each call signs a new 60-second token: audience the service called, issuer the caller, subject the user the call is for, and the current request's ID from the request context as `rid`.",
+      'It sends the token in x-internal-token, the request ID in X-Request-Id and a JSON body when there is one, and gives up after 5 seconds (DEFAULT_TIMEOUT_MS) unless told otherwise.',
+      'A 204 gives undefined and a 2xx its JSON body.',
+      'A 4xx whose body names a known error code is thrown again as that AppError, with its detail: a 402 from billing stays a 402.',
+      "A 5xx, a timeout or a refused connection becomes AppError('service_unavailable').",
+      'With `retry: true`, a service_unavailable is tried once more after 200 ms (RETRY_DELAY_MS); only for calls that are safe to repeat.',
+    ],
+    why: "Auth's sign-up grant and every call the agent makes to chat and billing go through it, so they all sign, time out and report errors the same way. A fresh token per call means a long answer never outlives its token, and the shared request ID ties the services' log lines together.",
+    returns: 'A client with one method, request(method, path, { userId, body, retry }).',
+    tests: [INTERNAL_CLIENT_TEST, AUTH_BILLING_TEST, AGENT_SERVICES_TEST, JOURNEY_TEST],
+  },
+  {
+    symbol: 'backend/shared/src/internalClient.ts#DEFAULT_TIMEOUT_MS',
+    status: 'verified',
+    summary: 'How long a call to another service may take by default: 5 seconds.',
+    why: 'A service that does not answer must not hold up the caller: a sign-in waiting for billing, or an answer waiting for chat. A caller can pass its own timeoutMs; none does today.',
+    returns: 'The number 5000.',
+    tests: [INTERNAL_CLIENT_TEST],
+  },
+  {
+    symbol: 'backend/shared/src/internalClient.ts#RETRY_DELAY_MS',
+    status: 'verified',
+    summary: 'The pause before the one retry: 200 milliseconds.',
+    why: 'A short wait gives a restarting service a moment without making the user wait long.',
+    returns: 'The number 200.',
+    tests: [INTERNAL_CLIENT_TEST],
+  },
+  {
+    symbol: 'backend/shared/src/internalClient.ts#isErrorCode',
+    status: 'verified',
+    summary: 'Says whether a value is one of the shared error codes.',
+    why: "createInternalClient keeps the other service's error code only when it is one the shared errors know, so an unknown body never turns into a strange error.",
+    returns: 'true or false.',
+    tests: [INTERNAL_CLIENT_TEST],
   },
 
   // -------------------------------------------------------------------------------------------
@@ -696,11 +830,11 @@ export const notes: SymbolNote[] = [
       'helmet() sets security headers.',
       'When `parseJson` is true (the default), express.json() parses JSON bodies up to `bodyLimit` (64kb by default). When it is false, bodies are left unread, byte for byte.',
       'healthRouter() adds /healthz and /readyz.',
-      'When the `internalAuth` option is given, requireInternalToken() comes next. Every route except /healthz and /readyz then needs a valid internal token addressed to this service, so a direct call gets 401 on any path, even an unknown one, unless its JSON body is rejected first: the body parser runs before the token check.',
+      "When the `internalAuth` option is given, requireInternalToken() comes next, trusting the gateway's key and the keys in `internalAuth.callers`. Every route except /healthz and /readyz then needs a valid internal token addressed to this service, so a direct call gets 401 on any path, even an unknown one, unless its JSON body is rejected first: the body parser runs before the token check.",
       "The app's own `routes` come next.",
       'notFoundHandler() and errorHandler() come last, to catch whatever is left.',
     ],
-    why: 'Middleware order matters: the request ID must exist before anything logs, health probes must not need a token, and the error handler must come last. The token check runs before the routes, so a call without a token cannot learn from a 404 which paths exist. Writing the order once means all five apps get it right. The gateway turns `parseJson` off, so it forwards bodies to the services untouched, and passes its /api router as its routes. Auth, chat, agent and billing pass `internalAuth`, and auth and chat also their own routes.',
+    why: 'Middleware order matters: the request ID must exist before anything logs, health probes must not need a token, and the error handler must come last. The token check runs before the routes, so a call without a token cannot learn from a 404 which paths exist. Writing the order once means all five apps get it right. The gateway turns `parseJson` off, so it forwards bodies to the services untouched, and passes its /api router as its routes. Auth, chat, agent and billing pass `internalAuth` and their own routes; chat lists the agent in `callers`, and billing auth and the agent.',
     returns: 'The Express app, not listening yet.',
     sideEffects: [
       'For each request once the app listens: sets security headers and X-Request-Id, and writes a request log line (not for GET or HEAD health probes).',
@@ -892,13 +1026,15 @@ export const notes: SymbolNote[] = [
     status: 'verified',
     summary: 'Starts a real MongoDB for one test file and connects Mongoose to it.',
     how: [
-      'mongodb-memory-server downloads a mongod binary on first use and starts it as a single server, so no Docker is needed.',
+      'mongodb-memory-server downloads a mongod binary on first use and starts it, so no Docker is needed: a single server by default, or a one-member replica set (WiredTiger) with `{ replicaSet: true }`.',
       'connectMongo connects the shared Mongoose to its gilder_test database, with a silent logger.',
       '`stop()` disconnects Mongoose and stops the server.',
     ],
-    why: "For tests only: an app's tests import it from `@gilder/shared/testing`, a separate entry that the running apps never load. Each call starts its own server, so test files running at the same time never share data. auth's users.test.ts, session-routes.test.ts and me-routes.test.ts, chat's models.test.ts, chat-routes.test.ts and internal-routes.test.ts, and the gateway's journey.test.ts use it.",
+    why: "For tests only: an app's tests import it from `@gilder/shared/testing`, a separate entry that the running apps never load. Each call starts its own server, so test files running at the same time never share data. Transactions need a replica set, so billing's tests, the agent's turn and service tests and the gateway's journey.test.ts ask for one; auth's and chat's model and route tests use a single server.",
     returns: 'A promise of { stop }.',
-    sideEffects: ['Starts a mongod process and connects Mongoose to it.'],
+    sideEffects: [
+      'Starts a mongod process (or a one-member replica set) and connects Mongoose to it.',
+    ],
     tests: [
       AUTH_USERS_TEST,
       AUTH_SESSION_ROUTES_TEST,
@@ -906,6 +1042,9 @@ export const notes: SymbolNote[] = [
       CHAT_MODELS_TEST,
       CHAT_ROUTES_TEST,
       CHAT_INTERNAL_ROUTES_TEST,
+      BILLING_MODELS_TEST,
+      BILLING_RESERVATIONS_TEST,
+      AGENT_TURNS_TEST,
       JOURNEY_TEST,
     ],
   },
@@ -950,7 +1089,7 @@ export const notes: SymbolNote[] = [
       'A request that leaves the router reaches the shared 404 handler and never reaches a service. /healthz and /readyz are answered before the router, so they are not rate-limited.',
       'At startup, index.ts passes one readiness check (redis), the Redis client, the imported INTERNAL_PRIVATE_KEY, the four service URLs, FRONTEND_ORIGIN as allowedOrigins and TRUST_PROXY_HOPS.',
     ],
-    why: "Every check every request needs lives in one place, cheapest first, and the route table decides what may reach a service at all, so a service's internal routes cannot be called from outside. Building the app apart from starting it lets tests pass a test Redis, a key pair made for the test and a stand-in service, or the real auth and chat apps (journey.test.ts). The optional `headersTimeoutMs` can shorten the proxy's 10-second wait for a service; index.ts does not set it.",
+    why: "Every check every request needs lives in one place, cheapest first, and the route table decides what may reach a service at all, so a service's internal routes cannot be called from outside. Building the app apart from starting it lets tests pass a test Redis, a key pair made for the test and a stand-in service, or the real auth, chat and billing apps (journey.test.ts). The optional `headersTimeoutMs` can shorten the proxy's 10-second wait for a service; index.ts does not set it.",
     returns:
       'An Express app with /healthz and /readyz, the /api router in front of the services, and the shared 404 and error handling.',
     tests: [GATEWAY_TEST, JOURNEY_TEST],
@@ -985,8 +1124,8 @@ export const notes: SymbolNote[] = [
     how: [
       'It extends baseEnvSchema with PORT (default 8000) and REDIS_URL (required, not empty).',
       'FRONTEND_ORIGIN is one origin or several separated by commas. Each part is trimmed, empty parts are dropped, and each must be an http(s) origin (toOrigin); at least one is needed. The parsed value is an array, with any trailing slash gone.',
-      'AUTH_SERVICE_URL, CHAT_SERVICE_URL, AGENT_SERVICE_URL and BILLING_SERVICE_URL must be http(s) URLs (serviceUrl); trailing slashes are stripped.',
-      'INTERNAL_PRIVATE_KEY, which signs the internal tokens, is required. Escaped `\\n` line breaks are turned back into real ones, and the result must parse as an Ed25519 private key (isEd25519PrivateKey). Its messages say to run `pnpm setup:keys` and never repeat the value.',
+      'AUTH_SERVICE_URL, CHAT_SERVICE_URL, AGENT_SERVICE_URL and BILLING_SERVICE_URL must be http(s) URLs (the shared serviceUrlSchema); trailing slashes are stripped.',
+      'INTERNAL_PRIVATE_KEY, which signs the internal tokens, is required and must parse as an Ed25519 private key (the shared internalPrivateKeySchema). Its messages say to run `pnpm setup:keys` and never repeat the value.',
       "TRUST_PROXY_HOPS is a whole number from 0 to 5 (default 1): how many proxies in front of the gateway to trust for the client's IP address.",
     ],
     why: 'A wrong origin list, service URL or key would break every request, so the gateway refuses to start instead. The schema lives apart from env.ts, which loads it at startup, so tests can check the rules without a real environment.',
@@ -1007,22 +1146,6 @@ export const notes: SymbolNote[] = [
     tests: [GATEWAY_ENV_SCHEMA_TEST],
   },
   {
-    symbol: 'backend/gateway/src/env-schema.ts#isEd25519PrivateKey',
-    status: 'verified',
-    summary: 'Says whether a text parses as an Ed25519 private key.',
-    why: "It asks Node's createPrivateKey to read the text and checks the key type, the kind `pnpm setup:keys` writes. Anything that fails to parse is simply false, so the settings check reports one clear message instead of a crypto error.",
-    returns: 'true or false.',
-    tests: [GATEWAY_ENV_SCHEMA_TEST],
-  },
-  {
-    symbol: 'backend/gateway/src/env-schema.ts#serviceUrl',
-    status: 'verified',
-    summary: 'The Zod schema for each service URL: an http(s) URL, without trailing slashes.',
-    why: "proxyToService builds each call as the service URL followed by the service's path, so a trailing slash would double the slash. Any other protocol fails with 'must be an http(s) URL'.",
-    returns: 'A Zod schema whose parsed value is the URL text without trailing slashes.',
-    tests: [GATEWAY_ENV_SCHEMA_TEST],
-  },
-  {
     symbol: 'backend/gateway/src/route-table.ts#PUBLIC_ROUTES',
     status: 'verified',
     summary:
@@ -1035,9 +1158,10 @@ export const notes: SymbolNote[] = [
       "GET and POST /api/chats go to chat's GET and POST /chats (list or search, and create).",
       "GET, PATCH and DELETE /api/chats/:id go to chat's /chats/:id (read, rename or pin, delete), and GET /api/chats/:id/messages to /chats/:id/messages (history).",
       'Every chat route requires a session.',
+      "GET /api/billing/account goes to billing's GET /account (the plan and balance); a session is required.",
     ],
-    why: "It is an allowlist: anything not listed gets the gateway's own 404 and never reaches a service, so auth's GET /internal/users/:id and chat's /internal routes cannot be called from outside (journey.test.ts checks both, SEC-01). Agent and billing have no entries yet, so nothing reaches them through the gateway.",
-    returns: 'A read-only array of eleven PublicRoute entries.',
+    why: "It is an allowlist: anything not listed gets the gateway's own 404 and never reaches a service, so auth's GET /internal/users/:id and the /internal routes of chat and billing cannot be called from outside (journey.test.ts checks them, SEC-01). The agent has no entries yet, so its turn route cannot be reached through the gateway.",
+    returns: 'A read-only array of twelve PublicRoute entries.',
     tests: [GATEWAY_ROUTE_TABLE_TEST, JOURNEY_TEST],
   },
   {
@@ -1179,11 +1303,11 @@ export const notes: SymbolNote[] = [
       "Builds the auth service's Express app: sign-in, logout and the user's profile, behind the internal-token check.",
     how: [
       "It calls createService with the name 'auth', the given logger and readiness checks, and `internalAuth: { publicKey, audience: 'auth' }`. Every route except /healthz and /readyz then needs a valid internal token addressed to auth, so a direct call gets 401.",
-      'Its routes add sessionRouter, given the Redis client, the Google sign-in check, devLogin, secureCookie and the logger, then meRouter.',
+      'Its routes add sessionRouter, given the Redis client, the Google sign-in check, devLogin, secureCookie, the sign-up grant and the logger, then meRouter.',
       'So it serves POST /sessions, POST /sessions/dev (only when devLogin is on), DELETE /sessions/current, GET and PATCH /me and GET /internal/users/:id. An unknown path with a valid token gets 404.',
-      'At startup, index.ts passes two readiness checks (mongo and redis), the imported INTERNAL_PUBLIC_KEY, the Redis client, the Google sign-in check (createFirebaseVerifier, or googleSignInNotSetUp when the Firebase settings are empty), AUTH_DEV_LOGIN as devLogin, and secureCookie on when NODE_ENV is production.',
+      "At startup, index.ts passes two readiness checks (mongo and redis), the imported INTERNAL_PUBLIC_KEY, the Redis client, the Google sign-in check (createFirebaseVerifier, or googleSignInNotSetUp when the Firebase settings are empty), AUTH_DEV_LOGIN as devLogin, secureCookie on when NODE_ENV is production, and billingSignupGrant over an internal client that signs with auth's SERVICE_PRIVATE_KEY and calls BILLING_SERVICE_URL.",
     ],
-    why: "Building the app apart from starting it lets tests get the app without startService or a fixed port; supertest serves it on a temporary port. Everything it needs is passed in, so auth's app.test.ts uses a silent logger, a fake readiness check, a test Redis, a key pair made for the test and googleSignInNotSetUp. The gateway signs the tokens and forwards the public sign-in, logout and /me routes to it; journey.test.ts runs this app on a port behind the real gateway.",
+    why: "Building the app apart from starting it lets tests get the app without startService or a fixed port; supertest serves it on a temporary port. Everything it needs is passed in, so the tests can pass a stand-in for billing's grant. The gateway signs the tokens and forwards the public sign-in, logout and /me routes to it; journey.test.ts runs this app on a port behind the real gateway, with the real billing app behind it.",
     returns:
       'An Express app with /healthz and /readyz open to all, the session and /me routes behind the internal-token check, and the shared 404 and error handling.',
     tests: [AUTH_TEST, JOURNEY_TEST],
@@ -1196,9 +1320,9 @@ export const notes: SymbolNote[] = [
       'It is one line, `loadEnv(authEnvSchema)`: the settings and the rules between them live in env-schema.ts.',
       'loadEnv checks process.env against that schema when the file is first imported.',
     ],
-    why: 'The service refuses to start if a setting is missing or invalid, before it connects to anything. It needs MONGODB_URI, REDIS_URL and INTERNAL_PUBLIC_KEY. AUTH_DEV_LOGIN (default false) and the three Firebase settings for Google sign-in are optional, except that production needs AUTH_DEV_LOGIN off and all three Firebase settings. PORT, NODE_ENV and LOG_LEVEL have defaults. Node fills process.env from the .env file, through the --env-file-if-exists flag in the package scripts. index.ts reads all of it: the log level, NODE_ENV (pretty logs in development, a Secure session cookie in production), the MongoDB and Redis URLs, the internal public key, the dev sign-in flag, the three Firebase settings (to pick the Google sign-in check) and the port.',
+    why: "The service refuses to start if a setting is missing or invalid, before it connects to anything. It needs MONGODB_URI, REDIS_URL, INTERNAL_PUBLIC_KEY and its own SERVICE_PRIVATE_KEY. BILLING_SERVICE_URL defaults to http://localhost:8004. AUTH_DEV_LOGIN (default false) and the three Firebase settings for Google sign-in are optional, except that production needs AUTH_DEV_LOGIN off and all three Firebase settings. PORT, NODE_ENV and LOG_LEVEL have defaults. Node fills process.env from the .env file, through the --env-file-if-exists flag in the package scripts. index.ts reads all of it: the log level, NODE_ENV (pretty logs in development, a Secure session cookie in production), the MongoDB and Redis URLs, the keys, billing's URL, the dev sign-in flag, the three Firebase settings (to pick the Google sign-in check) and the port.",
     returns:
-      'An object with NODE_ENV, LOG_LEVEL, PORT (a number), MONGODB_URI, REDIS_URL, INTERNAL_PUBLIC_KEY, AUTH_DEV_LOGIN (a boolean), and FIREBASE_PROJECT_ID, FIREBASE_CLIENT_EMAIL and FIREBASE_PRIVATE_KEY (each a string or undefined).',
+      'An object with NODE_ENV, LOG_LEVEL, PORT (a number), MONGODB_URI, REDIS_URL, INTERNAL_PUBLIC_KEY, SERVICE_PRIVATE_KEY, BILLING_SERVICE_URL, AUTH_DEV_LOGIN (a boolean), and FIREBASE_PROJECT_ID, FIREBASE_CLIENT_EMAIL and FIREBASE_PRIVATE_KEY (each a string or undefined).',
     sideEffects: [
       'Reads process.env.',
       'Throws an EnvError on import if anything is invalid, which stops the app.',
@@ -1211,6 +1335,7 @@ export const notes: SymbolNote[] = [
     how: [
       'It extends baseEnvSchema with PORT (default 8001), MONGODB_URI and REDIS_URL (both required, not empty).',
       "INTERNAL_PUBLIC_KEY, the gateway's public key for checking internal tokens, uses the shared internalPublicKeySchema: it is required, escaped `\\n` line breaks are turned back into real ones, and it must start with -----BEGIN PUBLIC KEY-----. Both of its messages say to run `pnpm setup:keys`, and neither repeats the value.",
+      "SERVICE_PRIVATE_KEY, auth's own key for calling billing, uses the shared internalPrivateKeySchema: it must parse as an Ed25519 private key. BILLING_SERVICE_URL is an http(s) URL (serviceUrlSchema), default http://localhost:8004.",
       'AUTH_DEV_LOGIN, sign-in with just an email for local development and tests, is a true or false flag (default false). Zod\'s stringbool also takes 1/0, yes/no, on/off, y/n and enabled/disabled, in any case; any other value, including an empty one, fails with "must be true or false".',
       'FIREBASE_PROJECT_ID, FIREBASE_CLIENT_EMAIL and FIREBASE_PRIVATE_KEY, a service account of a Firebase project for Google sign-in, may be left out; empty counts as unset. Escaped `\\n` line breaks in FIREBASE_PRIVATE_KEY are turned back into real ones, so the key works with or without double quotes in .env.',
       'In production, AUTH_DEV_LOGIN must be false, because it lets anyone sign in as anyone.',
@@ -1323,18 +1448,29 @@ export const notes: SymbolNote[] = [
     how: [
       'POST /sessions takes { idToken }, checks it with verifyIdToken, finds or makes the user with upsertGoogleUser and starts a session.',
       'POST /sessions/dev takes { email, name? } and does the same with findOrCreateDevUser. It is added only when devLogin is on, so without it the path is a 404.',
-      "Starting a session creates it in Redis, sets the gilder_sid cookie (HttpOnly, SameSite=Lax, Path=/, Max-Age 30 days, plus Secure when secureCookie is on), records the user in the request context, logs 'signed in' with the method and whether the user is new, and answers { user } with toProfile.",
+      "Starting a session records the user in the request context, then asks billing for the sign-up grant (grantSignupCredits). If that fails, it logs the warning 'sign-up credits could not be granted; the next sign-in asks again' and goes on.",
+      "It then creates the session in Redis, sets the gilder_sid cookie (HttpOnly, SameSite=Lax, Path=/, Max-Age 30 days, plus Secure when secureCookie is on), logs 'signed in' with the method and whether the user is new, and answers { user } with toProfile.",
       'DELETE /sessions/current needs a user in the internal token (requireUser). It deletes the session the cookie names, clears the cookie and answers 204. Calling it twice, or without a cookie, still gives 204.',
       'Request bodies are checked with validate, so a missing token or a bad email is a 400.',
     ],
-    why: "One service owns sessions end to end, so the cookie settings live in one place. Auth's createApp adds the router behind the internal-token check. The gateway maps POST /api/auth/session, POST /api/auth/dev-session and DELETE /api/auth/session onto these paths and passes the Set-Cookie headers back to the browser.",
+    why: "One service owns sessions end to end, so the cookie settings live in one place. Auth's createApp adds the router behind the internal-token check. The gateway maps POST /api/auth/session, POST /api/auth/dev-session and DELETE /api/auth/session onto these paths and passes the Set-Cookie headers back to the browser. The grant is asked for on every sign-in, because billing grants only once per user; a billing outage never blocks a sign-in, and the next sign-in asks again (session-routes.test.ts checks both).",
     returns: 'An Express Router.',
     sideEffects: [
       'Writes and deletes session keys in Redis.',
       'Creates and updates users in MongoDB.',
+      'Asks billing for the sign-up grant on every sign-in.',
       'Sets and clears the session cookie.',
     ],
     tests: [AUTH_SESSION_ROUTES_TEST, AUTH_TEST, JOURNEY_TEST],
+  },
+  {
+    symbol: 'backend/services/auth/src/billing.ts#billingSignupGrant',
+    status: 'verified',
+    summary: "Asks billing for a user's sign-up credits.",
+    why: "It posts to billing's POST /internal/accounts for the user, through an internal client that signs with auth's own key, and allows one retry: billing grants once per user, so asking twice is safe. sessionRouter calls it on every sign-in, so a sign-in that missed the grant (billing down) gets it on the next one. The package exports it as @gilder/auth/billing, so journey.test.ts uses the real one with the real billing app.",
+    returns: 'A function from a user ID to a promise that resolves when billing has answered.',
+    sideEffects: ["Calls billing's POST /internal/accounts."],
+    tests: [AUTH_BILLING_TEST, JOURNEY_TEST],
   },
   {
     symbol: 'backend/services/auth/src/users.ts#upsertGoogleUser',
@@ -1345,7 +1481,7 @@ export const notes: SymbolNote[] = [
       'Then by email: a verified email already on file under another ID belongs to the same person, for example after the Firebase account was recreated or a local dev sign-in used it, so that user gets the new Firebase ID.',
       'Otherwise it creates the user. If a second sign-in creates the same user at the same moment, the unique index makes one fail, and that one finds the user the other made.',
     ],
-    why: 'Sign-in must never create two accounts for one person. `created` tells the caller about a first sign-in, which the credits grant will need. Only the Google sign-in route (POST /sessions) calls it.',
+    why: "Sign-in must never create two accounts for one person. `created` tells the caller about a first sign-in, which the 'signed in' log line records; the credits grant does not rely on it, since billing grants once per user whatever auth says. Only the Google sign-in route (POST /sessions) calls it.",
     returns: 'A promise of { user, created }.',
     sideEffects: ['Creates or updates a user in MongoDB.'],
     tests: [AUTH_USERS_TEST],
@@ -1413,10 +1549,10 @@ export const notes: SymbolNote[] = [
     summary:
       "Builds the chat service's Express app: the chat routes and the internal routes, behind the internal-token check.",
     how: [
-      "It calls createService with the name 'chat', the given logger and readiness checks, `internalAuth: { publicKey: internalPublicKey, audience: 'chat' }`, and routes that add chatRouter, then internalRouter.",
+      "It calls createService with the name 'chat', the given logger and readiness checks, `internalAuth` with the gateway's key, the audience 'chat' and, when agentPublicKey is given, the agent as a trusted caller, and routes that add chatRouter, then internalRouter.",
       'So it serves GET and POST /chats, GET, PATCH and DELETE /chats/:id, GET /chats/:id/messages, and the five /internal routes for the agent service.',
-      "Per its comment, only the gateway's token gets past the health checks, so a direct call gets 401 on any path. An unknown path with a valid token gets 404.",
-      'At startup, index.ts passes one readiness check, mongo, and the imported INTERNAL_PUBLIC_KEY.',
+      'Only tokens from the gateway or the agent get past the health checks, so a direct call gets 401 on any path. An unknown path with a valid token gets 404.',
+      'At startup, index.ts passes one readiness check, mongo, the imported INTERNAL_PUBLIC_KEY and the imported AGENT_PUBLIC_KEY.',
     ],
     why: 'Building the app apart from starting it lets tests get the app without startService or a fixed port; supertest serves it on a temporary port, and the route tests start a MongoDB of their own (startTestMongo) and sign their own tokens. Its app.test.ts sends missing, garbage, forged, misaddressed and expired tokens and checks each gets 401 (SEC-02). The package exports it as @gilder/chat/app, so journey.test.ts runs this app on a port behind the real gateway, which forwards the six /api/chats routes to it.',
     returns:
@@ -1428,12 +1564,12 @@ export const notes: SymbolNote[] = [
     status: 'verified',
     summary: "The chat service's environment variables, checked at startup.",
     how: [
-      'It extends baseEnvSchema with PORT (default 8002), MONGODB_URI (required, not empty) and INTERNAL_PUBLIC_KEY (the shared internalPublicKeySchema).',
+      "It extends baseEnvSchema with PORT (default 8002), MONGODB_URI (required, not empty), and INTERNAL_PUBLIC_KEY and AGENT_PUBLIC_KEY (the gateway's and the agent's public keys, both the shared internalPublicKeySchema).",
       'loadEnv checks process.env against it when the file is first imported.',
     ],
-    why: 'The service refuses to start if MONGODB_URI or INTERNAL_PUBLIC_KEY is missing or if any value is invalid, and lists every problem at once, before it connects to anything. PORT, NODE_ENV and LOG_LEVEL have defaults, so leaving them out does not stop it. Node fills process.env from the .env file, through the --env-file-if-exists flag in the package scripts. index.ts reads it for the log level, pretty logs, the MongoDB URL, the public key and the port.',
+    why: 'The service refuses to start if MONGODB_URI or either key is missing or if any value is invalid, and lists every problem at once, before it connects to anything. PORT, NODE_ENV and LOG_LEVEL have defaults, so leaving them out does not stop it. Node fills process.env from the .env file, through the --env-file-if-exists flag in the package scripts. index.ts reads it for the log level, pretty logs, the MongoDB URL, the two public keys and the port.',
     returns:
-      'An object with NODE_ENV, LOG_LEVEL, PORT (a number), MONGODB_URI and INTERNAL_PUBLIC_KEY.',
+      'An object with NODE_ENV, LOG_LEVEL, PORT (a number), MONGODB_URI, INTERNAL_PUBLIC_KEY and AGENT_PUBLIC_KEY.',
     sideEffects: [
       'Reads process.env.',
       'Throws an EnvError on import if anything is invalid, which stops the app.',
@@ -1605,11 +1741,11 @@ export const notes: SymbolNote[] = [
   },
   {
     symbol: 'backend/services/chat/src/internal-routes.ts#internalRouter',
-    status: 'not-wired',
+    status: 'verified',
     summary:
       'Routes for the agent service: read a chat, auto-title it, read its recent messages, and save and fill in messages.',
     how: [
-      "Every /internal route needs a user in the internal token (requireUser), and every lookup filters by that user, so another user's chat or message gets a 404.",
+      "Every /internal route needs a token signed with the agent's own key (requireCaller('agent')): the gateway's token gets 403. It also needs a user in the token (requireUser), and every lookup filters by that user, so another user's chat or message gets a 404.",
       'GET /internal/chats/:id answers { chat }.',
       "PATCH /internal/chats/:id takes { title } and renames the chat only while its title is still 'New chat'. It answers { chat, renamed }.",
       'GET /internal/chats/:id/recent-messages returns the latest complete or stopped messages that are not superseded, oldest first: 20 by default, at most 50.',
@@ -1617,74 +1753,639 @@ export const notes: SymbolNote[] = [
       "A new message answers 201 with created: true. It hides the messages listed in supersedes (valid IDs in the same chat only) and moves the chat's lastMessageAt to it.",
       "PATCH /internal/messages/:id fills in content, status, agent, attachments, artifacts, sources or citations; at least one, and nothing else. Once the status is no longer 'streaming', the chat's lastMessageAt moves to now.",
     ],
-    why: "These are the calls the agent service is to make while it answers: check the chat, read its memory, save the user's message and the answer, and name the chat. The gateway's route table has no /internal entries, so they cannot be reached from outside (journey.test.ts, SEC-01). Nothing calls them yet.",
+    why: "These are the calls the agent makes while it answers (its chatService): check the chat, read its memory, save the user's message and the answer, fill the answer in, and name the chat. The gateway's route table has no /internal entries, so they cannot be reached from outside (journey.test.ts, SEC-01), and requireCaller keeps the gateway's own token off them too.",
     returns: 'An Express Router.',
     sideEffects: [
       "Creates and updates messages, and changes a chat's title and lastMessageAt, in MongoDB.",
     ],
-    tests: [CHAT_INTERNAL_ROUTES_TEST, JOURNEY_TEST],
+    tests: [CHAT_INTERNAL_ROUTES_TEST, AGENT_SERVICES_TEST, AGENT_TURNS_TEST, JOURNEY_TEST],
   },
-  {
-    symbol: 'backend/services/agent/src/app.ts#createApp',
-    status: 'verified',
-    summary:
-      "Builds the agent service's Express app: no routes of its own yet, but locked behind the internal-token check.",
-    how: [
-      "It calls createService with the name 'agent', the given logger and readiness checks, and `internalAuth: { publicKey: internalPublicKey, audience: 'agent' }`.",
-      "Its comment says it has no routes of its own yet, but is locked already: only the gateway's token gets past the health checks, so a direct call gets 401 on any path. A request with a valid token gets 404, since there are no routes.",
-      'At startup, index.ts passes two readiness checks: mongo and redis, and the imported INTERNAL_PUBLIC_KEY.',
-    ],
-    why: "Building the app apart from starting it lets tests get the app without startService, a fixed port or real databases; supertest serves it on a temporary port. Its app.test.ts sends missing, garbage, forged, misaddressed and expired tokens and checks each gets 401 (SEC-02). The gateway's route table has no agent routes yet, so nothing reaches it through the gateway.",
-    returns:
-      'An Express app with /healthz and /readyz open to all, the internal-token check in front of everything else, and the shared 404 and error handling.',
-    tests: [AGENT_TEST],
-  },
-  {
-    symbol: 'backend/services/agent/src/env.ts#env',
-    status: 'verified',
-    summary: "The agent service's environment variables, checked at startup.",
-    how: [
-      'It extends baseEnvSchema with PORT (default 8003), MONGODB_URI and REDIS_URL (both required, not empty) and INTERNAL_PUBLIC_KEY (the shared internalPublicKeySchema).',
-      'loadEnv checks process.env against it when the file is first imported.',
-    ],
-    why: 'The service refuses to start if MONGODB_URI, REDIS_URL or INTERNAL_PUBLIC_KEY is missing or if any value is invalid, and lists every problem at once, before it connects to anything. PORT, NODE_ENV and LOG_LEVEL have defaults, so leaving them out does not stop it. Node fills process.env from the .env file, through the --env-file-if-exists flag in the package scripts. index.ts reads it for the log level, pretty logs, the MongoDB and Redis URLs, the public key and the port.',
-    returns:
-      'An object with NODE_ENV, LOG_LEVEL, PORT (a number), MONGODB_URI, INTERNAL_PUBLIC_KEY and REDIS_URL.',
-    sideEffects: [
-      'Reads process.env.',
-      'Throws an EnvError on import if anything is invalid, which stops the app.',
-    ],
-  },
+  // -------------------------------------------------------------------------------------------
+  // backend/services/billing: accounts, credit holds, the ledger and their routes
+
   {
     symbol: 'backend/services/billing/src/app.ts#createApp',
     status: 'verified',
     summary:
-      "Builds the billing service's Express app: no routes of its own yet, but locked behind the internal-token check.",
+      "Builds the billing service's Express app: the account route and the internal credit routes, behind the internal-token check.",
     how: [
-      "It calls createService with the name 'billing', the given logger and readiness checks, and `internalAuth: { publicKey: internalPublicKey, audience: 'billing' }`.",
-      "Its comment says it has no routes of its own yet, but is locked already: only the gateway's token gets past the health checks, so a direct call gets 401 on any path. A request with a valid token gets 404, since there are no routes.",
-      'At startup, index.ts passes one readiness check: mongo, and the imported INTERNAL_PUBLIC_KEY.',
+      "It calls createService with the name 'billing', the given logger and readiness checks, `internalAuth` with the gateway's key, the audience 'billing' and `callers: callerKeys` (auth and the agent), and routes that add accountRouter, then internalRouter.",
+      'So it serves GET /account, POST /internal/accounts and POST /internal/credits/reserve, commit and release. A direct call without a valid token gets 401 on any path except the health checks.',
+      "At startup, index.ts passes one readiness check, mongo, the imported INTERNAL_PUBLIC_KEY, and AUTH_PUBLIC_KEY and AGENT_PUBLIC_KEY as the callers' keys. It then starts the stale reservation sweeper, which onShutdown stops before disconnecting MongoDB.",
     ],
-    why: "Building the app apart from starting it lets tests get the app without startService, a fixed port or real databases; supertest serves it on a temporary port. Its app.test.ts sends missing, garbage, forged, misaddressed and expired tokens and checks each gets 401 (SEC-02). The gateway's route table has no billing routes yet, so nothing reaches it through the gateway.",
+    why: "Building the app apart from starting it lets tests get the app without startService or a fixed port. Its app.test.ts sends missing, garbage, forged, misaddressed and expired tokens and checks each gets 401 (SEC-02). The package exports it as @gilder/billing/app, so journey.test.ts and the agent's turn tests run the real billing app on a port.",
     returns:
-      'An Express app with /healthz and /readyz open to all, the internal-token check in front of everything else, and the shared 404 and error handling.',
-    tests: [BILLING_TEST],
+      'An Express app with /healthz and /readyz open to all, the account and internal routes behind the internal-token check, and the shared 404 and error handling.',
+    tests: [BILLING_TEST, BILLING_CREDITS_TEST, BILLING_RESERVATIONS_TEST, JOURNEY_TEST],
   },
   {
     symbol: 'backend/services/billing/src/env.ts#env',
     status: 'verified',
     summary: "The billing service's environment variables, checked at startup.",
     how: [
-      'It extends baseEnvSchema with PORT (default 8004), MONGODB_URI (required, not empty) and INTERNAL_PUBLIC_KEY (the shared internalPublicKeySchema).',
+      "It extends baseEnvSchema with PORT (default 8004), MONGODB_URI (required, not empty), and three public keys with the shared internalPublicKeySchema: INTERNAL_PUBLIC_KEY (the gateway's), AUTH_PUBLIC_KEY (auth asks for the sign-up grant) and AGENT_PUBLIC_KEY (the agent holds and charges credits).",
       'loadEnv checks process.env against it when the file is first imported.',
     ],
-    why: 'The service refuses to start if MONGODB_URI or INTERNAL_PUBLIC_KEY is missing or if any value is invalid, and lists every problem at once, before it connects to anything. PORT, NODE_ENV and LOG_LEVEL have defaults, so leaving them out does not stop it. Node fills process.env from the .env file, through the --env-file-if-exists flag in the package scripts. index.ts reads it for the log level, pretty logs, the MongoDB URL, the public key and the port.',
+    why: 'The service refuses to start if MONGODB_URI or a key is missing or if any value is invalid, and lists every problem at once, before it connects to anything. `pnpm setup:keys` writes all three keys. Its .env.example also lists the Razorpay settings for payments, which env.ts does not read yet.',
     returns:
-      'An object with NODE_ENV, LOG_LEVEL, PORT (a number), MONGODB_URI and INTERNAL_PUBLIC_KEY.',
+      'An object with NODE_ENV, LOG_LEVEL, PORT (a number), MONGODB_URI, INTERNAL_PUBLIC_KEY, AUTH_PUBLIC_KEY and AGENT_PUBLIC_KEY.',
     sideEffects: [
       'Reads process.env.',
       'Throws an EnvError on import if anything is invalid, which stops the app.',
     ],
+  },
+  {
+    symbol: 'backend/services/billing/src/models.ts#PLAN_IDS',
+    status: 'verified',
+    summary:
+      "The plan names an account can have, taken from the shared PLANS: 'free', 'starter', 'pro'.",
+    why: 'The accounts model limits its plan field to them, so billing and the shared plan list cannot drift apart.',
+    returns: 'An array of plan IDs.',
+    tests: [BILLING_MODELS_TEST],
+  },
+  {
+    symbol: 'backend/services/billing/src/models.ts#RESERVATION_STATUSES',
+    status: 'verified',
+    summary: "The states of a credit hold: 'held', 'committed' or 'released'.",
+    why: "A hold starts as held and ends exactly once: committed when the answer is charged, released when the credits go back. Every change is a conditional update on status 'held', so a hold can never end twice.",
+    returns: 'A read-only array of the three statuses.',
+    tests: [BILLING_MODELS_TEST, BILLING_RESERVATIONS_TEST],
+  },
+  {
+    symbol: 'backend/services/billing/src/models.ts#LEDGER_KINDS',
+    status: 'verified',
+    summary: "The kinds of ledger entry: 'signup_grant', 'purchase', 'usage' and 'adjustment'.",
+    why: 'Each credit change says why it happened. Today the code writes signup_grant (grantSignupCredits) and usage (commitCredits); purchase and adjustment are ready for payments and support.',
+    returns: 'A read-only array of the four kinds.',
+    tests: [BILLING_MODELS_TEST],
+  },
+  {
+    symbol: 'backend/services/billing/src/models.ts#accountSchema',
+    status: 'verified',
+    summary: 'The shape and rules of an account: one per user.',
+    how: [
+      "_id is the user's ID from auth, so there is one account per user and no second lookup key.",
+      "plan is one of PLAN_IDS (default 'free'); planExpiresAt is when a paid plan's badge ends.",
+      'balance is a whole number of credits, never below 0 (min 0 and an integer check), default 0.',
+      'timestamps adds createdAt and updatedAt.',
+    ],
+    why: 'The balance is kept on the account so a spend is one conditional update (`balance >= cost`); the ledger keeps the history behind it.',
+    tests: [BILLING_MODELS_TEST],
+  },
+  {
+    symbol: 'backend/services/billing/src/models.ts#reservationSchema',
+    status: 'verified',
+    summary: 'The shape and rules of a credit hold for one answer.',
+    how: [
+      'userId, amount (a whole number, at least 1) and agent (one of AGENTS) are required.',
+      "status is one of RESERVATION_STATUSES, starting at 'held'.",
+      'idempotencyKey (at most 128 characters) is chosen by the caller and unique, so a retried reserve holds the credits once.',
+      'An index on { status, createdAt } lets the sweeper find holds left for too long.',
+    ],
+    why: 'A hold takes the credits off the balance before the AI runs, and settles once the answer ends, so a user can never start more answers than they can pay for.',
+    tests: [BILLING_MODELS_TEST, BILLING_RESERVATIONS_TEST],
+  },
+  {
+    symbol: 'backend/services/billing/src/models.ts#ledgerSchema',
+    status: 'verified',
+    summary: 'The shape and rules of a ledger entry: one credit change, never edited.',
+    how: [
+      'userId, delta (a whole, non-zero number: positive adds, negative spends) and kind (LEDGER_KINDS) are required; reservationId, paymentId and metadata (agent, model, tokens, latency for usage) are optional.',
+      'Only createdAt is kept; the collection is named ledger.',
+      'A partial unique index allows one signup_grant entry per user, and another one usage entry per reservation.',
+    ],
+    why: 'The ledger is the history behind every balance. The two partial unique indexes make a double grant or a double charge impossible in the database itself, even when two requests race. The tests check the invariant: balance = the sum of ledger entries − the credits on hold.',
+    tests: [BILLING_MODELS_TEST, BILLING_RESERVATIONS_TEST],
+  },
+  {
+    symbol: 'backend/services/billing/src/models.ts#AccountModel',
+    status: 'verified',
+    summary: "The Mongoose model for accounts, in billing's database (gilder_billing).",
+    why: 'Only billing reads or writes balances; auth and the agent ask it over HTTP. It is built from the mongoose that @gilder/shared re-exports, so it uses the connection connectMongo opens.',
+    returns: 'A Mongoose model of Account documents.',
+    tests: [BILLING_MODELS_TEST, BILLING_CREDITS_TEST, BILLING_RESERVATIONS_TEST],
+  },
+  {
+    symbol: 'backend/services/billing/src/models.ts#ReservationModel',
+    status: 'verified',
+    summary: 'The Mongoose model for credit holds.',
+    why: 'reserveCredits creates holds, commitCredits and releaseCredits end them, and the sweeper releases old ones.',
+    returns: 'A Mongoose model of Reservation documents.',
+    tests: [BILLING_MODELS_TEST, BILLING_RESERVATIONS_TEST, BILLING_SWEEPER_TEST],
+  },
+  {
+    symbol: 'backend/services/billing/src/models.ts#LedgerModel',
+    status: 'verified',
+    summary: 'The Mongoose model for the ledger collection.',
+    why: 'grantSignupCredits and commitCredits append to it, each in the same transaction as the balance or hold it goes with.',
+    returns: 'A Mongoose model of LedgerEntry documents.',
+    tests: [BILLING_MODELS_TEST, BILLING_CREDITS_TEST, BILLING_RESERVATIONS_TEST],
+  },
+  {
+    symbol: 'backend/services/billing/src/models.ts#toAccount',
+    status: 'verified',
+    summary: 'Turns an account document into what the API shows of an account.',
+    why: "One function decides what leaves the service: plan, planExpiresAt (an ISO string or null) and balance. The frontend's Account type has the same shape.",
+    returns: '{ plan, planExpiresAt, balance }',
+    tests: [BILLING_MODELS_TEST, BILLING_CREDITS_TEST],
+  },
+  {
+    symbol: 'backend/services/billing/src/models.ts#toReservation',
+    status: 'verified',
+    summary: 'Turns a hold into what the credit routes answer with.',
+    why: "The agent needs the hold's ID to commit or release it, its amount for the usage event and its status to spot a repeat.",
+    returns: '{ id, amount, agent, status }',
+    tests: [BILLING_RESERVATIONS_TEST],
+  },
+  {
+    symbol: 'backend/services/billing/src/credits.ts#inTransaction',
+    status: 'verified',
+    summary: 'Runs some work in one MongoDB transaction.',
+    why: 'Every balance change goes with a ledger entry or a hold change, and the two must be saved together or not at all. session.withTransaction retries the work on a transient conflict, and the session is always ended. Transactions need a replica set, which is why MongoDB runs as one even locally.',
+    returns: "A promise of the work's result.",
+    tests: [BILLING_MODELS_TEST, BILLING_RESERVATIONS_TEST],
+  },
+  {
+    symbol: 'backend/services/billing/src/credits.ts#grantSignupCredits',
+    status: 'verified',
+    summary: 'Gives a new user their sign-up credits, once.',
+    how: [
+      'If the user already has a signup_grant ledger entry, it changes nothing.',
+      'Otherwise, in one transaction, it writes a signup_grant entry of SIGNUP_CREDITS (100) and adds them to the account, creating it on the free plan if needed (an upsert).',
+      'If two sign-ins race, the one-grant-per-user index makes the second fail with a duplicate key, and that one just returns the account.',
+    ],
+    why: 'Auth asks on every sign-in, so the grant must be safe to ask for again and again; the tests run many grants at once and get exactly one.',
+    returns: 'A promise of { account, granted }: granted is false when nothing changed.',
+    sideEffects: ['May create an account and a ledger entry in MongoDB.'],
+    tests: [BILLING_CREDITS_TEST],
+  },
+  {
+    symbol: 'backend/services/billing/src/credits.ts#reserveCredits',
+    status: 'verified',
+    summary: "Holds an answer's credits before the AI runs, or refuses with 402.",
+    how: [
+      'A hold with the same idempotency key is returned as it is (created: false). A key used by another user is a 409 conflict.',
+      'The amount comes from CREDIT_COSTS for the agent: the caller never names a price.',
+      "In one transaction: one findOneAndUpdate takes the amount off the account only where `balance >= amount`, and a held reservation is created. When no account matches, it throws AppError('insufficient_credits', 'This answer needs <n> credits'): 402.",
+      'If the same reserve races, the unique key keeps the first hold and the other returns it.',
+    ],
+    why: 'The balance check and the decrease are one conditional update, so parallel requests can never overdraw: the SEC-08 test sends 50 reservations at once against 100 credits and gets exactly 10 holds, 40 refusals and a balance of 0.',
+    returns: 'A promise of { reservation, balance, created }.',
+    sideEffects: ['Lowers the balance and creates a hold, in MongoDB.'],
+    tests: [BILLING_RESERVATIONS_TEST],
+  },
+  {
+    symbol: 'backend/services/billing/src/credits.ts#commitCredits',
+    status: 'verified',
+    summary: 'Charges a held reservation once the answer is done.',
+    how: [
+      'An ID that cannot be a reservation is a 404, never a database error.',
+      'In one transaction it marks the hold committed (only while it is held) and appends a usage ledger entry of minus the amount, with the agent and the usage metadata (model, tokens, latency, chat and message).',
+      "A hold that is already committed returns unchanged; one already released is a 409; one that is not the user's is a 404.",
+    ],
+    why: 'The credits already left the balance at reserve time; committing makes the charge final and records it. Committing twice changes nothing, and the one-usage-per-reservation index backs that up.',
+    returns: 'A promise of { reservation, balance }.',
+    sideEffects: ['Marks the hold committed and appends a ledger entry, in MongoDB.'],
+    tests: [BILLING_RESERVATIONS_TEST],
+  },
+  {
+    symbol: 'backend/services/billing/src/credits.ts#releaseCredits',
+    status: 'verified',
+    summary: "Gives a held reservation's credits back.",
+    how: [
+      'An ID that cannot be a reservation is a 404.',
+      'In one transaction releaseHeld marks the hold released and adds its amount back to the balance.',
+      "A hold already released returns unchanged; one already committed is a 409; one that is not the user's is a 404.",
+    ],
+    why: 'An answer that failed, or was stopped before its first token, is not charged. No ledger entry is written, because the balance is back where it was.',
+    returns: 'A promise of { reservation, balance }.',
+    sideEffects: ['Marks the hold released and raises the balance, in MongoDB.'],
+    tests: [BILLING_RESERVATIONS_TEST],
+  },
+  {
+    symbol: 'backend/services/billing/src/credits.ts#releaseHeld',
+    status: 'verified',
+    summary: 'Releases one hold that is still held, inside a given transaction.',
+    why: 'The status check is part of the update, so a hold is released at most once however many callers try. releaseCredits uses it for one hold, and the sweeper for each stale one.',
+    returns: 'A promise of the released hold, or null when none was still held.',
+    sideEffects: ['Marks the hold released and adds its amount back to the balance.'],
+    tests: [BILLING_RESERVATIONS_TEST, BILLING_SWEEPER_TEST],
+  },
+  {
+    symbol: 'backend/services/billing/src/credits.ts#settledAlready',
+    status: 'verified',
+    summary: 'Decides what a commit or release of a hold that is no longer held means.',
+    why: "The same outcome again is a no-op, so a retried call is safe; the opposite outcome is a 409 'This reservation was already <status>'; and a hold that is not the user's is a 404 'No such reservation', so one user cannot learn about another's holds.",
+    returns: 'A promise of { reservation, balance }, or an AppError.',
+    tests: [BILLING_RESERVATIONS_TEST],
+  },
+  {
+    symbol: 'backend/services/billing/src/internal-routes.ts#internalRouter',
+    status: 'verified',
+    summary:
+      'The routes auth and the agent call: the sign-up grant, and holding, charging and releasing credits.',
+    how: [
+      'Every /internal route needs a user in the token (requireUser) and names the one service allowed to call it (requireCaller): any other signer, the gateway included, gets 403.',
+      'POST /internal/accounts (auth only) grants the sign-up credits: 201 { account, granted: true } the first time, 200 with granted: false after.',
+      'POST /internal/credits/reserve (agent only) takes { agent, idempotencyKey } (8 to 128 characters) and answers 201 for a new hold, 200 for a repeat, or 402.',
+      'POST /internal/credits/commit takes { reservationId, metadata } and /internal/credits/release { reservationId }, both for the agent only.',
+      'The bodies are strict: an amount or any other field is a 400. The credit routes answer { reservation, balance }.',
+    ],
+    why: "The gateway never forwards /internal routes, and requireCaller keeps auth's key off the credit routes and the agent's off the grant. Each route acts for the user in the token.",
+    returns: 'An Express Router.',
+    sideEffects: ['Creates and changes accounts, holds and ledger entries in MongoDB.'],
+    tests: [BILLING_CREDITS_TEST, BILLING_RESERVATIONS_TEST, JOURNEY_TEST],
+  },
+  {
+    symbol: 'backend/services/billing/src/account-routes.ts#accountRouter',
+    status: 'verified',
+    summary: "GET /account: the signed-in user's plan and balance.",
+    why: 'The gateway forwards GET /api/billing/account here for the credits card, and the agent reads it before a turn to refuse a user with no credits. A user with no account yet (the grant failed while billing was down) gets the free plan with 0 credits until the next sign-in creates it.',
+    returns: 'An Express Router.',
+    tests: [BILLING_CREDITS_TEST, JOURNEY_TEST],
+  },
+  {
+    symbol: 'backend/services/billing/src/sweeper.ts#STALE_RESERVATION_MS',
+    status: 'verified',
+    summary: 'How old a hold must be before the sweeper gives it back: 10 minutes.',
+    why: 'Answers end long before this, so only holds an agent left behind, for example after a crash mid-answer, are this old.',
+    returns: '600,000 milliseconds.',
+    tests: [BILLING_SWEEPER_TEST],
+  },
+  {
+    symbol: 'backend/services/billing/src/sweeper.ts#releaseStaleReservations',
+    status: 'verified',
+    summary: 'Releases every hold still held after 10 minutes.',
+    how: [
+      'It finds held reservations created before the cutoff, oldest first, 100 at a time.',
+      'Each one is released in its own transaction with releaseHeld, which only acts while the hold is still held.',
+      'It goes on until a batch comes back short, and returns how many it released.',
+    ],
+    why: 'Safe on several billing instances at once: each hold is given back exactly once (the test runs sweeps side by side). Recent holds and finished ones are left alone.',
+    returns: 'A promise of the number released.',
+    sideEffects: ['Marks holds released and raises balances, in MongoDB.'],
+    tests: [BILLING_SWEEPER_TEST],
+  },
+  {
+    symbol: 'backend/services/billing/src/sweeper.ts#startReservationSweeper',
+    status: 'verified',
+    summary: 'Runs the stale-hold sweep every minute, never two at once.',
+    why: "billing's index.ts starts it at startup and stops it on shutdown. A run that finds work logs 'released stale credit reservations' with the count; a failure is logged at error and the next run tries again. The timer is unref'd, so it never keeps the process alive on its own.",
+    returns: 'A function that stops the sweeper.',
+    sideEffects: ['Sets an interval timer.'],
+    tests: [BILLING_SWEEPER_TEST],
+  },
+
+  // -------------------------------------------------------------------------------------------
+  // backend/services/agent: the turn route
+
+  {
+    symbol: 'backend/services/agent/src/app.ts#createApp',
+    status: 'verified',
+    summary:
+      "Builds the agent service's Express app: the turn route, behind the internal-token check.",
+    how: [
+      "It calls createService with the name 'agent', the given logger and readiness checks, and `internalAuth: { publicKey: internalPublicKey, audience: 'agent' }`: only the gateway's tokens are trusted.",
+      'When `turns` is given, its routes add turnRouter with those dependencies and the logger; without it the app has no routes.',
+      "At startup, index.ts passes two readiness checks (mongo and redis), the imported INTERNAL_PUBLIC_KEY, and the turn's dependencies: the model layer (createLlm over buildProviders), chat and billing clients that sign with the agent's SERVICE_PRIVATE_KEY, the Redis memory, the Redis client and the agents.",
+    ],
+    why: "Building the app apart from starting it lets tests pass a scripted mock model, a test Redis and the real chat and billing apps (turns.test.ts). Its app.test.ts checks the SEC-02 token cases. The gateway's route table has no agent route yet, so the turn route cannot be reached from outside; today only the tests call it, with tokens signed like the gateway's.",
+    returns:
+      'An Express app with /healthz and /readyz open to all, the turn route behind the internal-token check, and the shared 404 and error handling.',
+    tests: [AGENT_TEST, AGENT_TURNS_TEST],
+  },
+  {
+    symbol: 'backend/services/agent/src/env.ts#env',
+    status: 'verified',
+    summary: "The agent service's environment variables, checked at startup.",
+    how: [
+      'It is one line, `loadEnv(agentEnvSchema)`: the settings and their rules live in env-schema.ts.',
+      'loadEnv checks process.env against that schema when the file is first imported.',
+    ],
+    why: "The service refuses to start if a setting is missing or invalid, before it connects to anything. index.ts reads the log level, the MongoDB and Redis URLs, the keys, chat's and billing's URLs, LLM_MODE and the provider keys. Its .env.example also lists QDRANT_URL, TAVILY_API_KEY and the S3 settings for later features, which the schema does not read yet.",
+    returns:
+      'An object with NODE_ENV, LOG_LEVEL, PORT, MONGODB_URI, REDIS_URL, INTERNAL_PUBLIC_KEY, SERVICE_PRIVATE_KEY, CHAT_SERVICE_URL, BILLING_SERVICE_URL, LLM_MODE, and GROQ_API_KEY, OPENROUTER_API_KEY and GEMINI_API_KEY (each a string or undefined).',
+    sideEffects: [
+      'Reads process.env.',
+      'Throws an EnvError on import if anything is invalid, which stops the app.',
+    ],
+  },
+  {
+    symbol: 'backend/services/agent/src/env-schema.ts#agentEnvSchema',
+    status: 'verified',
+    summary: "The agent's settings and the rules between them, as a Zod schema.",
+    how: [
+      'It extends baseEnvSchema with PORT (default 8003), MONGODB_URI and REDIS_URL (required), INTERNAL_PUBLIC_KEY, and SERVICE_PRIVATE_KEY, its own key for calling chat and billing.',
+      'CHAT_SERVICE_URL and BILLING_SERVICE_URL default to http://localhost:8002 and :8004.',
+      'LLM_MODE is live (real providers) or mock (canned answers, no keys), default mock.',
+      'GROQ_API_KEY, OPENROUTER_API_KEY and GEMINI_API_KEY may be left out; empty counts as unset.',
+      'In live mode GROQ_API_KEY is required, because chat, routing and titles run on Groq. The other keys only turn on the providers that need them.',
+    ],
+    why: 'The app runs in tests and CI without any AI keys, and refuses to start in live mode with no way to answer. The schema lives apart from env.ts so tests can check the rules without a real environment.',
+    returns: 'A Zod object schema, with a superRefine for the live-mode rule.',
+    tests: [AGENT_ENV_SCHEMA_TEST],
+  },
+  {
+    symbol: 'backend/services/agent/src/turns.ts#turnRouter',
+    status: 'verified',
+    summary:
+      'POST /chats/:chatId/turns: one answer, from the checks to the streamed reply and the settled credits.',
+    how: [
+      'It needs a user in the token (requireUser) and checks the body: content (trimmed, 1 to 20,000 characters), clientMessageId (8 to 64 letters, digits, - or _) and an optional agent chip; the body is strict. A shortcut with no message after it is a 400.',
+      "It loads the chat through chat's /internal route, so someone else's chat is a 404 before any AI call or charge.",
+      'A Redis lock (turn-lock:<chat>:<clientMessageId>, 15 minutes, set only if absent) refuses a second copy of the same send with 409.',
+      "If the balance is below the price of a chat answer, it refuses with 402 'You are out of credits' before any AI call, the router's included (SEC-03).",
+      'It loads the memory, picks the agent (routeMessage), and holds the credits with the idempotency key turn:<chat>:<clientMessageId>: 402 when too few for that agent, 409 when that send was already answered.',
+      "It saves the user's message and an empty 'streaming' answer in chat; if that fails, the hold is released.",
+      'Then streamAnswer streams the reply as server-sent events and settles the credits. The lock is always removed at the end.',
+    ],
+    why: 'Everything that can refuse the request happens before the stream starts, so it gets an ordinary problem+json error. Once streaming, the credits are settled whatever happens. The gateway does not forward this route yet; turns.test.ts runs it with the real chat and billing apps.',
+    returns: 'An Express Router.',
+    sideEffects: [
+      'Sets and removes a lock key in Redis.',
+      'Holds, charges or releases credits in billing, and saves and fills in messages in chat.',
+    ],
+    tests: [AGENT_TURNS_TEST],
+  },
+  {
+    symbol: 'backend/services/agent/src/turns.ts#streamAnswer',
+    status: 'verified',
+    summary: 'Streams one answer as server-sent events, then saves it and charges it.',
+    how: [
+      'It opens the event stream and aborts the answer if the client goes away before the end.',
+      "It sends meta (the turn and message IDs) and agent (the agent and why it was chosen), and starts titling a new chat (title 'New chat') at the same time.",
+      'It runs the agent and sends each piece of text as a token event.',
+      'Once the answer is done: it fills in the answer as complete, commits the credits with the model, tokens, latency, chat and message, sends usage (credits charged and the new balance), appends the turn to the memory cache, sends the title if one was made, and sends done.',
+      'Anything that goes wrong, a stop included, goes to settleUnfinished.',
+    ],
+    why: 'The browser sees the answer as it is written, and the credits are only charged for an answer that finished.',
+    returns: 'A promise that resolves when the stream is closed.',
+    sideEffects: ['Writes events to the response, and calls chat and billing.'],
+    tests: [AGENT_TURNS_TEST],
+  },
+  {
+    symbol: 'backend/services/agent/src/turns.ts#settleUnfinished',
+    status: 'verified',
+    summary: "Ends an answer that didn't finish: keeps the partial text and settles the credits.",
+    how: [
+      "It saves the text so far, with status 'stopped' for a stop and 'failed' otherwise.",
+      'A stop after text started is charged (commit, and a usage event); a stop before it, or any failure, is released.',
+      "It drops the chat's memory cache, so the next turn reloads it from chat.",
+      'If settling fails, it logs the error; the sweeper later releases a hold left behind.',
+      "For a failure (not a stop) it logs 'the answer failed' and sends an error event: the AppError's code and message, or answer_failed with 'The answer failed. Your credits were not charged.', and the request ID. It always ends with done.",
+    ],
+    why: 'The user pays only for text they received, and the stream always ends cleanly, even when billing or chat is down.',
+    returns: 'A promise that resolves when done.',
+    sideEffects: [
+      'Updates the answer in chat, commits or releases the hold in billing, and deletes the memory key in Redis.',
+    ],
+    tests: [AGENT_TURNS_TEST],
+  },
+  {
+    symbol: 'backend/services/agent/src/event-stream.ts#openEventStream',
+    status: 'verified',
+    summary: 'Turns a response into a server-sent events stream.',
+    how: [
+      'It sets 200 with text/event-stream, Cache-Control no-cache, no-transform and X-Accel-Buffering: no, and flushes the headers.',
+      'send writes a named event with JSON data, only while the response is still open.',
+      "A ': ping' comment goes out every 15 seconds, so proxies and browsers keep a quiet connection open while the model thinks.",
+      'close stops the heartbeat and ends the response.',
+    ],
+    why: 'One place sets the headers that stop proxies from buffering or compressing a stream.',
+    returns: 'An EventStream with send, open and close.',
+    sideEffects: ['Writes to the response; sets an interval timer.'],
+    tests: [AGENT_TURNS_TEST],
+  },
+  {
+    symbol: 'backend/services/agent/src/services.ts#chatService',
+    status: 'verified',
+    summary: "The agent's typed calls to chat's /internal routes.",
+    how: [
+      'getChat and recentMessages read GET /internal/chats/:id and /recent-messages (only role and content are kept for memory).',
+      'saveMessage posts to /internal/messages, and retries only when the message has a clientMessageId, because chat saves such a message once.',
+      'updateMessage patches /internal/messages/:id and autoTitle patches /internal/chats/:id; both may retry.',
+    ],
+    why: "Each call goes through an internal client signed with the agent's own key for the user it acts for, so chat checks both the caller and the user.",
+    returns: 'A ChatService.',
+    tests: [AGENT_SERVICES_TEST, AGENT_TURNS_TEST],
+  },
+  {
+    symbol: 'backend/services/agent/src/services.ts#billingService',
+    status: 'verified',
+    summary: "The agent's typed calls to billing.",
+    how: [
+      'balance reads GET /account.',
+      'reserve, commit and release post to /internal/credits/reserve, commit and release.',
+      'Every call may retry once: a reserve has its idempotency key, and a hold ends only once.',
+    ],
+    why: 'A 402 from billing comes back as the same AppError, so the turn route can pass it to the browser unchanged.',
+    returns: 'A BillingService.',
+    tests: [AGENT_SERVICES_TEST, AGENT_TURNS_TEST],
+  },
+  {
+    symbol: 'backend/services/agent/src/memory.ts#MEMORY_MESSAGES',
+    status: 'verified',
+    summary: 'How many recent messages the memory keeps: 20.',
+    why: 'Enough for the model to follow the conversation; trimToBudget then keeps only what fits.',
+    returns: 'The number 20.',
+    tests: [AGENT_MEMORY_TEST],
+  },
+  {
+    symbol: 'backend/services/agent/src/memory.ts#trimToBudget',
+    status: 'verified',
+    summary: 'Keeps the newest messages that fit a character budget, in their order.',
+    why: "A long chat must never overflow the model's context. The default budget is 24,000 characters, about 6,000 tokens, leaving room for the answer. It stops at the first message that does not fit, counting back from the newest.",
+    returns: 'The messages that fit, oldest first.',
+    tests: [AGENT_MEMORY_TEST],
+  },
+  {
+    symbol: 'backend/services/agent/src/memory.ts#createMemory',
+    status: 'verified',
+    summary: "A chat's recent messages for the model, cached in Redis.",
+    how: [
+      'load reads the Redis list mem:<chatId>. When it is empty, it asks chat for the latest finished messages, keeps the last 20 and caches them for an hour in one MULTI.',
+      'append adds a finished turn to the cache only when the cache exists, and keeps the last 20.',
+      'forget deletes the cache.',
+      'What load returns is trimmed with trimToBudget.',
+    ],
+    why: 'Most turns then skip the call to chat. The turn route appends after a finished answer and forgets after an unfinished one, so the cache never holds a turn chat does not have.',
+    returns: 'A Memory with load, append and forget.',
+    sideEffects: ['Reads and writes mem:<chatId> in Redis, with a one-hour expiry.'],
+    tests: [AGENT_MEMORY_TEST, AGENT_TURNS_TEST],
+  },
+  {
+    symbol: 'backend/services/agent/src/routing.ts#parseShortcut',
+    status: 'verified',
+    summary: 'Takes a shortcut such as /search off the start of a message.',
+    why: 'A user can type /search, /code, /pdf, /slides or /image to choose the agent. Any other text, an unknown shortcut included, is left alone.',
+    returns: '{ text, shortcut? }: the message without its shortcut, and the agent it names.',
+    tests: [AGENT_ROUTING_TEST],
+  },
+  {
+    symbol: 'backend/services/agent/src/routing.ts#routeMessage',
+    status: 'verified',
+    summary: 'Picks the agent for a message.',
+    how: [
+      'An agent the user chose (a chip or a shortcut) wins; then an attached PDF or image picks the Q&A agent.',
+      'Otherwise the router model is asked for JSON { agent, confidence } through completeJson, with the message inside <message> tags (at most 4,000 characters) and a prompt that says never to follow instructions in it.',
+      'A confidence below 0.6, an invalid reply or a failed call goes to chat; a stop is passed on.',
+      'An agent this server does not run also becomes chat.',
+    ],
+    why: 'Chat is the cheapest agent, so a routing problem never costs the user more. Today only chat runs (AVAILABLE_AGENTS), so every turn is answered by chat; the router call still runs, and its choice is reported in the agent event.',
+    returns: '{ agent, reason }: the reason is chosen, attachment, router or default.',
+    tests: [AGENT_ROUTING_TEST, AGENT_TURNS_TEST],
+  },
+  {
+    symbol: 'backend/services/agent/src/structured.ts#completeJson',
+    status: 'verified',
+    summary: 'Asks a model for JSON and checks it against a schema, with one repair.',
+    why: "A reply that does not parse or does not fit gets one more try, with the model shown its reply and the problem. A second failure is AppError('service_unavailable', 'The AI returned an answer in the wrong format'), never an unchecked object passed along. routeMessage uses it.",
+    returns: 'A promise of { value, result }.',
+    tests: [AGENT_STRUCTURED_TEST],
+  },
+  {
+    symbol: 'backend/services/agent/src/title.ts#generateTitle',
+    status: 'verified',
+    summary: 'A short title for a new chat, from its first message.',
+    why: "The title model gets the message inside <message> tags (at most 2,000 characters) and a prompt asking for at most six words. The turn route runs it while the answer streams and saves it with chat's auto-title route, which keeps a title the user chose.",
+    returns: 'A promise of the title, or null.',
+    tests: [AGENT_TURNS_TEST],
+  },
+  {
+    symbol: 'backend/services/agent/src/title.ts#cleanTitle',
+    status: 'verified',
+    summary: "Turns a model's reply into a clean title.",
+    why: "Models add quotes, a 'Title:' label or a full stop. It keeps the first line, strips those, cuts to 60 characters, and gives null when nothing is left.",
+    returns: 'The title, or null.',
+    tests: [AGENT_TURNS_TEST],
+  },
+  {
+    symbol: 'backend/services/agent/src/agents/chat.ts#chatAgent',
+    status: 'verified',
+    summary:
+      'Everyday answers: the fixed prompt, the conversation so far and the new message, streamed from the chat model.',
+    why: 'It is the one agent running today. The system prompt is fixed in code (CHAT_SYSTEM_PROMPT), so nothing a user writes can change it.',
+    returns: 'An AgentRunner whose run streams model, token and usage events.',
+    tests: [AGENT_CHAT_TEST, AGENT_TURNS_TEST],
+  },
+  {
+    symbol: 'backend/services/agent/src/agents/chat.ts#CHAT_SYSTEM_PROMPT',
+    status: 'verified',
+    summary: "The chat agent's system prompt.",
+    why: 'It asks for clear, concise answers with Markdown where it helps, and to say so when unsure instead of guessing.',
+    returns: 'A string.',
+    tests: [AGENT_CHAT_TEST],
+  },
+  {
+    symbol: 'backend/services/agent/src/agents/index.ts#AGENT_RUNNERS',
+    status: 'verified',
+    summary: 'The agents this server runs: today only chat.',
+    why: 'The turn route looks the routed agent up here and falls back to chat.',
+    returns: '{ chat: chatAgent }',
+    tests: [AGENT_TURNS_TEST],
+  },
+  {
+    symbol: 'backend/services/agent/src/agents/index.ts#AVAILABLE_AGENTS',
+    status: 'verified',
+    summary: 'The names of the agents in AGENT_RUNNERS.',
+    why: 'routeMessage turns any agent not in this set into chat, so a route never points at an agent that is not built.',
+    returns: 'A read-only Set of agent names.',
+    tests: [AGENT_TURNS_TEST],
+  },
+
+  // -------------------------------------------------------------------------------------------
+  // backend/services/agent/src/llm: the AI provider layer
+
+  {
+    symbol: 'backend/services/agent/src/llm/llm.ts#createLlm',
+    status: 'verified',
+    summary: 'The one way the agents call a model, with a fallback before the first token.',
+    how: [
+      'In mock mode every call goes to the mock provider. In live mode it takes the models for the purpose from MODEL_ROUTES and keeps those whose provider has a key; none left is a 503 service_unavailable.',
+      'It streams from the first model, and sends a model event (provider and model) before its first token.',
+      "If that model fails before its first token with a retryable error, and the caller has not stopped, it logs the warning 'model failed before answering; trying the next one' and tries the next. Otherwise the error goes up.",
+      'complete streams to the end and returns the whole text, the model and the token counts, for short calls such as routing and titles.',
+    ],
+    why: 'Once text has reached the user, switching models would mix two answers, so a fallback only happens before the first token. A stop or a bad request never moves on to another model.',
+    returns: 'An Llm with stream and complete.',
+    tests: [AGENT_LLM_TEST],
+  },
+  {
+    symbol: 'backend/services/agent/src/llm/models.ts#MODEL_ROUTES',
+    status: 'verified',
+    summary: 'Which models answer each kind of call, first choice first.',
+    how: [
+      'router and title: Groq openai/gpt-oss-20b, low reasoning.',
+      'chat and write: Groq openai/gpt-oss-120b, then openai/gpt-oss-20b.',
+      'code: OpenRouter deepseek/deepseek-chat, then Groq openai/gpt-oss-120b.',
+      'vision: Gemini gemini-2.5-flash.',
+    ],
+    why: 'Models are changed in this one place. Today the chat agent, the router and the titles use chat, router and title; write, code and vision are ready for the agents that will use them.',
+    returns: 'A read-only map from purpose to a list of { provider, model, reasoningEffort? }.',
+    tests: [AGENT_LLM_TEST],
+  },
+  {
+    symbol: 'backend/services/agent/src/llm/providers.ts#buildProviders',
+    status: 'verified',
+    summary: 'The providers that have keys, plus the mock one.',
+    why: 'Groq, OpenRouter and Gemini each get an OpenAI-compatible client with their base URL when their key is set; OpenRouter also gets an x-title header naming the app. The mock needs no key. createLlm then only uses models whose provider is here.',
+    returns: 'A map from provider name to provider.',
+  },
+  {
+    symbol: 'backend/services/agent/src/llm/openai-compatible.ts#createOpenAiCompatibleProvider',
+    status: 'verified',
+    summary:
+      'A streaming client for the OpenAI chat-completions API that Groq, OpenRouter and Gemini all offer.',
+    how: [
+      'It posts to <base URL>/chat/completions with the API key, stream: true and usage reporting, plus JSON mode, a token limit, a temperature or a reasoning effort when asked.',
+      'It gives up if the response has not started within 20 seconds, or if a started answer goes silent for 30.',
+      'A failed status is an LlmError, retryable for 408, 409, 429, 500, 502, 503 and 504, not for others such as 400 or 401.',
+      "It yields each piece of answer text (a reasoning model's thinking is skipped) and the token usage once at the end.",
+      'A stop from the caller is passed on as an abort, not as a provider failure.',
+    ],
+    why: 'One fetch-based client covers three providers with no SDKs, and its timeouts mean a stuck provider cannot hold an answer forever.',
+    returns: 'An LlmProvider.',
+    sideEffects: ["Calls the provider's API over HTTPS."],
+    tests: [AGENT_OPENAI_TEST],
+  },
+  {
+    symbol: 'backend/services/agent/src/llm/sse.ts#readSseData',
+    status: 'verified',
+    summary: "Reads a server-sent events body and yields each event's data.",
+    why: 'Providers stream their answer as server-sent events. It handles events split across reads, CRLF line ends and multi-line data, and calls onIdle (which aborts the call) when no bytes arrive for too long.',
+    returns: 'An async generator of strings.',
+    tests: [AGENT_SSE_TEST],
+  },
+  {
+    symbol: 'backend/services/agent/src/llm/types.ts#LlmError',
+    status: 'verified',
+    summary: 'Why a provider call failed, and whether another model may be tried.',
+    why: 'createLlm moves on to the next model only for a retryable LlmError: a rate limit, a server error, a timeout or a network failure. A bad request or a bad key would fail on the next model too.',
+    tests: [AGENT_OPENAI_TEST, AGENT_LLM_TEST],
+  },
+  {
+    symbol: 'backend/services/agent/src/llm/types.ts#LlmError.constructor',
+    status: 'verified',
+    summary: 'Builds the error with its provider, retryable flag, status and cause.',
+    why: 'The provider and status end up in the logs when a model fails.',
+    tests: [AGENT_OPENAI_TEST],
+  },
+  {
+    symbol: 'backend/services/agent/src/llm/mock.ts#createMockProvider',
+    status: 'verified',
+    summary: 'A provider that streams canned answers, so the app runs with no AI keys.',
+    why: 'LLM_MODE=mock, the default, uses it in development, tests and CI. It behaves like a real provider: word by word (15 ms apart by default), with token usage estimated at four characters a token, and it stops when the caller aborts.',
+    returns: 'An LlmProvider named mock.',
+    tests: [AGENT_MOCK_TEST, AGENT_TURNS_TEST],
+  },
+  {
+    symbol: 'backend/services/agent/src/llm/mock.ts#defaultMockAnswer',
+    status: 'verified',
+    summary:
+      "The mock's answer: a route to chat for JSON requests, otherwise an echo of the question.",
+    why: 'Routing in mock mode always lands on chat (confidence 0.9), and an answer says plainly that it is a mock.',
+    returns: 'A string.',
+    tests: [AGENT_MOCK_TEST],
   },
 
   // -------------------------------------------------------------------------------------------
@@ -1811,8 +2512,8 @@ export const notes: SymbolNote[] = [
     symbol: 'frontend/src/components/app-shell/sidebar.tsx#SidebarFrame',
     status: 'verified',
     summary:
-      'The sidebar on medium and larger screens: brand, New chat, Search chats, the chat list and the account part.',
-    why: 'New chat is a link to /, which creates nothing: an empty new chat. SearchButton opens the search dialog and ChatList loads the chats in the browser. The account part comes in as children, because it needs the session and sits in a Suspense boundary. Below the md breakpoint the sidebar is hidden and MobileBar takes over.',
+      'The sidebar on medium and larger screens: brand, New chat, Search chats, the chat list, the credits card and the account part.',
+    why: 'New chat is a link to /, which creates nothing: an empty new chat. SearchButton opens the search dialog, and ChatList and CreditsCard load in the browser. The account part comes in as children, because it needs the session and sits in a Suspense boundary. Below the md breakpoint the sidebar is hidden and MobileBar takes over.',
     returns: 'The <aside> as JSX.',
   },
   {
@@ -1830,7 +2531,7 @@ export const notes: SymbolNote[] = [
       'The chat list on small screens: a panel along the left edge, opened from the top bar.',
     how: [
       'The menu button opens it. It is a Radix dialog, so focus stays inside and Escape closes it.',
-      'It holds New chat, Search chats and the same ChatList as the sidebar.',
+      'It holds New chat, Search chats, the same ChatList as the sidebar and the credits card.',
       'A click on a link, or on an element marked data-closes-nav such as the search button, closes it.',
     ],
     why: 'Below the md breakpoint the sidebar is hidden, so the chats need another way in. Using the same ChatList means the same cached list.',
@@ -1857,18 +2558,18 @@ export const notes: SymbolNote[] = [
     symbol: 'frontend/src/store/api.ts#api',
     status: 'verified',
     summary:
-      "The browser's data layer for chats: an RTK Query API whose calls all go to the app's own /api.",
+      "The browser's data layer for chats and the credits balance: an RTK Query API whose calls all go to the app's own /api.",
     how: [
       'fetchBaseQuery uses the base URL /api, so every call goes to the Next.js proxy, which forwards it to the gateway with the session cookie.',
       'listChats is an infinite query for the sidebar: the first page is GET /api/chats, later pages add ?cursor=, and getNextPageParam reads nextCursor (null ends the list).',
-      'searchChats is GET /api/chats?query=, getChat is GET /api/chats/:id and createChat is POST /api/chats.',
+      'searchChats is GET /api/chats?query=, getChat is GET /api/chats/:id and createChat is POST /api/chats. getAccount is GET /api/billing/account, the plan and balance, with the Account tag.',
       'updateChat (PATCH, to rename or pin) and deleteChat (DELETE) change the cached list straight away in onQueryStarted, and undo that change if the call fails.',
       'The list queries provide the Chat LIST tag and getChat its own Chat tag. createChat, updateChat and deleteChat invalidate LIST, and updateChat also its chat, so those are fetched again once the call is done.',
     ],
     why: 'The sidebar, the small-screen panel and the recent chats in search use the same listChats cache, so one fetch serves them all. The optimistic changes make rename, pin and delete feel instant, and the undo keeps the list true when the server refuses. Nothing calls createChat yet.',
     returns:
       'The API object: its reducer, middleware, endpoints and hooks such as useListChatsInfiniteQuery and useUpdateChatMutation.',
-    tests: [FRONTEND_CHATS_TEST],
+    tests: [FRONTEND_CHATS_TEST, FRONTEND_CREDITS_TEST],
   },
   {
     symbol: 'frontend/src/store/api.ts#errorMessage',
@@ -2073,5 +2774,57 @@ export const notes: SymbolNote[] = [
     summary: "The page for a chat that isn't available.",
     why: 'A chat that does not exist, was deleted or belongs to someone else all lead here, with the same words, so the page cannot tell which. It links to / to start a new chat.',
     returns: 'The page as JSX.',
+  },
+
+  // -------------------------------------------------------------------------------------------
+  // frontend: credits
+
+  {
+    symbol: 'frontend/src/components/billing/credits-card.tsx#CreditsCard',
+    status: 'verified',
+    summary: 'The balance and plan, above the account menu.',
+    how: [
+      'getAccount loads GET /api/billing/account in the browser; a skeleton shows meanwhile.',
+      "It shows the balance (with Indian digit grouping, and 'credit' for exactly 1) and a badge with the plan's name.",
+      "Below LOW_BALANCE (10) the coin turns to the warning color and 'Running low' appears.",
+      'If billing cannot answer, the card renders nothing: the rest of the app works without it.',
+    ],
+    why: 'Every answer costs credits, so the balance stays in view, in the sidebar and in the small-screen panel.',
+    returns: 'The card as JSX, or null.',
+    tests: [FRONTEND_CREDITS_TEST],
+  },
+  {
+    symbol: 'frontend/src/lib/billing.ts#PLAN_NAMES',
+    status: 'verified',
+    summary: "The name shown for each plan: 'Free', 'Starter' and 'Pro'.",
+    why: "The credits card's badge reads it; the Account type next to it has the same shape as billing's toAccount.",
+    returns: 'A map from plan ID to name.',
+    tests: [FRONTEND_CREDITS_TEST],
+  },
+  {
+    symbol: 'frontend/src/lib/billing.ts#LOW_BALANCE',
+    status: 'verified',
+    summary: 'Below this many credits the card warns that the balance is running low: 10.',
+    why: 'Ten credits is one answer from most agents, so the warning comes while there is still something left.',
+    returns: 'The number 10.',
+    tests: [FRONTEND_CREDITS_TEST],
+  },
+  {
+    symbol: 'frontend/src/test/mock-api.ts#mockApi',
+    status: 'verified',
+    summary:
+      'Stands in for the network in component tests: records every /api call and answers it.',
+    why: "Node's Request needs an absolute URL, so it resolves '/api/...' against http://localhost:3000 as a browser would, then records the method, path and JSON body of each call and returns what the test's answer function gives. The chat and credits card tests use it.",
+    returns: 'The list of recorded calls.',
+    sideEffects: ['Replaces the global fetch and Request until vi.unstubAllGlobals() runs.'],
+    tests: [FRONTEND_CHATS_TEST, FRONTEND_CREDITS_TEST],
+  },
+  {
+    symbol: 'frontend/src/test/mock-api.ts#json',
+    status: 'verified',
+    summary: 'A JSON Response for a mocked call, 200 unless told otherwise.',
+    why: 'The tests answer most calls with JSON, so this keeps them short.',
+    returns: 'A Response.',
+    tests: [FRONTEND_CHATS_TEST, FRONTEND_CREDITS_TEST],
   },
 ];

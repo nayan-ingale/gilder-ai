@@ -13,7 +13,7 @@ const errorHandling: Flow = {
   category: 'errors',
   apps: APPS,
   summary:
-    "How an error in a backend app becomes a JSON error response in the problem+json format (RFC 9457). createService adds errorHandler last, so it receives every error passed on by the middleware before it. errorHandler turns the error into an AppError: it keeps AppErrors as they are, maps four JSON body-parser errors to 413, 400 and 415, and turns everything else into a generic 500. It logs server errors, then sends a body built by toProblem. Auth, chat, agent and billing raise a 401 from their internal-token check; chat, agent and billing have no routes, so a request with a valid token gets the 404. Auth also raises errors from its routes, such as a 400 from validate and a 503 for Google sign-in without the Firebase settings. The gateway raises a 429 from its rate limits, a 403 from its origin check, a 401 for a route that needs a session, a 413 for a body over 1 MB and a 503 when a service is down or slow, and passes each service's own error replies back unchanged.",
+    "How an error in a backend app becomes a JSON error response in the problem+json format (RFC 9457). createService adds errorHandler last, so it receives every error passed on by the middleware before it. errorHandler turns the error into an AppError: it keeps AppErrors as they are, maps four JSON body-parser errors to 413, 400 and 415, and turns everything else into a generic 500. It logs server errors, then sends a body built by toProblem. Auth, chat, agent and billing raise a 401 from their internal-token check, and errors from their routes: such as a 400 from validate, a 403 for the wrong signer on an internal route, a 404 for a chat that isn't the user's, a 402 when credits run out and a 503 for Google sign-in without the Firebase settings. The gateway raises a 429 from its rate limits, a 403 from its origin check, a 401 for a route that needs a session, a 413 for a body over 1 MB and a 503 when a service is down or slow, and passes each service's own error replies back unchanged.",
   status: 'partial',
   steps: [
     {
@@ -46,7 +46,7 @@ const errorHandling: Flow = {
       status: 'verified',
       symbol: 'backend/shared/src/service.ts#createService',
       highlight: 'routes?.(app);',
-      what: "An app's own routes run here. A route can throw, return a rejected promise (Express 5 passes it on like a throw), or call next(err), and all three reach the error handler. In auth, chat, agent and billing, the internal-token check (requireInternalToken) runs just before the routes and throws AppError('unauthorized') when the token is missing or invalid. Auth's routes raise AppErrors through validate() (400 validation_failed) and requireUser() (401), and in their own code: a bad Google sign-in or a deleted account is a 401, an unknown user ID a 404, and Google sign-in without the Firebase settings a 503. The gateway's /api router raises them from rateLimit() (429), originCheck (403), requireSession (401), express.raw (413 for a body over 1 MB) and proxyToService (503). The shared tests add routes too: /forbidden throws an AppError, /crash throws a plain Error, and /async-crash throws after an await.",
+      what: "An app's own routes run here. A route can throw, return a rejected promise (Express 5 passes it on like a throw), or call next(err), and all three reach the error handler. In auth, chat, agent and billing, the internal-token check (requireInternalToken) runs just before the routes and throws AppError('unauthorized') when the token is missing or invalid. Auth's routes raise AppErrors through validate() (400 validation_failed) and requireUser() (401), and in their own code: a bad Google sign-in or a deleted account is a 401, an unknown user ID a 404, and Google sign-in without the Firebase settings a 503. Chat's and billing's routes add requireCaller() (403 for a signer not allowed on an /internal route), 404 for a chat or hold that is not the user's, 409 for a hold settled the other way, and billing's 402 insufficient_credits. The agent's turn route raises 400, 404, 409 and 402 before its stream starts; once streaming, an error is sent as an error event instead. The gateway's /api router raises them from rateLimit() (429), originCheck (403), requireSession (401), express.raw (413 for a body over 1 MB) and proxyToService (503). The shared tests add routes too: /forbidden throws an AppError, /crash throws a plain Error, and /async-crash throws after an await.",
       why: 'Route code can simply throw. It does not have to build error responses itself.',
       next: [
         { to: 'not-found', kind: 'next', label: 'no route answered' },
@@ -234,7 +234,7 @@ const directServiceCall: Flow = {
   category: 'errors',
   apps: ['auth', 'chat', 'agent', 'billing'],
   summary:
-    "Auth, chat, agent and billing answer only requests that carry a valid internal token addressed to them, which the gateway signs. A request sent straight to a service's port, skipping the gateway, gets 401 on any path except /healthz and /readyz, before any route runs, so it cannot even learn which paths exist. A token that is garbage, signed with another key, meant for another service or more than 60 seconds old is refused the same way. Each service's app.test.ts and the gateway's journey.test.ts check this (SEC-02).",
+    "Auth, chat, agent and billing answer only requests that carry a valid internal token addressed to them, signed by the gateway or, where trusted, by auth or the agent. A request sent straight to a service's port, skipping the gateway, gets 401 on any path except /healthz and /readyz, before any route runs, so it cannot even learn which paths exist. A token that is garbage, signed with a key the service does not trust, meant for another service or more than 60 seconds old is refused the same way. Each service's app.test.ts and the gateway's journey.test.ts check this (SEC-02).",
   status: 'verified',
   steps: [
     {
@@ -242,7 +242,7 @@ const directServiceCall: Flow = {
       title: 'A request skips the gateway',
       kind: 'trigger',
       status: 'verified',
-      what: "Something sends a request straight to a service's port: auth 8001, chat 8002, agent 8003 or billing 8004. Every service listens on all network interfaces, so anything that can reach the port can try, for example GET /me or POST /sessions/dev on auth, or GET /chats on chat. journey.test.ts tries all three against the real auth and chat apps.",
+      what: "Something sends a request straight to a service's port: auth 8001, chat 8002, agent 8003 or billing 8004. Every service listens on all network interfaces, so anything that can reach the port can try, for example GET /me or POST /sessions/dev on auth, GET /chats on chat or POST /internal/accounts on billing. journey.test.ts tries them against the real auth, chat and billing apps.",
       why: 'The gateway is meant to be the only way in, but the services are reachable on their own ports, so they must refuse anything that did not come through it.',
       input: 'Any method and path, with no x-internal-token header or with one that is not valid.',
     },
@@ -262,8 +262,8 @@ const directServiceCall: Flow = {
       kind: 'middleware',
       status: 'verified',
       symbol: 'backend/shared/src/service.ts#createService',
-      highlight: 'app.use(requireInternalToken(internalAuth.publicKey, internalAuth.audience));',
-      what: "Each service passes createService the internalAuth option with the gateway's public key and its own name as the audience, so requireInternalToken runs after the health router and before the app's routes. It reads the x-internal-token header.",
+      highlight: '{ ...internalAuth.callers, gateway: internalAuth.publicKey },',
+      what: "Each service passes createService the internalAuth option with the gateway's public key, the keys of any services allowed to call it (chat trusts the agent; billing trusts auth and the agent) and its own name as the audience, so requireInternalToken runs after the health router and before the app's routes. It reads the x-internal-token header.",
       why: 'It sits in front of the routes, so a call without a token gets 401 even on a path that does not exist, instead of a 404 that would confirm which paths do.',
       next: [
         { to: 'missing-token', kind: 'branch', label: 'no x-internal-token header' },
@@ -287,9 +287,9 @@ const directServiceCall: Flow = {
       kind: 'function',
       status: 'verified',
       symbol: 'backend/shared/src/internalToken.ts#verifyInternalToken',
-      highlight: 'const { payload } = await jwtVerify(token, publicKey, {',
-      what: "jose checks the signature against the gateway's public key, the issuer (gilder-gateway), the audience (this service's name) and the expiry, and accepts only EdDSA. Garbage, a token signed with another key, a token addressed to another service and one more than 60 seconds old all fail; the app tests of chat, agent and billing send each of these. A valid token goes on to the routes instead, which is outside this flow.",
-      why: 'Only the gateway holds the private key, so only it can make a token that passes, and a token for one service is useless against another.',
+      highlight: 'const { payload } = await jwtVerify(token, key, {',
+      what: "verifyInternalToken reads the token's issuer only to pick a key: an issuer that names no caller, or a caller this service does not trust, fails at once. jose then checks the signature with that caller's public key, the issuer, the audience (this service's name) and the expiry, and accepts only EdDSA. Garbage, a token signed with another key, a token addressed to another service and one more than 60 seconds old all fail; the app tests of chat, agent and billing send each of these. A valid token goes on to the routes instead, which is outside this flow.",
+      why: 'Only the gateway, auth and the agent hold private keys, each its own, so only they can make a token that passes, only where they are trusted, and a token for one service is useless against another.',
       next: [{ to: 'invalid-token', kind: 'error', label: 'a check fails' }],
     },
     {

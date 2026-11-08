@@ -30,7 +30,7 @@ export const decisionsPage: DocPage = {
         },
         {
           kind: 'text',
-          text: 'Built today: the gateway checks every /api request (rate limits, its route table, the Origin and the session) and forwards the sign-in, logout and /me routes to auth and the chat routes to chat, each with a signed internal token. Every service turns on the internal-token check, so a direct call to any service path except the health checks gets 401, even though each service listens on its own port. The route table has no routes for agent or billing yet: each comes with its own feature (AI answers, Credits).',
+          text: 'Built today: the gateway checks every /api request (rate limits, its route table, the Origin and the session) and forwards the sign-in, logout and /me routes to auth, the chat routes to chat and the balance to billing, each with a signed internal token. Every service turns on the internal-token check, so a direct call to any service path except the health checks gets 401, even though each service listens on its own port. Services also call each other directly, each with its own key: auth calls billing, and the agent calls chat and billing. The route table has no route to the agent yet; it comes with AI answers.',
         },
         {
           kind: 'quote',
@@ -66,7 +66,7 @@ export const decisionsPage: DocPage = {
             },
             {
               label: 'Why',
-              text: "All five apps start, log, check health and fail in the same way, and a fix in one place reaches every app. Each app's own code stays small: agent and billing are just `env.ts`, `app.ts` and `index.ts`; auth adds its settings rules (`env-schema.ts`), its users model, its Google sign-in check and its routes; chat adds its models and its two routers; and the gateway adds its settings rules, its route table, its checks and its proxy.",
+              text: "All five apps start, log, check health and fail in the same way, and a fix in one place reaches every app. Each app's own code stays small: auth adds its settings rules (`env-schema.ts`), its users model, its Google sign-in check, its routes and its call to billing; chat adds its models and its two routers; billing its models, its credit functions, its routes and the sweeper; the agent its AI layer, routing, memory and turn route; and the gateway adds its settings rules, its route table, its checks and its proxy.",
             },
             {
               label: 'Trade-off',
@@ -113,7 +113,7 @@ export const decisionsPage: DocPage = {
         },
         {
           kind: 'text',
-          text: "Both sides are wired. The gateway imports `INTERNAL_PRIVATE_KEY` with `importInternalPrivateKey` (its settings check makes sure it is an Ed25519 key), and `proxyToService` calls `signInternalToken` for every request it forwards: the audience is the service, the subject is the user from the session, and `rid` is the request ID. Auth, chat, agent and billing import `INTERNAL_PUBLIC_KEY` with `importInternalPublicKey` and pass `createService` the `internalAuth` option, which puts `requireInternalToken` (with `verifyInternalToken`) in front of every route except `/healthz` and `/readyz`. Auth's routes that act for a user, and every chat route, add `requireUser`. A missing, garbage, forged, misaddressed or expired token gets 401 (SEC-02).",
+          text: 'Both sides are wired. The gateway imports `INTERNAL_PRIVATE_KEY` with `importInternalPrivateKey` (its settings check makes sure it is an Ed25519 key), and `proxyToService` calls `signInternalToken` for every request it forwards: the audience is the service, the subject is the user from the session, and `rid` is the request ID. Auth, chat, agent and billing import `INTERNAL_PUBLIC_KEY` with `importInternalPublicKey` and pass `createService` the `internalAuth` option, which puts `requireInternalToken` (with `verifyInternalToken`) in front of every route except `/healthz` and `/readyz`. Routes that act for a user add `requireUser`. A missing, garbage, forged, misaddressed or expired token gets 401 (SEC-02). Auth and the agent sign their own calls to other services the same way, each with its own key (see the next decision).',
         },
         {
           kind: 'quote',
@@ -132,6 +132,49 @@ export const decisionsPage: DocPage = {
         { file: 'backend/shared/scripts/setup-keys.ts' },
         { component: 'gateway' },
         { component: 'auth' },
+        { flow: 'direct-service-call' },
+      ],
+    },
+    {
+      id: 'service-keys',
+      title: 'Each service that calls another signs with its own key',
+      status: 'verified',
+      blocks: [
+        {
+          kind: 'fields',
+          fields: [
+            {
+              label: 'Decision',
+              text: "Auth and the agent each have their own signing key (`SERVICE_PRIVATE_KEY`). A token names its signer in its issuer (gilder-gateway, gilder-auth or gilder-agent); a service checks it with that signer's public key, and only for the signers it trusts: chat trusts the gateway and the agent, billing the gateway, auth and the agent. Each internal route names the one service allowed to call it (`requireCaller`).",
+            },
+            {
+              label: 'Why',
+              text: "Sharing the gateway's key would let any service act as the gateway, and any other service's route would be open to it. With a key per signer, a leaked agent key cannot hand out sign-up credits, auth's key cannot charge credits, and neither can reach a route through the gateway's door.",
+            },
+            {
+              label: 'Trade-off',
+              text: 'Three key pairs to manage instead of one, and each receiver needs the right public keys. `pnpm setup:keys` writes them all, and each app refuses to start without the keys it needs.',
+            },
+          ],
+        },
+        {
+          kind: 'text',
+          text: "`createInternalClient` signs every call with the caller's key, for the user the call is for and with the current request ID, and gives up after 5 seconds. The internalToken tests check that a service's token passes only where that service is trusted, and that no key can pass for another; credits.test.ts and the chat and billing route tests check that the wrong signer gets 403 on an internal route.",
+        },
+        {
+          kind: 'quote',
+          file: 'backend/shared/src/internalToken.ts',
+          text: "export const INTERNAL_CALLERS = ['gateway', 'auth', 'agent'] as const;",
+          caption: 'Who can sign internal tokens',
+        },
+      ],
+      refs: [
+        { symbol: 'backend/shared/src/internalToken.ts#INTERNAL_CALLERS' },
+        { symbol: 'backend/shared/src/internalToken.ts#verifyInternalToken' },
+        { symbol: 'backend/shared/src/internalToken.ts#requireCaller' },
+        { symbol: 'backend/shared/src/internalClient.ts#createInternalClient' },
+        { file: 'backend/shared/scripts/setup-keys.ts' },
+        { flow: 'signup-grant' },
         { flow: 'direct-service-call' },
       ],
     },
@@ -159,7 +202,7 @@ export const decisionsPage: DocPage = {
         },
         {
           kind: 'text',
-          text: 'The table lists the auth and chat routes today; every chat route needs a session, and `/api/chats/:id` becomes `/chats/<id>` on chat. The gateway tests and journey.test.ts check that internal paths, such as `/api/internal/users/<id>` and `/api/internal/messages`, get 404 without reaching a service (SEC-01).',
+          text: 'The table lists the auth and chat routes and `GET /api/billing/account` today; each of those needs a session, and `/api/chats/:id` becomes `/chats/<id>` on chat. The gateway tests and journey.test.ts check that internal paths, such as `/api/internal/users/<id>`, `/api/internal/messages` and `/api/internal/accounts`, get 404 without reaching a service (SEC-01).',
         },
         {
           kind: 'quote',
@@ -301,7 +344,7 @@ export const decisionsPage: DocPage = {
             },
             {
               label: 'Why',
-              text: 'MongoDB transactions only work on a replica set. The planned credits ledger will need them: a balance change and its ledger entry must be saved together or not at all.',
+              text: 'MongoDB transactions only work on a replica set. The credits ledger needs them: a balance change and its ledger entry must be saved together or not at all.',
             },
             {
               label: 'Trade-off',
@@ -311,7 +354,7 @@ export const decisionsPage: DocPage = {
         },
         {
           kind: 'text',
-          text: "No app uses a transaction yet; the ledger comes with Credits. The shared library's tests already run a real in-memory replica set and check that a transaction commits, and rolls back every write when it fails.",
+          text: "Billing runs every credit change in a transaction (`inTransaction`): the sign-up grant with its ledger entry, a hold with its balance change, a commit with its usage entry and a release with its refund. Its tests, the agent's turn tests and journey.test.ts start a one-member replica set in memory (`startTestMongo({ replicaSet: true })`), and the shared library's tests check that a transaction commits, and rolls back every write when it fails.",
         },
         {
           kind: 'quote',
@@ -351,7 +394,7 @@ export const decisionsPage: DocPage = {
         },
         {
           kind: 'text',
-          text: "The policy is set in Docker Compose. The shared code sets a TTL on every key it writes: a session (`sess:` and the SHA-256 of its ID) lasts 7 days, renewed on each lookup, and a rate-limit counter (`rl:<scope>:<id>`) gets its expiry in the same MULTI as its count. Auth's sign-in writes sessions and its logout deletes them; the gateway renews a session on each lookup and counts every request per IP and per signed-in user. No memory limit (`--maxmemory`) is set, so the policy does not come into play today.",
+          text: "The policy is set in Docker Compose. The shared code sets a TTL on every key it writes: a session (`sess:` and the SHA-256 of its ID) lasts 7 days, renewed on each lookup, and a rate-limit counter (`rl:<scope>:<id>`) gets its expiry in the same MULTI as its count. Auth's sign-in writes sessions and its logout deletes them; the gateway renews a session on each lookup and counts every request per IP and per signed-in user. The agent's chat memory (`mem:<chat ID>`) expires after an hour and its per-message lock (`turn-lock:...`) after 15 minutes. No memory limit (`--maxmemory`) is set, so the policy does not come into play today.",
         },
         {
           kind: 'quote',
@@ -393,7 +436,7 @@ export const decisionsPage: DocPage = {
         },
         {
           kind: 'text',
-          text: "The gateway passes its ID on: `proxyToService` sends it in `X-Request-Id` and in the internal token's `rid`, and the service's `requestId` middleware reuses it, so the gateway and the service log the same ID for one request. The Next.js proxy (`forwardToGateway`) sends one with every `/api` call it forwards and passes it back to the browser, where a failed chat change shows it in a toast. Server components' own calls (`gatewayGet`) send none, so the gateway makes one.",
+          text: "The gateway passes its ID on: `proxyToService` sends it in `X-Request-Id` and in the internal token's `rid`, and the service's `requestId` middleware reuses it, so the gateway and the service log the same ID for one request. The Next.js proxy (`forwardToGateway`) sends one with every `/api` call it forwards and passes it back to the browser, where a failed chat change shows it in a toast. Server components' own calls (`gatewayGet`) send none, so the gateway makes one. When auth or the agent calls another service, `createInternalClient` sends the current ID along too.",
         },
         {
           kind: 'quote',
@@ -469,7 +512,7 @@ export const decisionsPage: DocPage = {
         },
         {
           kind: 'text',
-          text: "Both are wired. Every app's `env.ts` calls `loadEnv`, and a bad setting stops the app at startup. Auth's routes check their input with `validate`: the sign-in bodies, the `PATCH /me` body and the user ID in `GET /internal/users/:id`. So do chat's: the chat ID, the list's query, cursor and limit, and bodies that refuse any field they do not list.",
+          text: "Both are wired. Every app's `env.ts` calls `loadEnv`, and a bad setting stops the app at startup. Auth's routes check their input with `validate`: the sign-in bodies, the `PATCH /me` body and the user ID in `GET /internal/users/:id`. So do chat's (the chat ID, the list's query, cursor and limit), billing's and the agent's turn route, with bodies that refuse any field they do not list. The router model's reply is checked the same way (`completeJson`), with one repair before it counts as a failure.",
         },
         {
           kind: 'quote',
@@ -668,7 +711,7 @@ export const decisionsPage: DocPage = {
         },
         {
           kind: 'text',
-          text: 'internal-routes.test.ts sends the same message three times at once and gets one 201, two 200s and one stored message. Nothing calls the route yet: the agent service will, when it saves the messages of a turn.',
+          text: "internal-routes.test.ts sends the same message three times at once and gets one 201, two 200s and one stored message. The agent's turn route uses it: it saves the user's message with the clientMessageId its request carries, and retries such a save safely.",
         },
         {
           kind: 'quote',
@@ -706,7 +749,7 @@ export const decisionsPage: DocPage = {
         },
         {
           kind: 'text',
-          text: 'internal-routes.test.ts checks that a second auto-title leaves the first one in place. Nothing calls the route yet: the agent service will, after the first answer.',
+          text: 'internal-routes.test.ts checks that a second auto-title leaves the first one in place. The agent writes the title while the first answer streams and sends it as a title event, which the turn test checks.',
         },
         {
           kind: 'quote',
@@ -799,6 +842,246 @@ export const decisionsPage: DocPage = {
         { symbol: 'frontend/src/components/chats/chat-row.tsx#ChatRow' },
         { flow: 'update-chat' },
         { flow: 'delete-chat' },
+      ],
+    },
+    {
+      id: 'grant-on-sign-in',
+      title: 'The sign-up grant is asked for on every sign-in',
+      status: 'verified',
+      blocks: [
+        {
+          kind: 'fields',
+          fields: [
+            {
+              label: 'Decision',
+              text: "Auth asks billing for the sign-up credits on every sign-in, not only a user's first. Billing grants once per user, and a billing failure never blocks the sign-in: auth logs a warning and goes on.",
+            },
+            {
+              label: 'Why',
+              text: 'Auth does not need to know whether billing has an account yet, and a user whose first grant failed because billing was down gets it on the next sign-in, without any repair job.',
+            },
+            {
+              label: 'Trade-off',
+              text: 'Every sign-in makes one more call, and waits up to 5 seconds (twice) when billing is down. Until the grant lands, the user has no account and the credits card shows 0.',
+            },
+          ],
+        },
+        {
+          kind: 'text',
+          text: 'Billing makes the repeat harmless: a check for an earlier grant, and a partial unique index that allows one signup_grant ledger entry per user even when two sign-ins race. journey.test.ts signs in twice through the real gateway and sees a balance of exactly 100.',
+        },
+        {
+          kind: 'quote',
+          file: 'backend/services/auth/src/session-routes.ts',
+          text: '// A billing outage must not stop sign-in: the grant is asked for again on the next one.',
+        },
+      ],
+      refs: [
+        { symbol: 'backend/services/auth/src/session-routes.ts#sessionRouter' },
+        { symbol: 'backend/services/auth/src/billing.ts#billingSignupGrant' },
+        { symbol: 'backend/services/billing/src/credits.ts#grantSignupCredits' },
+        { symbol: 'backend/services/billing/src/models.ts#ledgerSchema' },
+        { flow: 'signup-grant' },
+      ],
+    },
+    {
+      id: 'reserve-one-update',
+      title: "Credits are held with one conditional update, so they can't be overdrawn",
+      status: 'verified',
+      blocks: [
+        {
+          kind: 'fields',
+          fields: [
+            {
+              label: 'Decision',
+              text: "Before the AI runs, the agent holds the answer's credits in billing. The hold is one findOneAndUpdate that lowers the balance only where `balance >= cost`, in a transaction with the new reservation. The price comes from CREDIT_COSTS for the agent, never from the caller. A finished answer commits the hold with a usage ledger entry; a failed one releases it.",
+            },
+            {
+              label: 'Why',
+              text: 'Reading the balance and then writing it would let two answers at once both see enough credits. With the check inside the update, MongoDB applies them one at a time, and the second simply matches nothing. An idempotency key per message makes a retried reserve hold once.',
+            },
+            {
+              label: 'Trade-off',
+              text: 'The credits are taken before anyone knows whether the answer will succeed, so a failure has to give them back; a hold that is never settled waits for the sweeper. Every price is fixed per agent, not per token.',
+            },
+          ],
+        },
+        {
+          kind: 'text',
+          text: 'The SEC-08 test sends 50 reservations at once against 100 credits and gets exactly 10 holds, 40 refusals with 402 and a balance of 0. Every test checks the invariant: the balance equals the sum of the ledger minus the credits on hold.',
+        },
+        {
+          kind: 'quote',
+          file: 'backend/services/billing/src/credits.ts',
+          text: '{ _id: userId, balance: { $gte: amount } },',
+          caption: 'reserveCredits: the check and the decrease in one update',
+        },
+      ],
+      refs: [
+        { component: 'billing' },
+        { symbol: 'backend/services/billing/src/credits.ts#reserveCredits' },
+        { symbol: 'backend/services/billing/src/credits.ts#commitCredits' },
+        { symbol: 'backend/services/billing/src/credits.ts#releaseCredits' },
+        { symbol: 'backend/shared/src/constants.ts#CREDIT_COSTS' },
+        { flow: 'run-turn' },
+      ],
+    },
+    {
+      id: 'stale-hold-sweeper',
+      title: 'A sweeper gives back holds left behind',
+      status: 'verified',
+      blocks: [
+        {
+          kind: 'fields',
+          fields: [
+            {
+              label: 'Decision',
+              text: 'Every minute, billing releases each hold that has been held for more than 10 minutes, one transaction per hold.',
+            },
+            {
+              label: 'Why',
+              text: "If the agent crashes mid-answer, or cannot reach billing to settle, the user's credits would stay held for good. Answers end long before 10 minutes, so only abandoned holds are that old.",
+            },
+            {
+              label: 'Trade-off',
+              text: 'A user can be short of those credits for up to about 11 minutes after a crash. An answer that really did run longer than 10 minutes would be released before its commit, and the commit would then be refused as a conflict.',
+            },
+          ],
+        },
+        {
+          kind: 'text',
+          text: 'A hold is released only while it is still held, so several billing instances can sweep at once and each hold is given back exactly once; the test runs sweeps side by side. The timer never keeps the process alive and stops on shutdown.',
+        },
+        {
+          kind: 'quote',
+          file: 'backend/services/billing/src/sweeper.ts',
+          text: 'export const STALE_RESERVATION_MS = 10 * 60 * 1000;',
+        },
+      ],
+      refs: [
+        { symbol: 'backend/services/billing/src/sweeper.ts#releaseStaleReservations' },
+        { symbol: 'backend/services/billing/src/sweeper.ts#startReservationSweeper' },
+        { symbol: 'backend/services/billing/src/credits.ts#releaseHeld' },
+      ],
+    },
+    {
+      id: 'balance-check-first',
+      title: 'No credits, no AI call',
+      status: 'verified',
+      blocks: [
+        {
+          kind: 'fields',
+          fields: [
+            {
+              label: 'Decision',
+              text: "Before any AI call, the router's included, the turn route reads the user's balance and refuses with 402 when it is below the price of a chat answer. The chat ownership and the per-message lock are checked even earlier.",
+            },
+            {
+              label: 'Why',
+              text: 'Choosing the agent is free to the user but not to the server: a user with no credits must not be able to make the server call a model at all (SEC-03).',
+            },
+            {
+              label: 'Trade-off',
+              text: 'One extra call to billing per turn. The check is only a first filter: a user with a little credit left can pass it and still be refused by the hold, after the free router call, when the routed agent costs more.',
+            },
+          ],
+        },
+        {
+          kind: 'text',
+          text: 'turns.test.ts sends a turn for a user with no account and checks the 402, that no AI call of any kind was made and that no message was saved.',
+        },
+        {
+          kind: 'quote',
+          file: 'backend/services/agent/src/turns.ts',
+          text: "// No credits at all: refuse before any AI call, the router's included.",
+        },
+      ],
+      refs: [
+        { symbol: 'backend/services/agent/src/turns.ts#turnRouter' },
+        { symbol: 'backend/services/agent/src/services.ts#billingService' },
+        { flow: 'run-turn' },
+      ],
+    },
+    {
+      id: 'fetch-ai-layer',
+      title: 'A small fetch-based AI layer instead of an SDK or agent framework',
+      status: 'verified',
+      blocks: [
+        {
+          kind: 'fields',
+          fields: [
+            {
+              label: 'Decision',
+              text: 'The agent calls the AI providers through its own code: one streaming client for the OpenAI chat-completions API (which Groq, OpenRouter and Gemini all offer), a table of models per kind of call, a mock provider, JSON checked with Zod, and routing and the turn written as plain functions. No provider SDK and no agent framework such as LangChain.',
+            },
+            {
+              label: 'Why',
+              text: "The few things needed (streaming, token usage, timeouts, a fallback, structured output) fit in a few hundred lines that can be read and tested end to end. Credits, streaming to the browser and saving messages follow the app's own rules, which a framework would have to be bent around.",
+            },
+            {
+              label: 'Trade-off',
+              text: 'Features a framework would bring, such as tool calling or new provider quirks, have to be written by hand when they are needed. Only providers with an OpenAI-compatible API fit the one client.',
+            },
+          ],
+        },
+        {
+          kind: 'text',
+          text: '`LLM_MODE=mock`, the default, swaps in a mock provider that streams canned text, so the whole app, its tests and CI run without any AI keys.',
+        },
+        {
+          kind: 'quote',
+          file: 'backend/services/agent/src/llm/openai-compatible.ts',
+          text: ' * Groq, OpenRouter and Gemini all speak the OpenAI chat-completions API, so one client serves',
+        },
+      ],
+      refs: [
+        { component: 'llm-providers' },
+        {
+          symbol:
+            'backend/services/agent/src/llm/openai-compatible.ts#createOpenAiCompatibleProvider',
+        },
+        { symbol: 'backend/services/agent/src/llm/llm.ts#createLlm' },
+        { symbol: 'backend/services/agent/src/llm/mock.ts#createMockProvider' },
+        { symbol: 'backend/services/agent/src/structured.ts#completeJson' },
+      ],
+    },
+    {
+      id: 'fallback-before-first-token',
+      title: 'A model falls back only before its first token',
+      status: 'verified',
+      blocks: [
+        {
+          kind: 'fields',
+          fields: [
+            {
+              label: 'Decision',
+              text: 'Each kind of call has a list of models. If one fails before sending any text, with an error worth retrying (a rate limit, a server error, a timeout, a lost connection), the next model is tried. Once text has reached the user, a failure ends the answer instead; a stop or a bad request never moves on.',
+            },
+            {
+              label: 'Why',
+              text: 'Switching models mid-answer would join the start of one answer to the rest of another. Before the first token nothing has been shown, so a second model costs the user nothing.',
+            },
+            {
+              label: 'Trade-off',
+              text: 'An answer that fails halfway is not rescued: the user keeps the partial text, marked failed, and is not charged. A provider that is slow to start can add up to 20 seconds before the fallback begins.',
+            },
+          ],
+        },
+        {
+          kind: 'text',
+          text: 'llm.test.ts checks the fallback, and that the model never changes once text was sent, after a stop or after a bad request. The provider client gives up when the answer has not started within 20 seconds, or goes silent for 30.',
+        },
+        {
+          kind: 'quote',
+          file: 'backend/services/agent/src/llm/llm.ts',
+          text: '!started && !call.signal?.aborted && error instanceof LlmError && error.retryable;',
+        },
+      ],
+      refs: [
+        { symbol: 'backend/services/agent/src/llm/llm.ts#createLlm' },
+        { symbol: 'backend/services/agent/src/llm/models.ts#MODEL_ROUTES' },
+        { symbol: 'backend/services/agent/src/llm/types.ts#LlmError' },
+        { flow: 'run-turn' },
       ],
     },
   ],

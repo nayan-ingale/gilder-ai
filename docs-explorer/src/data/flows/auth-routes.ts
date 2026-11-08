@@ -284,7 +284,7 @@ const devSignIn: Flow = {
   route: { method: 'POST', path: '/sessions/dev' },
   apps: APPS,
   summary:
-    "POST /api/auth/dev-session signs in with just an email, for local development and tests. The gateway counts the request for the per-IP limit, finds the route in its table, checks the Origin, looks for a session (usually none), reads the raw body and forwards it to auth's POST /sessions/dev with a token that names no user. Auth checks the token and the body, finds or creates the user in MongoDB, stores a new session in Redis and sets the gilder_sid cookie; the gateway passes the answer and the Set-Cookie header back. The route exists only when auth runs with AUTH_DEV_LOGIN on. journey.test.ts follows it with the real auth app behind the real gateway.",
+    "POST /api/auth/dev-session signs in with just an email, for local development and tests. The gateway counts the request for the per-IP limit, finds the route in its table, checks the Origin, looks for a session (usually none), reads the raw body and forwards it to auth's POST /sessions/dev with a token that names no user. Auth checks the token and the body, finds or creates the user in MongoDB, asks billing for the sign-up credits (a billing outage never blocks the sign-in), stores a new session in Redis and sets the gilder_sid cookie; the gateway passes the answer and the Set-Cookie header back. The route exists only when auth runs with AUTH_DEV_LOGIN on. journey.test.ts follows it with the real auth app behind the real gateway.",
   status: 'verified',
   steps: [
     {
@@ -323,8 +323,8 @@ const devSignIn: Flow = {
     serviceDown(),
     authMiddleware('express.json parses the forwarded body, up to 64kb.'),
     authToken(
-      'requireInternalToken reads the x-internal-token header, and verifyInternalToken checks the signature with the gateway public key, the issuer gilder-gateway, the audience auth and the expiry. The token has no subject, so no user is set, and the request goes on to the routes.',
-      'claims = await verifyInternalToken(token, publicKey, audience);',
+      "requireInternalToken reads the x-internal-token header. verifyInternalToken reads the token's issuer, gilder-gateway, to pick the gateway's public key, the only key auth trusts, then checks the signature, the issuer, the audience auth and the expiry. res.locals.caller becomes gateway. The token has no subject, so no user is set, and the request goes on to the routes.",
+      'claims = await verifyInternalToken(token, trusted, audience);',
     ),
     {
       id: 'auth-validate',
@@ -365,6 +365,34 @@ const devSignIn: Flow = {
       sideEffects: ['May create a user in MongoDB.'],
     },
     {
+      id: 'auth-grant',
+      title: 'Auth: ask billing for the sign-up credits',
+      kind: 'external',
+      status: 'verified',
+      symbol: SESSION_ROUTES,
+      highlight: 'await deps.grantSignupCredits(user.id);',
+      what: "startSession records the user in the request context, then calls billingSignupGrant: POST /internal/accounts on billing, signed with auth's own key for this user, with one retry allowed. Billing gives 100 credits the first time and nothing after, so auth asks on every sign-in. The flow POST /internal/accounts follows billing's side.",
+      why: 'A new user starts with credits, and a user whose first grant failed gets it on the next sign-in.',
+      next: [
+        { to: 'auth-session', kind: 'next' },
+        { to: 'grant-failed', kind: 'error', label: 'billing down, slow or failing' },
+      ],
+    },
+    {
+      id: 'grant-failed',
+      title: 'No grant: log it and sign in anyway',
+      kind: 'error',
+      status: 'verified',
+      symbol: SESSION_ROUTES,
+      highlight: "'sign-up credits could not be granted; the next sign-in asks again',",
+      what: 'If billing does not answer within 5 seconds (twice), answers 5xx or refuses, auth logs that warning with the error and goes on. session-routes.test.ts checks that the sign-in still succeeds and that the next one asks again.',
+      why: 'A billing outage must never stop a user from signing in.',
+      sideEffects: [
+        "Logs 'sign-up credits could not be granted; the next sign-in asks again' at warn.",
+      ],
+      next: [{ to: 'auth-session', kind: 'next', label: 'sign-in goes on' }],
+    },
+    {
       id: 'auth-session',
       title: 'Auth: store a new session in Redis',
       kind: 'datastore',
@@ -383,7 +411,7 @@ const devSignIn: Flow = {
       symbol: SESSION_ROUTES,
       highlight:
         'res.cookie(SESSION_COOKIE, sessionId, { ...cookieOptions, maxAge: COOKIE_MAX_AGE_MS });',
-      what: "The response gets Set-Cookie gilder_sid=<ID>, HttpOnly, SameSite=Lax, Path=/, Max-Age 30 days, and Secure when NODE_ENV is production. setContextUserId records the user in the request context, and auth logs 'signed in' with the method dev and whether the user is new; that line carries the user ID.",
+      what: "The response gets Set-Cookie gilder_sid=<ID>, HttpOnly, SameSite=Lax, Path=/, Max-Age 30 days, and Secure when NODE_ENV is production. Auth logs 'signed in' with the method dev and whether the user is new; the user was put in the request context before the grant, so that line carries the user ID.",
       why: 'Page scripts cannot read an HttpOnly cookie, and other sites do not send a SameSite=Lax one with their forms and scripts.',
       sideEffects: ["Logs 'signed in' at info."],
     },

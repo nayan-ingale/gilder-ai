@@ -3,11 +3,12 @@ import type { ArchComponent, ArchLink } from './schema.ts';
 /**
  * The system map: every app, data store and outside service, and how they connect.
  *
- * Built today: the frontend (sign-in page, app shell, chat list, search and chat page) and its
- * /api proxy; the gateway, which checks each /api request and forwards the sign-in, logout,
- * profile and chat routes; auth and chat, which serve them; agent and billing, locked behind the
- * internal-token check but with no routes yet; and local MongoDB, Redis and Qdrant in Docker.
- * Everything else is marked `planned`, with the roadmap feature that adds it.
+ * Built today: the frontend (sign-in page, app shell, chat list, search, chat page and credits
+ * card) and its /api proxy; the gateway, which checks each /api request and forwards the sign-in,
+ * logout, profile, chat and balance routes; auth, chat and billing, which serve them; auth's call
+ * to billing for the sign-up grant; the agent's turn route, which calls chat, billing and the AI
+ * providers but is not forwarded by the gateway yet; and local MongoDB, Redis and Qdrant in
+ * Docker. Everything else is marked `planned`, with the roadmap feature that adds it.
  *
  * Link kinds used here: `http` for HTTP calls between programs, `internal` for an app importing
  * the shared library (same process, no network), `data` for a connection to a data store, and
@@ -47,6 +48,7 @@ export const components: ArchComponent[] = [
       'Chat list (ChatList): loaded in the browser with RTK Query a page at a time and grouped into Pinned, Today, Previous 7 days and Older. Each row has a menu to rename, pin or delete, which changes the list at once and undoes it if the call fails. On small screens the same list opens in a panel (MobileNav).',
       'Search (SearchDialog, ⌘K or Ctrl+K): searches titles and message text through GET /api/chats?query=, with the keyboard. ⌘⇧O or Ctrl+Shift+O goes to / for a new chat (ChatCommands).',
       "Chat page (/c/<chat ID>): the server reads the chat and its latest messages from the gateway with the browser's cookie (getChatWithHistory, gatewayGet) and renders them, so the history shows on first paint. A missing, deleted or someone else's chat gets one 'This chat isn't available' page.",
+      'Credits card (CreditsCard): the balance and plan from GET /api/billing/account, in the sidebar and the small-screen panel, with a warning below 10 credits.',
       'Data in the browser: a Redux store with RTK Query (makeStore, StoreProvider), whose calls all go to /api.',
       'Design system: Light minimal tokens in light and dark, Radix-based components, and a theme remembered in a cookie and applied before the first paint.',
       'Security headers on every page (next.config.ts): a Content-Security-Policy without nonces, nosniff, referrer and permissions policies, and no framing.',
@@ -69,11 +71,11 @@ export const components: ArchComponent[] = [
     kind: 'app',
     status: 'verified',
     summary:
-      'The one public entry to the backend. Each /api request goes through its checks (rate limits, the route allowlist, the origin check and the session lookup) and is then forwarded to its service with a fresh signed internal token. Its route table lists the auth and chat routes so far. The services also listen on their own ports, but each one answers 401 to anything without a valid token except its health checks.',
+      "The one public entry to the backend. Each /api request goes through its checks (rate limits, the route allowlist, the origin check and the session lookup) and is then forwarded to its service with a fresh signed internal token. Its route table lists the auth and chat routes and billing's account route so far; nothing reaches the agent through it yet. The services also listen on their own ports, but each one answers 401 to anything without a valid token except its health checks.",
     responsibilities: [
       "Builds its Express app with createService, with parseJson: false and its /api router as its routes, after the shared middleware and GET /healthz and GET /readyz. Express's trust proxy is set to TRUST_PROXY_HOPS, so req.ip is the client's address.",
       'Limits each IP address to 120 requests a minute (ipRateLimit), for every request that reaches the router, and each signed-in user to 60 (userRateLimit). Over the limit is a 429 with Retry-After.',
-      "Forwards only what its route table (PUBLIC_ROUTES) lists: POST /api/auth/session, POST /api/auth/dev-session, DELETE /api/auth/session, and GET and PATCH /api/me to auth; GET and POST /api/chats, GET, PATCH and DELETE /api/chats/:id and GET /api/chats/:id/messages to chat. A :id must be 1 to 64 letters, digits, - or _. Anything else gets the gateway's own 404 and never reaches a service.",
+      "Forwards only what its route table (PUBLIC_ROUTES) lists: POST /api/auth/session, POST /api/auth/dev-session, DELETE /api/auth/session, and GET and PATCH /api/me to auth; GET and POST /api/chats, GET, PATCH and DELETE /api/chats/:id and GET /api/chats/:id/messages to chat; GET /api/billing/account to billing. A :id must be 1 to 64 letters, digits, - or _. Anything else gets the gateway's own 404 and never reaches a service.",
       'Refuses a request that changes something (any method but GET, HEAD and OPTIONS) unless its Origin is one of FRONTEND_ORIGIN, with 403 (originCheck).',
       'Looks the session cookie up in Redis on every matched request, which renews it (sessionLookup), and answers 401 itself for a route that needs a session when there is none (requireSession).',
       'Forwards the request (proxyToService) with fetch: raw body up to 1 MB, a few allowed headers, the cookie only to auth, X-Request-Id, and an internal token signed for that service that names the user. It passes back the status, a few headers, every Set-Cookie and the streamed body. A service that is down or does not start answering within 10 seconds gives 503.',
@@ -96,7 +98,7 @@ export const components: ArchComponent[] = [
     kind: 'app',
     status: 'verified',
     summary:
-      "Handles sign-in, logout and the user's profile. Its session and /me routes sit behind the internal-token check, so a direct call to any path except the health checks gets 401. The gateway forwards the public sign-in, logout and /me routes to it, each with a token it signs.",
+      "Handles sign-in, logout and the user's profile. Its session and /me routes sit behind the internal-token check, so a direct call to any path except the health checks gets 401. The gateway forwards the public sign-in, logout and /me routes to it, each with a token it signs. On every sign-in it asks billing for the sign-up credits, with its own key.",
     responsibilities: [
       'Builds its Express app with createService: the shared middleware, GET /healthz and GET /readyz, then the internal-token check (the internalAuth option, audience auth) in front of its own routes. A call without a valid token gets 401 on any path except the health checks; an unknown path with a valid token gets 404.',
       'Connects to MongoDB at startup and does not start serving until the connection works.',
@@ -104,11 +106,12 @@ export const components: ArchComponent[] = [
       'Imports INTERNAL_PUBLIC_KEY with importInternalPublicKey at startup. A key it cannot read stops startup with exit code 1.',
       "Is reached through the gateway's route table: POST /api/auth/session → POST /sessions, POST /api/auth/dev-session → POST /sessions/dev, DELETE /api/auth/session → DELETE /sessions/current, GET and PATCH /api/me → /me. GET /internal/users/:id has no public route.",
       'Serves the sign-in routes (sessionRouter): POST /sessions for Google, POST /sessions/dev only when AUTH_DEV_LOGIN is on (otherwise the path is a 404), and DELETE /sessions/current for logout. They create or delete the session in Redis and set or clear the gilder_sid cookie, marked Secure when NODE_ENV is production.',
+      'Asks billing for the sign-up grant on every sign-in (billingSignupGrant): POST /internal/accounts through an internal client signed with its own SERVICE_PRIVATE_KEY, with one retry. Billing grants once per user; if billing is down, the sign-in still succeeds, a warning is logged and the next sign-in asks again.',
       "Serves the profile routes (meRouter): GET /me, PATCH /me to change the theme, and GET /internal/users/:id, which returns only the token's own user.",
       'Keeps users in MongoDB (UserModel, with a unique Firebase ID and a unique lowercase email); toProfile is the public shape of a user.',
       "Checks Google sign-in tokens with the Firebase Admin SDK (createFirebaseVerifier) when all three FIREBASE_* settings are set, including whether a token was revoked. A bad token gives 401, and a server-side failure stays a 500. Without the settings it uses googleSignInNotSetUp, so Google sign-in answers 503, and startup logs the warning 'Google sign-in is not set up: the FIREBASE_* settings are empty'.",
       "With AUTH_DEV_LOGIN on, startup logs the warning 'dev sign-in is on: anyone who can reach auth can sign in with just an email'.",
-      'Checks its settings at startup (rules in env-schema.ts) and refuses to start if a required variable (MONGODB_URI, REDIS_URL, INTERNAL_PUBLIC_KEY) is missing, or if any value is invalid. INTERNAL_PUBLIC_KEY (the shared internalPublicKeySchema; escaped \\n line breaks are fine) must start with -----BEGIN PUBLIC KEY-----; the message says to run pnpm setup:keys and never repeats the value. PORT, NODE_ENV, LOG_LEVEL and AUTH_DEV_LOGIN (false) have defaults.',
+      'Checks its settings at startup (rules in env-schema.ts) and refuses to start if a required variable (MONGODB_URI, REDIS_URL, INTERNAL_PUBLIC_KEY, SERVICE_PRIVATE_KEY) is missing, or if any value is invalid. INTERNAL_PUBLIC_KEY (the shared internalPublicKeySchema; escaped \\n line breaks are fine) must start with -----BEGIN PUBLIC KEY-----, and SERVICE_PRIVATE_KEY must parse as an Ed25519 private key; the messages say to run pnpm setup:keys and never repeat the value. PORT, NODE_ENV, LOG_LEVEL, BILLING_SERVICE_URL (http://localhost:8004) and AUTH_DEV_LOGIN (false) have defaults.',
       'In production it also refuses AUTH_DEV_LOGIN=true and requires FIREBASE_PROJECT_ID, FIREBASE_CLIENT_EMAIL and FIREBASE_PRIVATE_KEY; elsewhere the three are optional, but all three or none.',
       'On SIGTERM or SIGINT, finishes in-flight requests, then disconnects MongoDB and closes Redis.',
     ],
@@ -117,6 +120,8 @@ export const components: ArchComponent[] = [
     entryPoints: [
       'backend/services/auth/src/index.ts#(module)',
       'backend/services/auth/src/app.ts#createApp',
+      'backend/services/auth/src/session-routes.ts#sessionRouter',
+      'backend/services/auth/src/billing.ts#billingSignupGrant',
     ],
   },
   {
@@ -125,15 +130,15 @@ export const components: ArchComponent[] = [
     kind: 'app',
     status: 'verified',
     summary:
-      "Owns chats and their messages, in its own database. The gateway forwards the six /api/chats routes to it: list and search, create, read, rename or pin, delete, and the history. Its /internal routes for the agent service are built but not called yet. Every lookup filters by the user in the internal token, so another user's chat gets the same 404 as a missing one.",
+      "Owns chats and their messages, in its own database. The gateway forwards the six /api/chats routes to it: list and search, create, read, rename or pin, delete, and the history. Its /internal routes are open only to the agent, which reads chats and saves messages while it answers. Every lookup filters by the user in the internal token, so another user's chat gets the same 404 as a missing one.",
     responsibilities: [
-      'Builds its Express app with createService: the shared middleware, GET /healthz and GET /readyz, then the internal-token check (audience chat) in front of chatRouter and internalRouter. A call without a valid token gets 401 on any path except the health checks.',
+      'Builds its Express app with createService: the shared middleware, GET /healthz and GET /readyz, then the internal-token check (audience chat; it trusts the gateway and the agent) in front of chatRouter and internalRouter. A call without a valid token gets 401 on any path except the health checks.',
       'Serves the chat routes (chatRouter): GET /chats (every pinned chat on the first page, then the others by latest activity, with a keyset cursor; or a search of titles and message text with ?query=), POST /chats, GET, PATCH (rename or pin) and DELETE (soft) /chats/:id, and GET /chats/:id/messages (pages from the newest back).',
-      "Serves the internal routes (internalRouter) for the agent service: read a chat, auto-title it while it is still 'New chat', read its recent finished messages, save a message once per clientMessageId, and fill in an answer. The gateway has no route to them, and no service calls them yet.",
+      "Serves the internal routes (internalRouter) for the agent service: read a chat, auto-title it while it is still 'New chat', read its recent finished messages, save a message once per clientMessageId, and fill in an answer. Only tokens signed with the agent's key may use them (requireCaller), and the gateway has no route to them.",
       'Keeps conversations and messages in MongoDB (ConversationModel, MessageModel). findOwnedConversation reads a chat only for its owner and only if it is not deleted, and toChat and toMessage are the public shapes.',
       'Connects to MongoDB at startup and does not start serving until the connection works. /readyz pings it.',
-      'Imports INTERNAL_PUBLIC_KEY with importInternalPublicKey at startup. A key it cannot read stops startup with exit code 1.',
-      'Checks its settings at startup and refuses to start if a required variable (MONGODB_URI, INTERNAL_PUBLIC_KEY) is missing, or if any value is invalid. PORT, NODE_ENV and LOG_LEVEL have defaults.',
+      'Imports INTERNAL_PUBLIC_KEY and AGENT_PUBLIC_KEY with importInternalPublicKey at startup. A key it cannot read stops startup with exit code 1.',
+      'Checks its settings at startup and refuses to start if a required variable (MONGODB_URI, INTERNAL_PUBLIC_KEY, AGENT_PUBLIC_KEY) is missing, or if any value is invalid. PORT, NODE_ENV and LOG_LEVEL have defaults.',
       'On SIGTERM or SIGINT, finishes in-flight requests and then disconnects MongoDB.',
     ],
     path: 'backend/services/chat',
@@ -152,13 +157,17 @@ export const components: ArchComponent[] = [
     kind: 'app',
     status: 'verified',
     summary:
-      'Will run the AI agents. Today it answers health checks, and 401 to anything else without a valid internal token. Planned: LLM calls through Groq, OpenRouter and Gemini (AI answers), web search with Tavily (Web search and code), files in S3 and vectors in Qdrant (PDF and image Q&A), and images from Pollinations (File generation).',
+      'Runs a turn: POST /chats/:chatId/turns checks the chat and the credits, picks the agent, holds the credits in billing, saves the messages in chat and streams the answer from an AI provider as server-sent events, then charges or releases the credits. Only the chat agent runs so far, and the gateway does not forward the turn route yet. Planned: web search with Tavily (Web search and code), files in S3 and vectors in Qdrant (PDF and image Q&A), and images from Pollinations (File generation).',
     responsibilities: [
-      'Builds its Express app with createService: the shared middleware, GET /healthz and GET /readyz, then the internal-token check (audience agent). It has no routes of its own yet, so a request with a valid token gets 404.',
+      'Builds its Express app with createService: the shared middleware, GET /healthz and GET /readyz, then the internal-token check (audience agent; only the gateway is trusted) in front of turnRouter.',
+      "Serves POST /chats/:chatId/turns (turnRouter): 404 for someone else's chat, 409 for a message already being answered, 402 before any AI call when the user has no credits (SEC-03), then memory, routing, a credit hold, the two messages in chat, and the streamed answer (meta, agent, token, usage, title, error and done events). A finished answer is committed; a failure, or a stop before the first token, is released; a stop after text started is committed.",
+      "Calls chat and billing with its own key (SERVICE_PRIVATE_KEY) through createInternalClient: chat's /internal routes to read the chat and its recent messages, save and fill in messages and name a new chat; billing's GET /account and /internal/credits/reserve, commit and release.",
+      'Calls the AI providers through its own fetch-based layer (createLlm, createOpenAiCompatibleProvider): Groq, OpenRouter and Gemini over their OpenAI-compatible APIs, with a fallback to the next model only before the first token, a 20-second start limit and a 30-second idle limit. LLM_MODE=mock (the default) answers from a mock provider with no keys.',
+      'Picks the agent (routeMessage): a chip or /shortcut, an attachment, or a small router model asked for JSON (completeJson, with one repair); anything unclear becomes chat. Titles a new chat while the answer streams (generateTitle).',
+      "Keeps each chat's last 20 messages in Redis for an hour (createMemory), and a 15-minute lock per message (turn-lock:...).",
       'Connects to MongoDB at startup and does not start serving until the connection works.',
       'Opens a Redis client at startup. /readyz says ready only when both MongoDB and Redis answer.',
-      'Imports INTERNAL_PUBLIC_KEY with importInternalPublicKey at startup. A key it cannot read stops startup with exit code 1.',
-      'Checks its settings at startup and refuses to start if a required variable (MONGODB_URI, REDIS_URL, INTERNAL_PUBLIC_KEY) is missing, or if any value is invalid. PORT, NODE_ENV and LOG_LEVEL have defaults. Its .env.example also lists QDRANT_URL, CHAT_SERVICE_URL, BILLING_SERVICE_URL, the AI provider keys (GROQ_API_KEY, OPENROUTER_API_KEY, GEMINI_API_KEY, TAVILY_API_KEY) and the S3 settings (AWS_REGION, S3_BUCKET, AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY) for later features, but env.ts does not read them yet.',
+      'Checks its settings at startup (rules in env-schema.ts) and refuses to start if a required variable (MONGODB_URI, REDIS_URL, INTERNAL_PUBLIC_KEY, SERVICE_PRIVATE_KEY) is missing, if any value is invalid, or if LLM_MODE is live without GROQ_API_KEY. Its .env.example also lists QDRANT_URL, TAVILY_API_KEY and the S3 settings for later features, which the schema does not read yet.',
       'On SIGTERM or SIGINT, finishes in-flight requests, then disconnects MongoDB and closes Redis.',
     ],
     path: 'backend/services/agent',
@@ -166,6 +175,8 @@ export const components: ArchComponent[] = [
     entryPoints: [
       'backend/services/agent/src/index.ts#(module)',
       'backend/services/agent/src/app.ts#createApp',
+      'backend/services/agent/src/turns.ts#turnRouter',
+      'backend/services/agent/src/llm/llm.ts#createLlm',
     ],
   },
   {
@@ -174,19 +185,26 @@ export const components: ArchComponent[] = [
     kind: 'app',
     status: 'verified',
     summary:
-      'Will own credits and payments. Today it answers health checks, and 401 to anything else without a valid internal token. Planned: its routes (Credits), with credits kept in a ledger, and Razorpay payments (Payments and usage).',
+      'Owns credits: one account per user with its plan and balance, a hold for each answer in progress, and an append-only ledger. The gateway forwards GET /api/billing/account to it; auth calls it for the sign-up grant and the agent to hold, charge and release credits, each with its own key. Planned: Razorpay payments (Payments and usage).',
     responsibilities: [
-      'Builds its Express app with createService: the shared middleware, GET /healthz and GET /readyz, then the internal-token check (audience billing). It has no routes of its own yet, so a request with a valid token gets 404.',
+      'Builds its Express app with createService: the shared middleware, GET /healthz and GET /readyz, then the internal-token check (audience billing; it trusts the gateway, auth and the agent) in front of accountRouter and internalRouter.',
+      "Serves GET /account (the plan and balance, for the credits card and the agent's balance check) and the internal routes: POST /internal/accounts for auth only, and POST /internal/credits/reserve, commit and release for the agent only (requireCaller). Other signers get 403.",
+      'Grants 100 sign-up credits once per user (grantSignupCredits), even when sign-ins race.',
+      "Holds an answer's credits with one conditional update on balance >= cost, so parallel answers can never overdraw (reserveCredits, SEC-08); the amount comes from CREDIT_COSTS. Commit appends a usage ledger entry; release gives the credits back. Each happens once, in a transaction.",
+      'Keeps accounts, reservations and the ledger in MongoDB (AccountModel, ReservationModel, LedgerModel). The balance always equals the sum of the ledger minus the credits on hold, which the tests check.',
+      'Releases holds still held after 10 minutes, every minute (startReservationSweeper), say after an agent crash.',
       'Connects to MongoDB at startup and does not start serving until the connection works. /readyz pings it.',
-      'Imports INTERNAL_PUBLIC_KEY with importInternalPublicKey at startup. A key it cannot read stops startup with exit code 1.',
-      'Checks its settings at startup and refuses to start if a required variable (MONGODB_URI, INTERNAL_PUBLIC_KEY) is missing, or if any value is invalid. PORT, NODE_ENV and LOG_LEVEL have defaults. Its .env.example also lists the Razorpay settings (RAZORPAY_KEY_ID, RAZORPAY_KEY_SECRET, RAZORPAY_WEBHOOK_SECRET) for later features, but env.ts does not read them yet.',
-      'On SIGTERM or SIGINT, finishes in-flight requests and then disconnects MongoDB.',
+      'Imports INTERNAL_PUBLIC_KEY, AUTH_PUBLIC_KEY and AGENT_PUBLIC_KEY with importInternalPublicKey at startup. A key it cannot read stops startup with exit code 1.',
+      'Checks its settings at startup and refuses to start if a required variable (MONGODB_URI and the three public keys) is missing, or if any value is invalid. PORT, NODE_ENV and LOG_LEVEL have defaults. Its .env.example also lists the Razorpay settings for later features, which env.ts does not read yet.',
+      'On SIGTERM or SIGINT, finishes in-flight requests, then stops the sweeper and disconnects MongoDB.',
     ],
     path: 'backend/services/billing',
     port: 8004,
     entryPoints: [
       'backend/services/billing/src/index.ts#(module)',
       'backend/services/billing/src/app.ts#createApp',
+      'backend/services/billing/src/credits.ts#reserveCredits',
+      'backend/services/billing/src/internal-routes.ts#internalRouter',
     ],
   },
   {
@@ -202,12 +220,13 @@ export const components: ArchComponent[] = [
       "loadEnv checks each app's settings at startup and lists every problem at once, without printing the values.",
       'createLogger makes a pino logger that hides secrets such as tokens, cookies and passwords.',
       'connectMongo, pingMongo, createRedis and pingRedis open the database connections and provide the checks behind /readyz.',
-      "Its setup:keys script (pnpm setup:keys) writes the gateway's private key and each service's matching public key into their .env files, without printing them.",
-      "Internal tokens: the gateway imports its private key and signs a token for each forwarded request (importInternalPrivateKey, signInternalToken); auth, chat, agent and billing import the public key (internalPublicKeySchema, importInternalPublicKey) and check every token (createService's internalAuth option, requireInternalToken). Auth's user routes and every chat route add requireUser.",
+      "Its setup:keys script (pnpm setup:keys) writes three key pairs into the .env files, without printing them: the gateway's private key and every service's matching public key, and auth's and the agent's own private keys with their public keys for the services they call (billing for auth; chat and billing for the agent).",
+      "Internal tokens: each token names its signer (INTERNAL_CALLERS: gateway, auth, agent). The gateway signs one for each forwarded request (signInternalToken); auth and the agent sign their own calls through createInternalClient, which also keeps the request ID, times out after 5 seconds, can retry once and passes the other service's error codes on. Services check every token against the keys they trust (createService's internalAuth option with callers, requireInternalToken, verifyInternalToken). Routes that act for a user add requireUser, and internal routes meant for one service add requireCaller.",
       'Sessions: auth creates and deletes them (createSession, deleteSession); the gateway looks them up on each request (sessionIdFromCookies, resolveSession).',
-      "Rate limits: the gateway's per-IP and per-user limits (rateLimit, hitRateLimit, GATEWAY_RATE_LIMITS). The validate request middleware checks the params, query and bodies of auth's and chat's routes.",
-      "Shared constants: chat uses the agent list (AGENTS) for a message's agent. Credit costs, per-agent rate limits and plans are built and tested, but not used by any app yet.",
-      'It re-exports mongoose, so every model uses the connection connectMongo opens: auth its users, chat its conversations and messages.',
+      "Rate limits: the gateway's per-IP and per-user limits (rateLimit, hitRateLimit, GATEWAY_RATE_LIMITS). The validate request middleware checks the params, query and bodies of the services' routes.",
+      'Shared constants: chat and billing use the agent list (AGENTS), billing the credit costs, the sign-up credits and the plan names, and the agent the price of a chat answer. The per-agent rate limits are built and tested, but not used by any app yet.',
+      'It re-exports mongoose, so every model uses the connection connectMongo opens: auth its users, chat its conversations and messages, billing its accounts, holds and ledger.',
+      'startTestMongo gives each test file its own in-memory MongoDB, a one-member replica set when the test needs transactions.',
       'createTestRedis gives each test a client on a real Redis (database 15) with its own random key prefix, and deletes its keys afterwards.',
     ],
     path: 'backend/shared',
@@ -226,13 +245,14 @@ export const components: ArchComponent[] = [
     kind: 'datastore',
     status: 'verified',
     summary:
-      'The main database, run locally in Docker (mongo:8). It is a single-node replica set named rs0, because MongoDB transactions need a replica set; the credits ledger planned for billing will use them.',
+      'The main database, run locally in Docker (mongo:8). It is a single-node replica set named rs0, because MongoDB transactions need a replica set: billing changes every balance in a transaction with its ledger entry or hold.',
     responsibilities: [
       'Listens on host port 27018, not the usual 27017, so it does not clash with other local projects. Data lives in the mongo-data volume.',
       'The Docker health check creates the rs0 replica set on the first run.',
       'auth, chat, agent and billing connect at startup. Each .env.example points the app at its own database: gilder_auth, gilder_chat, gilder_agent and gilder_billing.',
       'Auth keeps its users here (a unique Firebase ID and email each): its sign-in routes create or update them, and the /me routes read and save them.',
       "Chat keeps conversations and messages in gilder_chat. The indexes serve the chat list (userId, pinnedAt, lastMessageAt), a chat's messages in order, one message per clientMessageId, and text search of titles and message text, each behind userId.",
+      'Billing keeps accounts (keyed by the user ID), reservations and the ledger in gilder_billing. Partial unique indexes allow one sign-up grant per user and one usage entry per reservation; a unique idempotency key makes each reserve happen once.',
     ],
     port: 27018,
     entryPoints: ['backend/shared/src/mongo.ts#connectMongo'],
@@ -247,7 +267,8 @@ export const components: ArchComponent[] = [
     responsibilities: [
       'Listens on host port 6380, not the usual 6379. It saves to disk (append-only file) in the redis-data volume.',
       'Sets the noeviction policy, so if a memory limit is added later, Redis will refuse new writes instead of quietly deleting keys. No memory limit (--maxmemory) is set today, so the policy does not come into play yet.',
-      'gateway, auth and agent open a client at startup and send PING for /readyz. Agent reads and writes no keys yet.',
+      'gateway, auth and agent open a client at startup and send PING for /readyz.',
+      "The agent caches each chat's last 20 messages as the list mem:<chat ID> for an hour, and locks a message being answered with turn-lock:<chat ID>:<client message ID> for up to 15 minutes.",
       "The shared library stores sessions as sess:<SHA-256 of the session ID>, with a 7-day expiry that each lookup renews, and rate-limit counters as rl:<scope>:<id>, whose expiry is set with the count in one MULTI. Auth's sign-in creates sessions and its logout deletes them; the gateway looks a session up on each request and counts requests per IP (rl:ip:...) and per user (rl:user:...).",
       'Tests run against a real Redis on port 6380, using database 15: the local container, or a Redis service in CI.',
     ],
@@ -279,16 +300,19 @@ export const components: ArchComponent[] = [
   },
 
   // -------------------------------------------------------------------------------------------
-  // Outside services (only Firebase, from auth, is called by the code today)
+  // Outside services (Firebase from auth, and the AI providers from the agent, are called today)
 
   {
     id: 'llm-providers',
     name: 'LLM providers (Groq, OpenRouter, Gemini)',
     kind: 'external',
-    status: 'planned',
-    plannedIn: 'AI answers',
-    summary: 'The language models the agent will call to write answers. Not built yet.',
-    responsibilities: [],
+    status: 'verified',
+    summary:
+      'The language models the agent calls to write answers, all over their OpenAI-compatible chat-completions APIs with fetch. Each is used only when its key is set and LLM_MODE is live; the default, mock, calls none of them.',
+    responsibilities: [
+      'Groq: the chat answers (openai/gpt-oss-120b, then openai/gpt-oss-20b), routing and titles (openai/gpt-oss-20b). Live mode needs its key.',
+      'OpenRouter (deepseek/deepseek-chat) for code and Gemini (gemini-2.5-flash) for image questions are set up in MODEL_ROUTES and buildProviders, but no running agent uses them yet.',
+    ],
   },
   {
     id: 'tavily',
@@ -460,13 +484,19 @@ export const links: ArchLink[] = [
     from: 'billing',
     to: 'mongodb',
     kind: 'data',
-    label: 'Connects at startup; /readyz pings it',
+    label:
+      'Connects at startup; /readyz pings it. Keeps accounts, credit holds and the ledger in gilder_billing, changing each balance in a transaction with its ledger entry or hold',
     status: 'verified',
     evidence: [
       'backend/services/billing/src/index.ts#(module)',
       'backend/services/billing/src/index.ts#app',
       'backend/shared/src/mongo.ts#connectMongo',
       'backend/shared/src/mongo.ts#pingMongo',
+      'backend/services/billing/src/models.ts#AccountModel',
+      'backend/services/billing/src/models.ts#ReservationModel',
+      'backend/services/billing/src/models.ts#LedgerModel',
+      'backend/services/billing/src/credits.ts#inTransaction',
+      'backend/services/billing/src/sweeper.ts#releaseStaleReservations',
     ],
   },
 
@@ -511,13 +541,16 @@ export const links: ArchLink[] = [
     from: 'agent',
     to: 'redis',
     kind: 'data',
-    label: 'Opens a client at startup; /readyz sends PING. No keys are read or written yet',
+    label:
+      "Opens a client at startup; /readyz sends PING. Caches each chat's last 20 messages (mem:...) and locks a message while it is answered (turn-lock:...)",
     status: 'verified',
     evidence: [
       'backend/services/agent/src/index.ts#redis',
       'backend/services/agent/src/index.ts#app',
       'backend/shared/src/redis.ts#createRedis',
       'backend/shared/src/redis.ts#pingRedis',
+      'backend/services/agent/src/memory.ts#createMemory',
+      'backend/services/agent/src/turns.ts#turnRouter',
     ],
   },
 
@@ -596,47 +629,88 @@ export const links: ArchLink[] = [
     ],
   },
 
-  // -------------------------------------------------------------------------------------------
-  // Planned: not built yet
-
+  // Gateway → billing: the balance for the credits card.
   {
     from: 'gateway',
     to: 'billing',
     kind: 'http',
-    label: 'Billing requests, each with a short-lived signed internal token',
-    status: 'planned',
-    plannedIn: 'Credits',
+    label:
+      'GET /api/billing/account (the plan and balance), with a fresh internal token for billing that names the user',
+    status: 'verified',
+    evidence: [
+      'backend/gateway/src/route-table.ts#PUBLIC_ROUTES',
+      'backend/gateway/src/proxy.ts#proxyToService',
+      'backend/services/billing/src/account-routes.ts#accountRouter',
+    ],
   },
+
+  // Service to service: each caller signs with its own key, and the receiver checks the caller.
   {
-    from: 'gateway',
-    to: 'agent',
+    from: 'auth',
+    to: 'billing',
     kind: 'http',
-    label: 'Agent requests, each with a short-lived signed internal token',
-    status: 'planned',
-    plannedIn: 'AI answers',
+    label:
+      "The sign-up grant on every sign-in (POST /internal/accounts), signed with auth's own key; a billing outage never blocks the sign-in",
+    status: 'verified',
+    evidence: [
+      'backend/services/auth/src/billing.ts#billingSignupGrant',
+      'backend/shared/src/internalClient.ts#createInternalClient',
+      'backend/services/auth/src/session-routes.ts#sessionRouter',
+      'backend/services/billing/src/internal-routes.ts#internalRouter',
+    ],
   },
   {
     from: 'agent',
     to: 'chat',
     kind: 'http',
     label:
-      "Calls to chat's /internal routes, which chat already serves (CHAT_SERVICE_URL is already in the agent's .env.example)",
-    status: 'planned',
-    plannedIn: 'AI answers',
+      "During a turn: reads the chat and its recent messages, saves the user's message and the answer, fills the answer in and names a new chat, through chat's /internal routes with the agent's own key",
+    status: 'verified',
+    evidence: [
+      'backend/services/agent/src/services.ts#chatService',
+      'backend/shared/src/internalClient.ts#createInternalClient',
+      'backend/services/agent/src/turns.ts#turnRouter',
+      'backend/services/chat/src/internal-routes.ts#internalRouter',
+    ],
   },
   {
     from: 'agent',
     to: 'billing',
     kind: 'http',
-    label: "Service-to-service calls (BILLING_SERVICE_URL is already in the agent's .env.example)",
-    status: 'planned',
-    plannedIn: 'AI answers',
+    label:
+      "During a turn: reads the balance, holds the answer's credits, then commits or releases them, with the agent's own key",
+    status: 'verified',
+    evidence: [
+      'backend/services/agent/src/services.ts#billingService',
+      'backend/shared/src/internalClient.ts#createInternalClient',
+      'backend/services/agent/src/turns.ts#turnRouter',
+      'backend/services/billing/src/internal-routes.ts#internalRouter',
+    ],
   },
   {
     from: 'agent',
     to: 'llm-providers',
     kind: 'external',
-    label: 'Language model calls',
+    label:
+      'Streams answers, routing and titles from Groq (and OpenRouter or Gemini when their keys are set) over their OpenAI-compatible APIs, in live mode only',
+    status: 'verified',
+    evidence: [
+      'backend/services/agent/src/llm/openai-compatible.ts#createOpenAiCompatibleProvider',
+      'backend/services/agent/src/llm/providers.ts#buildProviders',
+      'backend/services/agent/src/llm/llm.ts#createLlm',
+      'backend/services/agent/src/llm/models.ts#MODEL_ROUTES',
+    ],
+  },
+
+  // -------------------------------------------------------------------------------------------
+  // Planned: not built yet
+
+  {
+    from: 'gateway',
+    to: 'agent',
+    kind: 'http',
+    label:
+      "Turn requests (POST /chats/:chatId/turns), each with a short-lived signed internal token: the agent serves the route, but the gateway's route table does not list it yet",
     status: 'planned',
     plannedIn: 'AI answers',
   },

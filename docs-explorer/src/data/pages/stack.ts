@@ -13,15 +13,17 @@ export const stackPage: DocPage = {
       blocks: [
         {
           kind: 'text',
-          text: "A request goes from the browser to the Next.js server, then to the gateway, then to one service, which reads and writes its data stores. Today that path carries sign-in, logout, the profile and chats (the list and search, renaming, pinning and deleting, and each chat's history), end to end; agent and billing have no routes yet.",
+          text: "A request goes from the browser to the Next.js server, then to the gateway, then to one service, which reads and writes its data stores. Today that path carries sign-in, logout, the profile, chats (the list and search, renaming, pinning and deleting, and each chat's history) and the credits balance, end to end. The agent's turn route is built and tested, but the gateway does not forward it yet.",
         },
         {
           kind: 'list',
           items: [
             'Browser → Next.js server (port 3000): the browser only ever talks to the frontend app. Its chat data lives in a Redux store, fetched and cached with RTK Query.',
             "Next.js server → gateway (port 8000): the Next.js server forwards every `/api/*` call to the gateway (`forwardToGateway`), so backend addresses and secrets never reach the browser. Server components also call the gateway directly with the browser's cookie (`gatewayGet`), for the signed-in user and for a chat page.",
-            'Gateway → services: the gateway checks the rate limits, its route table, the Origin and the session, then calls the service with fetch and a short-lived signed token: today auth (8001) and chat (8002), for the routes in its table. Agent (8003) and billing (8004) already refuse any call without a valid token; their routes come with their own features.',
-            'Services → data stores: auth, chat, agent and billing connect to MongoDB at startup, and the gateway, auth and agent open a Redis client. Auth keeps its users in MongoDB and its sessions in Redis; chat keeps conversations and messages in MongoDB. Qdrant runs in Docker, but nothing connects to it yet. AWS S3 will hold files.',
+            'Gateway → services: the gateway checks the rate limits, its route table, the Origin and the session, then calls the service with fetch and a short-lived signed token: today auth (8001), chat (8002) and billing (8004), for the routes in its table. The agent (8003) refuses any call without a valid token, and its turn route is not in the table yet.',
+            'Service → service: auth calls billing for the sign-up grant, and the agent calls chat and billing during a turn, each with fetch and a token signed with its own key (`createInternalClient`).',
+            'Agent → AI providers: the agent streams answers from Groq over its OpenAI-compatible API, with fetch and no SDK. By default (`LLM_MODE=mock`) a mock provider answers instead, so nothing needs a key.',
+            'Services → data stores: auth, chat, agent and billing connect to MongoDB at startup, and the gateway, auth and agent open a Redis client. Auth keeps its users in MongoDB and its sessions in Redis; chat keeps conversations and messages, and billing accounts, credit holds and the ledger, in MongoDB; the agent keeps a short memory of each chat and a lock per message in Redis. Qdrant runs in Docker, but nothing connects to it yet. AWS S3 will hold files.',
             'Every backend app is built from the shared library, `@gilder/shared`, so they all start, log and fail in the same way.',
           ],
         },
@@ -37,6 +39,7 @@ export const stackPage: DocPage = {
         { component: 'shared' },
         { component: 'mongodb' },
         { component: 'redis' },
+        { component: 'llm-providers' },
         { component: 'qdrant' },
         { component: 's3' },
       ],
@@ -80,6 +83,54 @@ export const stackPage: DocPage = {
         },
       ],
       refs: [{ file: 'pnpm-workspace.yaml' }, { file: 'package.json' }, { component: 'shared' }],
+    },
+    {
+      id: 'ai-providers',
+      title: 'AI providers, called with fetch',
+      status: 'verified',
+      blocks: [
+        {
+          kind: 'text',
+          text: 'The agent calls language models through its own small layer instead of an SDK or an agent framework. Groq, OpenRouter and Gemini all offer the OpenAI chat-completions API, so one fetch-based client (`createOpenAiCompatibleProvider`) streams from any of them, reads the server-sent events and reports token usage. `MODEL_ROUTES` says which models serve each kind of call; `createLlm` picks the first whose provider has a key, and moves to the next only if one fails before its first token.',
+        },
+        {
+          kind: 'table',
+          columns: ['Kind of call', 'Models, first choice first', 'Used today by'],
+          rows: [
+            ['router, title', 'Groq openai/gpt-oss-20b', 'Routing and new-chat titles'],
+            ['chat', 'Groq openai/gpt-oss-120b, then openai/gpt-oss-20b', 'The chat agent'],
+            ['write', 'Groq openai/gpt-oss-120b, then openai/gpt-oss-20b', 'No agent yet'],
+            [
+              'code',
+              'OpenRouter deepseek/deepseek-chat, then Groq openai/gpt-oss-120b',
+              'No agent yet',
+            ],
+            ['vision', 'Gemini gemini-2.5-flash', 'No agent yet'],
+          ],
+        },
+        {
+          kind: 'text',
+          text: '`LLM_MODE=live` calls the real providers and needs `GROQ_API_KEY`; `mock`, the default, streams canned text word by word from a mock provider, so development, tests and CI need no keys.',
+        },
+        {
+          kind: 'quote',
+          file: 'backend/services/agent/src/llm/providers.ts',
+          text: "baseUrl: 'https://api.groq.com/openai/v1',",
+          caption: 'Groq, through its OpenAI-compatible API',
+        },
+      ],
+      refs: [
+        { component: 'llm-providers' },
+        { component: 'agent' },
+        { symbol: 'backend/services/agent/src/llm/llm.ts#createLlm' },
+        { symbol: 'backend/services/agent/src/llm/models.ts#MODEL_ROUTES' },
+        {
+          symbol:
+            'backend/services/agent/src/llm/openai-compatible.ts#createOpenAiCompatibleProvider',
+        },
+        { symbol: 'backend/services/agent/src/llm/mock.ts#createMockProvider' },
+        { flow: 'run-turn' },
+      ],
     },
     {
       id: 'packages',
@@ -153,12 +204,12 @@ export const packageNotes: PackageNote[] = [
   {
     name: 'zod',
     layer: 'backend',
-    why: "Checks data against schemas: each app's settings at startup (`loadEnv`), and request input with `validate`, which auth's and chat's routes use.",
+    why: "Checks data against schemas: each app's settings at startup (`loadEnv`), request input with `validate`, which the services' routes use, and the JSON the router model returns (`completeJson`).",
   },
   {
     name: 'jose',
     layer: 'backend',
-    why: 'Signs and checks the short-lived internal tokens between the gateway and services, and makes the private key that `pnpm setup:keys` writes when the gateway has none. The gateway signs a token with it for every request it forwards, and auth, chat, agent and billing check them.',
+    why: 'Signs and checks the short-lived internal tokens, and makes the key pairs that `pnpm setup:keys` writes. The gateway signs a token with it for every request it forwards, auth and the agent for their calls to other services, and auth, chat, agent and billing check them.',
   },
   {
     name: 'firebase-admin',
@@ -190,12 +241,12 @@ export const packageNotes: PackageNote[] = [
   {
     name: 'mongoose',
     layer: 'data',
-    why: 'Connects the services to MongoDB (`connectMongo`) and checks the connection for `/readyz` (`pingMongo`). Auth defines its users model with it, and chat its conversations and messages models. The shared library re-exports it, so every app uses one copy and the connection `connectMongo` opens.',
+    why: 'Connects the services to MongoDB (`connectMongo`) and checks the connection for `/readyz` (`pingMongo`). Auth defines its users model with it, chat its conversations and messages models, and billing its accounts, reservations and ledger, whose changes run in its transactions. The shared library re-exports it, so every app uses one copy and the connection `connectMongo` opens.',
   },
   {
     name: 'ioredis',
     layer: 'data',
-    why: 'The Redis client. `createRedis` makes one for the gateway, auth and agent, and `pingRedis` checks it for `/readyz`. The shared sessions and rate limits use it too: auth creates and deletes sessions, and the gateway looks them up and counts requests. Their tests run against a real Redis.',
+    why: "The Redis client. `createRedis` makes one for the gateway, auth and agent, and `pingRedis` checks it for `/readyz`. The shared sessions and rate limits use it too: auth creates and deletes sessions, and the gateway looks them up and counts requests. The agent keeps each chat's recent messages and a lock per message being answered in it. Their tests run against a real Redis.",
   },
 
   // Quality
@@ -274,29 +325,16 @@ export const packageNotes: PackageNote[] = [
 export const plannedTools: PlannedTool[] = [
   // AI
   {
-    name: 'LangGraph',
-    package: '@langchain/langgraph',
-    layer: 'ai',
-    why: 'Runs the agents: picks the agent for each message and runs its steps.',
-    plannedIn: 'AI answers',
-  },
-  {
-    name: 'Groq',
-    layer: 'ai',
-    why: 'Hosted language models. The main provider: it writes chat answers and the text for most other agents.',
-    plannedIn: 'AI answers',
-  },
-  {
     name: 'OpenRouter',
     layer: 'ai',
-    why: 'One API for many language models. The code agent will use it.',
-    plannedIn: 'AI answers',
+    why: 'One API for many language models, for the code agent. Its client is built (an OpenAI-compatible provider, used when OPENROUTER_API_KEY is set), but no running agent sends it anything yet.',
+    plannedIn: 'Web search and code',
   },
   {
     name: 'Gemini',
     layer: 'ai',
-    why: "Google's models. Part of the model providers, and later also used for PDF embeddings and questions about images (PDF and image Q&A).",
-    plannedIn: 'AI answers',
+    why: "Google's models, for questions about images and PDF embeddings. Its client is built (used when GEMINI_API_KEY is set), but no running agent sends it anything yet.",
+    plannedIn: 'PDF and image Q&A',
   },
   {
     name: 'Tavily',

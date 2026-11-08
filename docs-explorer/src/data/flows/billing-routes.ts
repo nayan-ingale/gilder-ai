@@ -1,0 +1,203 @@
+import type { Flow, SymbolRef } from '../schema.ts';
+
+/**
+ * Billing's sign-up grant, followed from a sign-in in auth to billing's ledger and back: the
+ * first service-to-service call, signed with auth's own key.
+ */
+
+const SESSION_ROUTES: SymbolRef = 'backend/services/auth/src/session-routes.ts#sessionRouter';
+const CLIENT: SymbolRef = 'backend/shared/src/internalClient.ts#createInternalClient';
+const BILLING_ROUTES: SymbolRef = 'backend/services/billing/src/internal-routes.ts#internalRouter';
+const GRANT: SymbolRef = 'backend/services/billing/src/credits.ts#grantSignupCredits';
+
+const signupGrant: Flow = {
+  id: 'signup-grant',
+  title: 'POST /internal/accounts',
+  category: 'api',
+  route: { method: 'POST', path: '/internal/accounts' },
+  apps: ['gateway', 'auth', 'billing'],
+  summary:
+    "The sign-up grant. On every sign-in, once auth has found or created the user, it asks billing for the user's sign-up credits: POST /internal/accounts, signed with auth's own key. Billing accepts only auth on this route, and grants 100 credits the first time, in one transaction with a ledger entry; after that, and when two sign-ins race, it changes nothing. Whatever billing answers, even nothing at all, the sign-in goes on. credits.test.ts covers billing's side, session-routes.test.ts the outage, and journey.test.ts the whole trip through the real gateway, auth and billing.",
+  status: 'verified',
+  steps: [
+    {
+      id: 'sign-in',
+      title: 'A sign-in reaches auth',
+      kind: 'trigger',
+      status: 'verified',
+      what: 'POST /api/auth/session (Google) or POST /api/auth/dev-session reaches auth through the gateway (see POST /sessions/dev). Auth has checked the token and the body and found or created the user, and startSession records the user in the request context.',
+      why: 'A user needs credits before their first answer, and sign-in is the one moment every user passes through.',
+      input: 'The signed-in user.',
+    },
+    {
+      id: 'ask',
+      title: 'Auth: ask billing for the grant',
+      kind: 'function',
+      status: 'verified',
+      symbol: 'backend/services/auth/src/billing.ts#billingSignupGrant',
+      highlight: "await billing.request('POST', '/internal/accounts', { userId, retry: true });",
+      what: 'startSession calls grantSignupCredits, which is billingSignupGrant: a POST to /internal/accounts for this user, with one retry allowed.',
+      why: 'Billing grants once per user, so asking on every sign-in is safe, and a sign-in that missed the grant gets it next time.',
+    },
+    {
+      id: 'sign',
+      title: "Sign a token with auth's own key",
+      kind: 'function',
+      status: 'verified',
+      symbol: CLIENT,
+      highlight: 'const token = await signInternalToken(',
+      what: "The internal client signs a fresh token with auth's SERVICE_PRIVATE_KEY: issuer gilder-auth, audience billing, the user as its subject, the request ID from the request context as rid, valid for 60 seconds.",
+      why: 'Billing can tell that auth, and not the gateway or the agent, is calling, and for which user.',
+    },
+    {
+      id: 'fetch',
+      title: 'Call billing',
+      kind: 'external',
+      status: 'verified',
+      symbol: CLIENT,
+      highlight: 'response = await fetch(`${baseUrl}${path}`, {',
+      what: 'fetch sends POST BILLING_SERVICE_URL/internal/accounts with the token in x-internal-token and the request ID in X-Request-Id, and gives up after 5 seconds.',
+      why: 'A slow billing must not hold up the sign-in.',
+      next: [
+        { to: 'billing-middleware', kind: 'next' },
+        { to: 'unreachable', kind: 'error', label: 'no answer, a timeout or a 5xx' },
+      ],
+    },
+    {
+      id: 'unreachable',
+      title: 'Billing down: one retry, then sign in anyway',
+      kind: 'error',
+      status: 'verified',
+      symbol: CLIENT,
+      highlight: "throw new AppError('service_unavailable', `${options.service} did not answer`, {",
+      what: "A failed fetch, a timeout or a 5xx becomes AppError('service_unavailable'). Because the call allows a retry, the client waits 200 ms and tries once more; if that fails too, the error goes back to startSession, which logs 'sign-up credits could not be granted; the next sign-in asks again'.",
+      why: 'A billing outage must never stop a sign-in; the grant is asked for again next time.',
+      sideEffects: ['Logs a warn line in auth.'],
+      next: [{ to: 'auth-goes-on', kind: 'error', label: 'the sign-in goes on' }],
+    },
+    {
+      id: 'billing-middleware',
+      title: 'Billing: same request ID, shared middleware',
+      kind: 'middleware',
+      status: 'verified',
+      symbol: 'backend/shared/src/requestId.ts#requestId',
+      highlight: 'const id = incoming && SAFE_REQUEST_ID.test(incoming) ? incoming : randomUUID();',
+      what: "createService's shared middleware runs in billing. Auth sent the sign-in's request ID, so billing reuses it, and express.json reads the (empty) body.",
+      why: "The gateway's, auth's and billing's log lines for this sign-in share one ID.",
+    },
+    {
+      id: 'billing-token',
+      title: "Billing: check the token with auth's key",
+      kind: 'middleware',
+      status: 'verified',
+      symbol: 'backend/shared/src/internalToken.ts#requireInternalToken',
+      highlight: 'claims = await verifyInternalToken(token, trusted, audience);',
+      what: 'Billing trusts the gateway, auth and the agent. The issuer gilder-auth picks AUTH_PUBLIC_KEY, which checks the signature, the audience billing and the expiry. res.locals.caller becomes auth and res.locals.userId the user.',
+      why: 'Only a signer billing trusts gets past this point, and the signer is recorded for the route to check.',
+    },
+    {
+      id: 'billing-route',
+      title: 'Billing: only auth may ask',
+      kind: 'handler',
+      status: 'verified',
+      symbol: BILLING_ROUTES,
+      highlight: "router.post('/internal/accounts', requireCaller('auth'), async (_req, res) => {",
+      what: "requireUser, mounted on /internal, passes because the token names a user, and requireCaller('auth') passes because auth signed it.",
+      why: "The agent's key, or a gateway token, can never hand out credits.",
+      next: [
+        { to: 'already', kind: 'next' },
+        { to: 'wrong-caller', kind: 'error', label: 'signed by the gateway or the agent' },
+      ],
+    },
+    {
+      id: 'wrong-caller',
+      title: 'Another signer: 403',
+      kind: 'error',
+      status: 'verified',
+      symbol: 'backend/shared/src/internalToken.ts#requireCaller',
+      highlight: "next(new AppError('forbidden', 'This route is not open to this caller'));",
+      what: "requireCaller answers 403 forbidden. credits.test.ts checks this with the gateway's token, a token without a user (401) and a key billing does not trust (401). Auth itself never sees this answer, since it always signs as auth.",
+      why: 'Each internal route is open to exactly the service that needs it.',
+      next: [{ to: 'auth-goes-on', kind: 'error', label: 'back in auth: logged, sign-in goes on' }],
+    },
+    {
+      id: 'already',
+      title: 'Billing: was the grant given before?',
+      kind: 'datastore',
+      status: 'verified',
+      symbol: GRANT,
+      highlight:
+        "const alreadyGranted = await LedgerModel.exists({ userId, kind: 'signup_grant' });",
+      what: 'grantSignupCredits looks for a signup_grant ledger entry for the user.',
+      why: 'Most sign-ins are not first sign-ins, and those change nothing.',
+      next: [
+        { to: 'grant', kind: 'branch', label: 'no grant yet' },
+        { to: 'answer-200', kind: 'branch', label: 'already granted' },
+      ],
+    },
+    {
+      id: 'grant',
+      title: 'Billing: grant the credits in one transaction',
+      kind: 'datastore',
+      status: 'verified',
+      symbol: GRANT,
+      highlight: 'await inTransaction(async (session) => {',
+      what: 'In one transaction it writes a signup_grant ledger entry of SIGNUP_CREDITS (100) and adds them to the account, creating the account on the free plan if needed (an upsert).',
+      why: 'The balance and its ledger entry are saved together or not at all, so they always agree.',
+      sideEffects: ['Creates a ledger entry, and creates or updates the account, in MongoDB.'],
+      next: [
+        { to: 'answer-201', kind: 'next' },
+        { to: 'race', kind: 'branch', label: 'another sign-in granted first' },
+      ],
+    },
+    {
+      id: 'race',
+      title: 'Two sign-ins at once: one grant',
+      kind: 'function',
+      status: 'verified',
+      symbol: GRANT,
+      highlight: 'if (!isDuplicateKey(error)) {',
+      what: 'If two sign-ins both found no grant, the one-grant-per-user index makes the second insert fail with a duplicate key. Its transaction is aborted, so nothing it did is kept, and it returns the account as the other sign-in left it. The test runs many grants at once and gets exactly one.',
+      why: 'The database itself rules out a double grant.',
+      next: [{ to: 'answer-200', kind: 'next' }],
+    },
+    {
+      id: 'answer-201',
+      title: 'Billing answers 201: granted',
+      kind: 'response',
+      status: 'verified',
+      symbol: BILLING_ROUTES,
+      highlight: 'res.status(granted ? 201 : 200).json({ account: toAccount(account), granted });',
+      what: 'The body is { account, granted: true }, with the plan, planExpiresAt and the new balance from toAccount.',
+      why: 'The caller can tell a first grant from a repeat.',
+      output:
+        '201 { "account": { "plan": "free", "planExpiresAt": null, "balance": 100 }, "granted": true }',
+      next: [{ to: 'auth-goes-on', kind: 'next' }],
+    },
+    {
+      id: 'answer-200',
+      title: 'Billing answers 200: nothing changed',
+      kind: 'response',
+      status: 'verified',
+      symbol: GRANT,
+      highlight: 'return { account: await findAccount(userId), granted: false };',
+      what: 'grantSignupCredits returns the account unchanged with granted false, and the route answers 200.',
+      why: 'Asking again is harmless.',
+      output: '200 { "account": { ... }, "granted": false }',
+      next: [{ to: 'auth-goes-on', kind: 'next' }],
+    },
+    {
+      id: 'auth-goes-on',
+      title: 'Auth starts the session',
+      kind: 'function',
+      status: 'verified',
+      symbol: SESSION_ROUTES,
+      highlight: 'const sessionId = await createSession(deps.redis, user.id);',
+      what: "Whatever billing answered, auth goes on: it creates the session in Redis, sets the gilder_sid cookie and answers with the user. It does not read billing's answer. journey.test.ts signs in twice and then sees a balance of exactly 100 on GET /api/billing/account.",
+      why: 'The sign-in result never depends on billing.',
+      next: [],
+    },
+  ],
+};
+
+export const billingRouteFlows: Flow[] = [signupGrant];

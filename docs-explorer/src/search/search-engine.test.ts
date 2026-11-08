@@ -51,7 +51,8 @@ describe('search', () => {
   });
 
   it('matches part of a camelCase name', () => {
-    expect(titles(engine.search('router'))).toContain('healthRouter');
+    // `router` is part of too many names now (turnRouter, chatRouter...) to pick one out.
+    expect(titles(engine.search('timeout'))).toContain('withTimeout');
   });
 
   it('finds the Redis component and the code that talks to Redis', () => {
