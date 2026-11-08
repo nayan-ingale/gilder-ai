@@ -129,7 +129,7 @@ describe('ComponentDetails', () => {
   });
 
   it('drops sections with no data', () => {
-    const html = render(<ComponentDetails componentId="s3" />, '/architecture/system');
+    const html = render(<ComponentDetails componentId="pollinations" />, '/architecture/system');
     expect(html).not.toContain('Entry points');
     expect(html).not.toContain('>Code<');
   });

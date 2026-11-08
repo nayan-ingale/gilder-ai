@@ -7,8 +7,10 @@ import { authRouteFlows } from './flows/auth-routes.ts';
 import { billingRouteFlows } from './flows/billing-routes.ts';
 import { chatErrorFlows, chatRouteFlows } from './flows/chat-routes.ts';
 import { errorFlows } from './flows/errors.ts';
+import { fileFlows } from './flows/files.ts';
 import { httpFlows } from './flows/http.ts';
 import { lifecycleFlows } from './flows/lifecycle.ts';
+import { paymentFlows } from './flows/payments.ts';
 import { notes } from './notes.ts';
 import type { Flow } from './schema.ts';
 
@@ -20,8 +22,10 @@ export const flows: Flow[] = [
   ...authRouteFlows,
   ...chatRouteFlows,
   ...billingRouteFlows,
+  ...paymentFlows,
   ...agentTurnFlows,
   ...agentAnswerFlows,
+  ...fileFlows,
   ...errorFlows,
   ...chatErrorFlows,
   ...lifecycleFlows,

@@ -20,12 +20,12 @@ export const deploymentPage: DocPage = {
           items: [
             'MongoDB 8, as a single-node replica set named `rs0`. Its health check creates the replica set on the first run.',
             'Redis 7, saving to disk (append-only file), with the `noeviction` policy.',
-            'Qdrant 1.16, a vector database. It runs and is healthy, but no app connects to it yet.',
+            'Qdrant 1.16, a vector database. The agent stores the pieces of uploaded PDFs in it when QDRANT_URL is set, as its .env.example does.',
           ],
         },
         {
           kind: 'text',
-          text: 'There is no storage container: files will be stored in AWS S3, even in development. S3 is not used yet; it comes with PDF and image Q&A.',
+          text: "There is no storage container: files are stored in AWS S3, even in development. Uploads need a bucket of your own and an IAM user limited to it (the agent's four S3 settings); without them, uploads answer 503. So far uploads have been tested only against an in-memory bucket: a live run needs a bucket the agent's key can use.",
         },
         {
           kind: 'quote',
@@ -94,7 +94,7 @@ export const deploymentPage: DocPage = {
       blocks: [
         {
           kind: 'text',
-          text: 'Each app reads its settings from environment variables. `pnpm setup:env` creates the files they come from: for each backend app it copies `.env.example` to `.env`, and for the frontend it copies `.env.example` to `.env.local`. It never overwrites a file that already exists. Only the examples are committed; the real env files are ignored by git. The examples also list, empty, the keys for outside services that later features use: the Firebase web config and service account, the AI providers, S3 and Razorpay.',
+          text: 'Each app reads its settings from environment variables. `pnpm setup:env` creates the files they come from: for each backend app it copies `.env.example` to `.env`, and for the frontend it copies `.env.example` to `.env.local`. It never overwrites a file that already exists. Only the examples are committed; the real env files are ignored by git. The examples also list, empty, the keys for outside services: the Firebase web config and service account, the AI providers, S3 and Razorpay.',
         },
         {
           kind: 'text',
@@ -114,7 +114,11 @@ export const deploymentPage: DocPage = {
         },
         {
           kind: 'text',
-          text: "Service URLs for calls between services default to localhost: auth's `BILLING_SERVICE_URL`, and the agent's `CHAT_SERVICE_URL` and `BILLING_SERVICE_URL`. The agent's `LLM_MODE` is `mock` by default, so it answers with canned text and needs no AI keys; `live` calls the real providers and needs `GROQ_API_KEY`. `OPENROUTER_API_KEY` (code answers), `GEMINI_API_KEY` and `TAVILY_API_KEY` (web search) are optional, and empty counts as unset; without a Tavily key, live mode has no search agent, while mock mode always searches with canned results.",
+          text: "Service URLs for calls between services default to localhost: auth's `BILLING_SERVICE_URL`, and the agent's `CHAT_SERVICE_URL` and `BILLING_SERVICE_URL`. The agent's `LLM_MODE` is `mock` by default, so it answers with canned text and needs no AI keys; `live` calls the real providers and needs `GROQ_API_KEY`. `OPENROUTER_API_KEY` (code answers), `GEMINI_API_KEY` (PDF embeddings) and `TAVILY_API_KEY` (web search) are optional, and empty counts as unset; without a Tavily key, live mode has no search agent, while mock mode always searches with canned results.",
+        },
+        {
+          kind: 'text',
+          text: "The agent's `AWS_REGION` (ap-south-1 in the example), `S3_BUCKET`, `AWS_ACCESS_KEY_ID` and `AWS_SECRET_ACCESS_KEY` turn uploads on, all four or none; otherwise it logs 'uploads are off: ...'. `QDRANT_URL` (http://localhost:6335 in the example) points PDF indexing at the local Qdrant; without it the agent keeps vectors in memory. Billing's `RAZORPAY_KEY_ID`, `RAZORPAY_KEY_SECRET` and `RAZORPAY_WEBHOOK_SECRET` are Razorpay test-mode keys and turn payments on, all three or none; locally the webhook secret can be any long random string. Without them billing logs 'payments are off: ...' and the payment routes answer 503. The frontend's example also lists `NEXT_PUBLIC_RAZORPAY_KEY_ID`, but no code reads it: the checkout gets the key ID from billing's order answer.",
         },
         {
           kind: 'quote',

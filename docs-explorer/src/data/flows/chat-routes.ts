@@ -143,7 +143,7 @@ function originForRead(): FlowStep {
     kind: 'middleware',
     status: 'verified',
     symbol: 'backend/gateway/src/guards.ts#originCheck',
-    highlight: 'if (SAFE_METHODS.has(req.method)) {',
+    highlight: 'if (SAFE_METHODS.has(req.method) || matched?.route.webhook) {',
     what: 'GET only reads, so originCheck lets it through without looking at the Origin header.',
     why: 'Only requests that change something need to prove they come from the app.',
   };
@@ -772,7 +772,7 @@ const deleteChat: Flow = {
   category: 'api',
   route: { method: 'DELETE', path: '/chats/:id' },
   apps: APPS,
-  summary: `Delete a chat from its menu, after a confirmation. RTK Query takes the chat out of the cached list at once and sends DELETE /api/chats/<id>. The Next.js server and the gateway forward it to chat, which sets deletedAt on the user's own chat and answers 204. The chat and its messages stay in MongoDB but leave every list, search and read. If the deleted chat was open, the app goes to a new chat; if the call fails, the chat comes back. ${TESTS}`,
+  summary: `Delete a chat from its menu, after a confirmation. RTK Query takes the chat out of the cached list at once and sends DELETE /api/chats/<id>. The Next.js server and the gateway forward it to chat, which sets deletedAt on the user's own chat and answers 204. The chat and its messages stay in MongoDB but leave every list, search and read; the agent's file clean-up later removes the chat's files (see Clean up the files of deleted chats). If the deleted chat was open, the app goes to a new chat; if the call fails, the chat comes back. ${TESTS}`,
   status: 'verified',
   steps: [
     {

@@ -65,6 +65,14 @@ const FRONTEND_CHATS_LIB_TEST = 'frontend/src/lib/chats.test.ts';
 const FRONTEND_SERVER_CHATS_TEST = 'frontend/src/server/chats.test.ts';
 const FRONTEND_SESSION_TEST = 'frontend/src/server/session.test.ts';
 const FRONTEND_CREDITS_TEST = 'frontend/src/components/billing/credits-card.test.tsx';
+const BILLING_PAYMENTS_TEST = 'backend/services/billing/src/payments.test.ts';
+const AGENT_FILE_ROUTES_TEST = 'backend/services/agent/src/files/file-routes.test.ts';
+const AGENT_FILE_CHECKS_TEST = 'backend/services/agent/src/files/file-checks.test.ts';
+const AGENT_CHUNKS_TEST = 'backend/services/agent/src/rag/chunks.test.ts';
+const AGENT_INDEXER_TEST = 'backend/services/agent/src/rag/indexer.test.ts';
+const AGENT_CLEANUP_TEST = 'backend/services/agent/src/rag/cleanup.test.ts';
+const FRONTEND_BILLING_TEST = 'frontend/src/components/billing/billing.test.tsx';
+const FRONTEND_DAILY_CHART_TEST = 'frontend/src/components/billing/daily-chart.test.ts';
 
 export const notes: SymbolNote[] = [
   // -------------------------------------------------------------------------------------------
@@ -120,7 +128,7 @@ export const notes: SymbolNote[] = [
       '`satisfies Record<string, Plan>` checks that each plan has every field of Plan.',
       '`as const` keeps the exact values, so code can rely on them as types.',
     ],
-    why: "Whole numbers of paise avoid rounding errors with money. Per its comment, `validityDays` is how long a plan badge lasts; purchased credits never expire. Billing takes its plan names from it (PLAN_IDS), so an account's plan can only be one of these. Prices are not used yet: payments are not built.",
+    why: "Whole numbers of paise avoid rounding errors with money. Per its comment, `validityDays` is how long a plan badge lasts; purchased credits never expire. Billing takes its plan names from it (PLAN_IDS), so an account's plan can only be one of these. Billing prices every order from it and grants the plan's credits and validity days once a payment is checked (paymentRouter, grantPurchase).",
     returns:
       'Free: 0 paise and 100 credits. Starter: 19,900 paise (₹199) and 500 credits. Pro: 49,900 paise (₹499) and 1,000 credits. Each lasts 30 days.',
     tests: [CONSTANTS_TEST, BILLING_MODELS_TEST],
@@ -828,7 +836,7 @@ export const notes: SymbolNote[] = [
       'pino-http logs each request with that ID. isHealthProbe makes it skip GET and HEAD probes of /healthz and /readyz; anything else on those paths is logged.',
       'The log level follows the result: error for failures and 5xx, warn for 4xx, info otherwise.',
       'helmet() sets security headers.',
-      'When `parseJson` is true (the default), express.json() parses JSON bodies up to `bodyLimit` (64kb by default). When it is false, bodies are left unread, byte for byte.',
+      'When `parseJson` is true (the default), express.json() parses JSON bodies up to `bodyLimit` (64kb by default), and its verify hook keeps the exact bytes on the request for rawBodyOf. When it is false, bodies are left unread, byte for byte.',
       'healthRouter() adds /healthz and /readyz.',
       "When the `internalAuth` option is given, requireInternalToken() comes next, trusting the gateway's key and the keys in `internalAuth.callers`. Every route except /healthz and /readyz then needs a valid internal token addressed to this service, so a direct call gets 401 on any path, even an unknown one, unless its JSON body is rejected first: the body parser runs before the token check.",
       "The app's own `routes` come next.",
@@ -840,6 +848,18 @@ export const notes: SymbolNote[] = [
       'For each request once the app listens: sets security headers and X-Request-Id, and writes a request log line (not for GET or HEAD health probes).',
     ],
     tests: [SERVICE_TEST, ...APP_TESTS],
+  },
+  {
+    symbol: 'backend/shared/src/service.ts#rawBodyOf',
+    status: 'verified',
+    summary: 'The JSON body exactly as it arrived, before parsing.',
+    how: [
+      "createService's JSON parser has a verify hook that keeps the bytes it read on the request (the rawBody of RawBodyRequest).",
+      'rawBodyOf returns them, or undefined when the request had no JSON body.',
+    ],
+    why: "A webhook signature is computed over the exact bytes that were sent, and JSON parsed and written out again can differ in spacing or key order. Billing checks Razorpay's webhook signature over these bytes (paymentRouter).",
+    returns: 'A Buffer, or undefined.',
+    tests: [BILLING_PAYMENTS_TEST],
   },
   {
     symbol: 'backend/shared/src/service.ts#startService',
@@ -1160,10 +1180,25 @@ export const notes: SymbolNote[] = [
       'Every chat route requires a session.',
       "POST /api/chats/:id/messages goes to the agent's POST /chats/:id/turns (send a message); POST /api/chats/:id/messages/:messageId/regenerate and /edit go to the agent's routes of the same path; POST /api/turns/:turnId/stop goes to the agent's /turns/:turnId/stop. Each streams its answer back, and each requires a session.",
       "GET /api/billing/account goes to billing's GET /account (the plan and balance); a session is required.",
+      "POST /api/files/uploads, POST /api/files/:fileId/complete, GET /api/files/:fileId and GET /api/files/:fileId/url go to the agent's /files routes of the same shape (start and complete an upload, a file's details, a download link); each requires a session.",
+      "GET /api/billing/plans, POST /api/billing/orders, POST /api/billing/orders/:orderId/verify and GET /api/billing/payments go to billing's /plans, /orders, /orders/:orderId/verify and /payments, and GET /api/usage/summary and /api/usage/events to its /usage/summary and /usage/events. Each requires a session.",
+      "POST /api/webhooks/razorpay goes to billing's POST /webhooks/razorpay with no session. It is marked webhook with the headers x-razorpay-signature and x-razorpay-event-id: the Origin check skips it, and the two headers are passed on.",
     ],
     why: "It is an allowlist: anything not listed gets the gateway's own 404 and never reaches a service, so auth's GET /internal/users/:id and the /internal routes of chat and billing cannot be called from outside (journey.test.ts checks them, SEC-01).",
-    returns: 'A read-only array of sixteen PublicRoute entries.',
-    tests: [GATEWAY_ROUTE_TABLE_TEST, JOURNEY_TEST],
+    returns: 'A read-only array of twenty-three PublicRoute entries.',
+    tests: [GATEWAY_ROUTE_TABLE_TEST, GATEWAY_TEST, JOURNEY_TEST],
+  },
+  {
+    symbol: 'backend/gateway/src/route-table.ts#PublicRoute',
+    status: 'verified',
+    summary:
+      'One entry of the route table: a public method and path, the service and target path it goes to, and its session rule.',
+    how: [
+      "session is 'required' (the caller must be signed in) or 'none' (open, such as sign-in itself).",
+      "webhook, when set, marks a server-to-server route such as Razorpay's: originCheck lets it through without an Origin, and proxyToService passes its listed headers on, for that route only.",
+    ],
+    why: 'Each exception to the usual checks is written on its own route, where it is easy to see and review, instead of being hidden in the guards.',
+    tests: [GATEWAY_ROUTE_TABLE_TEST, GATEWAY_TEST],
   },
   {
     symbol: 'backend/gateway/src/route-table.ts#SAFE_PARAM',
@@ -1209,7 +1244,7 @@ export const notes: SymbolNote[] = [
     summary:
       'Cross-site request forgery defence: a request that changes something must carry an allowed Origin.',
     how: [
-      'GET, HEAD and OPTIONS pass straight through.',
+      "GET, HEAD and OPTIONS pass straight through, and so does a route marked webhook (PublicRoute.webhook), which comes from another server; its service checks the sender's signature instead.",
       "Any other method needs an Origin header that is exactly one of the allowed origins (FRONTEND_ORIGIN). Otherwise, missing or not, it passes AppError('forbidden', 'This request must come from the GilderAi app') on, and the client gets 403.",
     ],
     why: "Browsers set Origin themselves and pages cannot fake it, so a form or script on another site cannot act with the user's cookie. Per its comment, the cookie's SameSite=Lax is the first line of defence and this is the second. It runs after the route is matched and before the session lookup, so a refused request costs no Redis read for the session.",
@@ -1264,7 +1299,7 @@ export const notes: SymbolNote[] = [
     symbol: 'backend/gateway/src/proxy.ts#FORWARDED_REQUEST_HEADERS',
     status: 'verified',
     summary: 'The request headers a service may see.',
-    why: 'Only Content-Type, Accept, Accept-Language and User-Agent are passed on. Everything else, such as Origin and other browser headers, stays at the gateway. The proxy adds X-Request-Id and the internal token itself, and the cookie only for auth.',
+    why: 'Only Content-Type, Accept, Accept-Language and User-Agent are passed on. Everything else, such as Origin and other browser headers, stays at the gateway. The proxy adds X-Request-Id and the internal token itself, and the cookie only for auth. A webhook route adds its own headers on top (PublicRoute.webhook), for that route only.',
     returns: "['content-type', 'accept', 'accept-language', 'user-agent']",
     tests: [GATEWAY_PROXY_TEST],
   },
@@ -1283,7 +1318,7 @@ export const notes: SymbolNote[] = [
       'Forwards a matched request to its service with a fresh internal token, and streams the answer back.',
     how: [
       "The URL is the service's URL, the matched target path and the original query string.",
-      'It copies the allowed request headers, sets X-Request-Id to the request ID, and signs an internal token with signInternalToken: the audience is the service, the subject is the user when sessionLookup found one, and `rid` is the request ID.',
+      'It copies the allowed request headers (plus, for a webhook route, the extra headers listed on that route), sets X-Request-Id to the request ID, and signs an internal token with signInternalToken: the audience is the service, the subject is the user when sessionLookup found one, and `rid` is the request ID.',
       'It passes the Cookie header only to auth, which owns the session cookie.',
       "It calls fetch with the method, the raw body when there is one and `redirect: 'manual'`. An AbortController stops the call if the service has not started answering within 10 seconds, or if the client disconnects before the response is finished.",
       "If fetch fails and the client is still there, it throws AppError('service_unavailable'): 'The <service> service did not answer in time' after a timeout, otherwise 'The <service> service is not reachable'. The client gets a 503, and errorHandler logs the error as 'request failed'.",
@@ -1744,7 +1779,7 @@ export const notes: SymbolNote[] = [
     symbol: 'backend/services/chat/src/internal-routes.ts#internalRouter',
     status: 'verified',
     summary:
-      'Routes for the agent service: read a chat, auto-title it, read its recent messages and its last turn, and save and fill in messages.',
+      'Routes for the agent service: read a chat, auto-title it, read its recent messages and its last turn, save and fill in messages, and say which chats are gone.',
     how: [
       "Every /internal route needs a token signed with the agent's own key (requireCaller('agent')): the gateway's token gets 403. It also needs a user in the token (requireUser), and every lookup filters by that user, so another user's chat or message gets a 404.",
       'GET /internal/chats/:id answers { chat }.',
@@ -1754,13 +1789,20 @@ export const notes: SymbolNote[] = [
       'POST /internal/messages saves a message, with up to 400,000 characters of text. If the chat already has a message with the same clientMessageId, it answers 200 with that message and created: false. If two copies race past that check, the unique index keeps one and the other answers with it.',
       "A new message answers 201 with created: true. It hides the messages listed in supersedes (valid IDs in the same chat only) and moves the chat's lastMessageAt to it.",
       "PATCH /internal/messages/:id fills in content, status, agent, attachments, artifacts, sources or citations; at least one, and nothing else. Once the status is no longer 'streaming', the chat's lastMessageAt moves to now.",
+      "POST /internal/chats/deleted takes up to 200 IDs and answers { deleted } with those that are not the user's live chats: deleted, missing, someone else's, or not an ID at all. The agent's file clean-up uses it.",
     ],
-    why: "These are the calls the agent makes while it answers (its chatService): check the chat, read its memory, save the user's message and the answer, fill the answer in, and name the chat. The gateway's route table has no /internal entries, so they cannot be reached from outside (journey.test.ts, SEC-01), and requireCaller keeps the gateway's own token off them too.",
+    why: "These are the calls the agent makes while it answers (its chatService): check the chat, read its memory, save the user's message and the answer, fill the answer in, and name the chat; and, every ten minutes, find the chats whose files can go. The gateway's route table has no /internal entries, so they cannot be reached from outside (journey.test.ts, SEC-01), and requireCaller keeps the gateway's own token off them too.",
     returns: 'An Express Router.',
     sideEffects: [
       "Creates and updates messages, and changes a chat's title and lastMessageAt, in MongoDB.",
     ],
-    tests: [CHAT_INTERNAL_ROUTES_TEST, AGENT_SERVICES_TEST, AGENT_TURNS_TEST, JOURNEY_TEST],
+    tests: [
+      CHAT_INTERNAL_ROUTES_TEST,
+      AGENT_SERVICES_TEST,
+      AGENT_TURNS_TEST,
+      AGENT_CLEANUP_TEST,
+      JOURNEY_TEST,
+    ],
   },
   // -------------------------------------------------------------------------------------------
   // backend/services/billing: accounts, credit holds, the ledger and their routes
@@ -1769,16 +1811,22 @@ export const notes: SymbolNote[] = [
     symbol: 'backend/services/billing/src/app.ts#createApp',
     status: 'verified',
     summary:
-      "Builds the billing service's Express app: the account route and the internal credit routes, behind the internal-token check.",
+      "Builds the billing service's Express app: the account, payment and usage routes and the internal credit routes, behind the internal-token check.",
     how: [
-      "It calls createService with the name 'billing', the given logger and readiness checks, `internalAuth` with the gateway's key, the audience 'billing' and `callers: callerKeys` (auth and the agent), and routes that add accountRouter, then internalRouter.",
-      'So it serves GET /account, POST /internal/accounts and POST /internal/credits/reserve, commit and release. A direct call without a valid token gets 401 on any path except the health checks.',
-      "At startup, index.ts passes one readiness check, mongo, the imported INTERNAL_PUBLIC_KEY, and AUTH_PUBLIC_KEY and AGENT_PUBLIC_KEY as the callers' keys. It then starts the stale reservation sweeper, which onShutdown stops before disconnecting MongoDB.",
+      "It calls createService with the name 'billing', the given logger and readiness checks, `internalAuth` with the gateway's key, the audience 'billing' and `callers: callerKeys` (auth and the agent), and routes that add accountRouter, paymentRouter (with the payment gateway and the logger), usageRouter, then internalRouter.",
+      'So it serves GET /account, GET /plans, POST /orders, POST /orders/:orderId/verify, GET /payments, POST /webhooks/razorpay, GET /usage/summary, GET /usage/events, POST /internal/accounts and POST /internal/credits/reserve, commit and release. A direct call without a valid token gets 401 on any path except the health checks.',
+      "At startup, index.ts passes one readiness check, mongo, the imported INTERNAL_PUBLIC_KEY, and AUTH_PUBLIC_KEY and AGENT_PUBLIC_KEY as the callers' keys, and createRazorpay as payments when all three Razorpay settings are set (otherwise it logs 'payments are off: set RAZORPAY_KEY_ID, RAZORPAY_KEY_SECRET and RAZORPAY_WEBHOOK_SECRET'). It then starts the stale reservation sweeper, which onShutdown stops before disconnecting MongoDB.",
     ],
     why: "Building the app apart from starting it lets tests get the app without startService or a fixed port. Its app.test.ts sends missing, garbage, forged, misaddressed and expired tokens and checks each gets 401 (SEC-02). The package exports it as @gilder/billing/app, so journey.test.ts and the agent's turn tests run the real billing app on a port.",
     returns:
-      'An Express app with /healthz and /readyz open to all, the account and internal routes behind the internal-token check, and the shared 404 and error handling.',
-    tests: [BILLING_TEST, BILLING_CREDITS_TEST, BILLING_RESERVATIONS_TEST, JOURNEY_TEST],
+      'An Express app with /healthz and /readyz open to all, the account, payment, usage and internal routes behind the internal-token check, and the shared 404 and error handling.',
+    tests: [
+      BILLING_TEST,
+      BILLING_CREDITS_TEST,
+      BILLING_RESERVATIONS_TEST,
+      BILLING_PAYMENTS_TEST,
+      JOURNEY_TEST,
+    ],
   },
   {
     symbol: 'backend/services/billing/src/env.ts#env',
@@ -1786,11 +1834,12 @@ export const notes: SymbolNote[] = [
     summary: "The billing service's environment variables, checked at startup.",
     how: [
       "It extends baseEnvSchema with PORT (default 8004), MONGODB_URI (required, not empty), and three public keys with the shared internalPublicKeySchema: INTERNAL_PUBLIC_KEY (the gateway's), AUTH_PUBLIC_KEY (auth asks for the sign-up grant) and AGENT_PUBLIC_KEY (the agent holds and charges credits).",
+      'RAZORPAY_KEY_ID, RAZORPAY_KEY_SECRET and RAZORPAY_WEBHOOK_SECRET may be left out, and empty counts as unset; index.ts turns payments on only when all three are set.',
       'loadEnv checks process.env against it when the file is first imported.',
     ],
-    why: 'The service refuses to start if MONGODB_URI or a key is missing or if any value is invalid, and lists every problem at once, before it connects to anything. `pnpm setup:keys` writes all three keys. Its .env.example also lists the Razorpay settings for payments, which env.ts does not read yet.',
+    why: "The service refuses to start if MONGODB_URI or a key is missing or if any value is invalid, and lists every problem at once, before it connects to anything. `pnpm setup:keys` writes all three keys. Without the Razorpay settings it still starts, logs 'payments are off: ...', and the payment routes answer 503.",
     returns:
-      'An object with NODE_ENV, LOG_LEVEL, PORT (a number), MONGODB_URI, INTERNAL_PUBLIC_KEY, AUTH_PUBLIC_KEY and AGENT_PUBLIC_KEY.',
+      'An object with NODE_ENV, LOG_LEVEL, PORT (a number), MONGODB_URI, INTERNAL_PUBLIC_KEY, AUTH_PUBLIC_KEY, AGENT_PUBLIC_KEY and the three Razorpay settings (each a string or undefined).',
     sideEffects: [
       'Reads process.env.',
       'Throws an EnvError on import if anything is invalid, which stops the app.',
@@ -1817,7 +1866,7 @@ export const notes: SymbolNote[] = [
     symbol: 'backend/services/billing/src/models.ts#LEDGER_KINDS',
     status: 'verified',
     summary: "The kinds of ledger entry: 'signup_grant', 'purchase', 'usage' and 'adjustment'.",
-    why: 'Each credit change says why it happened. Today the code writes signup_grant (grantSignupCredits) and usage (commitCredits); purchase and adjustment are ready for payments and support.',
+    why: 'Each credit change says why it happened. Today the code writes signup_grant (grantSignupCredits), usage (commitCredits) and purchase (grantPurchase); adjustment is ready for support.',
     returns: 'A read-only array of the four kinds.',
     tests: [BILLING_MODELS_TEST],
   },
@@ -1854,10 +1903,10 @@ export const notes: SymbolNote[] = [
     how: [
       'userId, delta (a whole, non-zero number: positive adds, negative spends) and kind (LEDGER_KINDS) are required; reservationId, paymentId and metadata (agent, model, tokens, latency for usage) are optional.',
       'Only createdAt is kept; the collection is named ledger.',
-      'A partial unique index allows one signup_grant entry per user, and another one usage entry per reservation.',
+      'Partial unique indexes allow one signup_grant entry per user, one usage entry per reservation, and one purchase entry per payment ID (one_purchase_per_payment).',
     ],
-    why: 'The ledger is the history behind every balance. The two partial unique indexes make a double grant or a double charge impossible in the database itself, even when two requests race. The tests check the invariant: balance = the sum of ledger entries − the credits on hold.',
-    tests: [BILLING_MODELS_TEST, BILLING_RESERVATIONS_TEST],
+    why: 'The ledger is the history behind every balance. The partial unique indexes make a double grant, a double charge or a payment granted twice impossible in the database itself, even when two requests race. The tests check the invariant: balance = the sum of ledger entries − the credits on hold.',
+    tests: [BILLING_MODELS_TEST, BILLING_RESERVATIONS_TEST, BILLING_PAYMENTS_TEST],
   },
   {
     symbol: 'backend/services/billing/src/models.ts#AccountModel',
@@ -2038,6 +2087,152 @@ export const notes: SymbolNote[] = [
     tests: [BILLING_SWEEPER_TEST],
   },
 
+  // Buying credits and usage
+
+  {
+    symbol: 'backend/services/billing/src/models.ts#PAYMENT_STATUSES',
+    status: 'verified',
+    summary: "A payment's two states: 'created' and 'paid'.",
+    why: 'An order starts as created when billing makes it, and becomes paid once, in the grant. There is no failed state: an order nobody paid stays created.',
+    returns: "A read-only array: ['created', 'paid'].",
+    tests: [BILLING_PAYMENTS_TEST],
+  },
+  {
+    symbol: 'backend/services/billing/src/models.ts#paymentSchema',
+    status: 'verified',
+    summary: 'The shape and rules of a payment: one Razorpay order for one plan.',
+    how: [
+      "userId, orderId (Razorpay's order), plan (PLAN_IDS), amountPaise and credits (whole numbers of at least 1) are required; status is created by default; paymentId and paidAt are set once it is paid.",
+      'orderId is unique, and so is paymentId among the payments that have one (a partial index), so one payment can never pay for a second order.',
+      'An index on userId and createdAt (newest first) serves the payment history.',
+    ],
+    why: 'The record fixes what the user is owed when the order is made from the plan config, so the grant never takes an amount or a credit count from the browser or the webhook.',
+    tests: [BILLING_PAYMENTS_TEST],
+  },
+  {
+    symbol: 'backend/services/billing/src/models.ts#webhookEventSchema',
+    status: 'verified',
+    summary: "A webhook delivery already handled, stored under Razorpay's event ID.",
+    how: [
+      'The _id is the x-razorpay-event-id header and type the event name; receivedAt is its only time. The collection is named webhookEvents.',
+    ],
+    why: 'Inserting the event ID fails with a duplicate key the second time, so a redelivered event is caught in one write, with no read first.',
+    tests: [BILLING_PAYMENTS_TEST],
+  },
+  {
+    symbol: 'backend/services/billing/src/models.ts#PaymentModel',
+    status: 'verified',
+    summary: 'The Mongoose model for payments (paymentSchema).',
+    why: 'POST /orders creates one per order, grantPurchase marks it paid, and GET /payments lists them.',
+    tests: [BILLING_PAYMENTS_TEST],
+  },
+  {
+    symbol: 'backend/services/billing/src/models.ts#WebhookEventModel',
+    status: 'verified',
+    summary: 'The Mongoose model for handled webhook events (webhookEventSchema).',
+    why: 'The webhook route creates one per delivery; a duplicate key means the event was handled before.',
+    tests: [BILLING_PAYMENTS_TEST],
+  },
+  {
+    symbol: 'backend/services/billing/src/models.ts#toPayment',
+    status: 'verified',
+    summary: 'What the API shows of a payment.',
+    how: [
+      'It keeps the order ID, plan, amount in paise, credits and status, with createdAt and paidAt as ISO strings (paidAt is null until paid).',
+    ],
+    why: "The user ID and Razorpay's payment ID stay inside billing; the payment history needs neither.",
+    returns: 'A PaymentView.',
+    tests: [BILLING_PAYMENTS_TEST],
+  },
+  {
+    symbol: 'backend/services/billing/src/razorpay.ts#signaturesMatch',
+    status: 'verified',
+    summary: 'Compares two signatures in constant time.',
+    how: [
+      'The expected signature is read as hex. The given one is read as hex when it looks like hex, and as text otherwise.',
+      'Different lengths are a mismatch at once; equal lengths are compared with timingSafeEqual.',
+    ],
+    why: 'A normal comparison stops at the first wrong character, so its timing could reveal how much of a guess is right. timingSafeEqual takes the same time whatever matches.',
+    returns: 'true when they match.',
+    tests: [BILLING_PAYMENTS_TEST],
+  },
+  {
+    symbol: 'backend/services/billing/src/razorpay.ts#createRazorpay',
+    status: 'verified',
+    summary: "Billing's Razorpay client: create an order, and check the two kinds of signature.",
+    how: [
+      "createOrder posts the amount in paise, the currency INR, a receipt and notes to https://api.razorpay.com/v1/orders, with the key ID and secret as Basic auth and a 10-second limit. No answer is a 503 'Payments are not reachable right now'; an error status is a 503 that names it.",
+      "verifyCheckout checks the checkout's signature: an HMAC-SHA256 of '<order ID>|<payment ID>' with the key secret.",
+      'verifyWebhook checks a webhook: an HMAC-SHA256 of the raw body with the webhook secret.',
+      'Both compare with signaturesMatch. keyId is passed on to the browser for the checkout.',
+    ],
+    why: 'fetch and node:crypto are enough for one call and two HMACs, so there is no Razorpay SDK. The tests replace only createOrder and keep the real signature checks.',
+    returns: 'A PaymentGateway.',
+    sideEffects: ['createOrder calls Razorpay over HTTPS.'],
+    tests: [BILLING_PAYMENTS_TEST],
+  },
+  {
+    symbol: 'backend/services/billing/src/credits.ts#grantPurchase',
+    status: 'verified',
+    summary:
+      "Grants a paid order's credits once, whoever reports the payment first: the browser's check or Razorpay's webhook.",
+    how: [
+      "It finds the payment by its order ID. When a user ID is given (the browser's check), the payment must be that user's; otherwise, or when there is no such order, it throws not_found 'No such order'.",
+      'In one transaction it moves the payment from created to paid, with the payment ID and paidAt, only if it is still created. If it was already paid, nothing else happens and granted is false.',
+      "Otherwise it appends a purchase ledger entry with the plan's credits, the payment ID and the order, raises the balance, and sets the plan and planExpiresAt: the plan's validity days (30) from now, or from the current end if the badge is still running.",
+      'When two reports arrive at the same moment, the one_purchase_per_payment index makes the second insert fail with a duplicate key; its transaction is undone and it returns granted false.',
+    ],
+    why: 'Razorpay can report a payment more than once and the browser once more, in any order; the credits must arrive exactly once (SEC-05). The credits come from the payment record, fixed from the plan config when the order was made.',
+    returns:
+      '{ account, granted }: the account as it now is, and whether this call granted the credits.',
+    sideEffects: ['Updates a payment, appends a ledger entry and updates an account, in MongoDB.'],
+    tests: [BILLING_PAYMENTS_TEST],
+  },
+  {
+    symbol: 'backend/services/billing/src/payment-routes.ts#paymentRouter',
+    status: 'verified',
+    summary:
+      "Buying credits: the plans, orders priced by the server, the browser's payment check, the payment history and Razorpay's webhook.",
+    how: [
+      'GET /plans lists Starter and Pro from PLANS (name, price in paise, credits and validity days), with currency INR and testMode true.',
+      "POST /orders takes a strict { planId: 'starter' | 'pro' }, creates a Razorpay order for the plan's price and saves a created payment. It answers 201 with the order and the key ID.",
+      "POST /orders/:orderId/verify takes a strict { paymentId, signature }, checks the checkout signature (400 'The payment could not be verified' when it is wrong) and grants with the user's ID (grantPurchase). It answers the account and granted.",
+      "GET /payments lists the user's last 50 payments, newest first (toPayment).",
+      "POST /webhooks/razorpay needs no user. It checks x-razorpay-signature over the raw body (rawBodyOf; 400 when wrong), stores x-razorpay-event-id once (a repeat answers { ok: true, duplicate: true }), and grants a payment.captured event for the order's owner. An unknown order is logged at warn; anything correctly signed gets 200.",
+      "Every route but the webhook needs a user. Without a payment gateway, the routes that use it answer 503 'Payments are not set up on this server'.",
+    ],
+    why: 'The price never comes from the browser, and nothing is granted without a signature only Razorpay can make. The webhook covers a browser that closed right after paying, and one shared grant makes the two reports safe together.',
+    returns: 'An Express Router.',
+    sideEffects: [
+      'Creates orders at Razorpay; creates and updates payments, webhook events, ledger entries and accounts in MongoDB.',
+    ],
+    tests: [BILLING_PAYMENTS_TEST, GATEWAY_TEST],
+  },
+  {
+    symbol: 'backend/services/billing/src/usage-routes.ts#usageRouter',
+    status: 'verified',
+    summary: "The usage page's data, from the ledger's usage entries.",
+    how: [
+      "GET /usage/summary takes days (1 to 90, default 30) and tz (a time zone the runtime knows, default UTC). Two aggregations at once sum the user's usage entries in the window: by the agent in their metadata (credits and answers, largest first) and by calendar day in tz.",
+      'It answers the window, the total credits, byAgent (an entry with no agent counts as chat) and byDay, which lists only the days that had usage.',
+      'GET /usage/events lists the latest usage entries, newest first: limit from 1 to 100 (default 30), and an optional before time to page back. Each has its ID, time, credits, agent, model, input and output tokens, time taken and chat, with null for what is missing.',
+    ],
+    why: "commitCredits already writes each answer's agent, model, tokens and time into its ledger entry, so usage needs no store of its own and always matches the balance. Grouping the days in the viewer's zone keeps the last day on the chart their today.",
+    returns: 'An Express Router.',
+    tests: [BILLING_PAYMENTS_TEST],
+  },
+  {
+    symbol: 'backend/services/billing/src/usage-routes.ts#isTimeZone',
+    status: 'verified',
+    summary: 'True for any time zone name the runtime knows, aliases included.',
+    how: [
+      'It tries to build an Intl.DateTimeFormat with the zone, and returns false when that throws.',
+    ],
+    why: 'Per its comment, the list from Intl.supportedValuesOf leaves out aliases such as Asia/Kolkata, which browsers report, so that list cannot be the check. The tests send Asia/Kolkata (accepted) and Mars/Base (a 400).',
+    returns: 'true or false.',
+    tests: [BILLING_PAYMENTS_TEST],
+  },
+
   // -------------------------------------------------------------------------------------------
   // backend/services/agent: the turn route
 
@@ -2045,16 +2240,16 @@ export const notes: SymbolNote[] = [
     symbol: 'backend/services/agent/src/app.ts#createApp',
     status: 'verified',
     summary:
-      "Builds the agent service's Express app: the answer routes, behind the internal-token check.",
+      "Builds the agent service's Express app: the answer and file routes, behind the internal-token check.",
     how: [
       "It calls createService with the name 'agent', the given logger and readiness checks, and `internalAuth: { publicKey: internalPublicKey, audience: 'agent' }`: only the gateway's tokens are trusted.",
-      'When `turns` is given, its routes add turnRouter (send, regenerate, edit and stop) with those dependencies and the logger; without it the app has no routes.',
-      "At startup, index.ts builds the model layer (createLlm over buildProviders, with llmCallRecorder as its telemetry hook), chat and billing clients that sign with the agent's SERVICE_PRIVATE_KEY, the stop signals (createStopSignals) and the agents (buildAgents, with Tavily search, mock search in mock mode, or none), logs 'agents ready' with their names, and passes them with two readiness checks (mongo and redis), the imported INTERNAL_PUBLIC_KEY, the Redis memory and the Redis client. On shutdown it closes the stop signals first.",
+      'When `turns` is given, its routes add turnRouter (send, regenerate, edit and stop) with those dependencies and the logger, and when `files` is given, fileRouter (uploads, details and download links); without either the app has no routes.',
+      "At startup, index.ts builds the model layer (createLlm over buildProviders, with llmCallRecorder as its telemetry hook), chat and billing clients that sign with the agent's SERVICE_PRIVATE_KEY, the stop signals (createStopSignals) and the agents (buildAgents, with Tavily search, mock search in mock mode, or none), logs 'agents ready' with their names, and passes them with two readiness checks (mongo and redis), the imported INTERNAL_PUBLIC_KEY, the Redis memory and the Redis client. It also picks the file store (createS3FileStore when all four S3 settings are set; otherwise it logs 'uploads are off: ...'), the embedder (Gemini in live mode with GEMINI_API_KEY, mockEmbedder otherwise) and the vector store (Qdrant when QDRANT_URL is set, in memory otherwise), starts the file clean-up (startFileCleanup), and gives fileRouter the file store, the chat client and an onPdfReady that indexes a ready PDF (indexPdf) without waiting. On shutdown it stops the file clean-up, then closes the stop signals.",
     ],
-    why: 'Building the app apart from starting it lets tests pass a scripted mock model, a test Redis and the real chat and billing apps (turns.test.ts). Its app.test.ts checks the SEC-02 token cases. The gateway forwards POST /api/chats/:id/messages, the regenerate and edit routes and POST /api/turns/:turnId/stop here.',
+    why: 'Building the app apart from starting it lets tests pass a scripted mock model, a test Redis and the real chat and billing apps (turns.test.ts). Its app.test.ts checks the SEC-02 token cases. The gateway forwards POST /api/chats/:id/messages, the regenerate and edit routes, POST /api/turns/:turnId/stop and the four /api/files routes here.',
     returns:
-      'An Express app with /healthz and /readyz open to all, the answer routes behind the internal-token check, and the shared 404 and error handling.',
-    tests: [AGENT_TEST, AGENT_TURNS_TEST],
+      'An Express app with /healthz and /readyz open to all, the answer and file routes behind the internal-token check, and the shared 404 and error handling.',
+    tests: [AGENT_TEST, AGENT_TURNS_TEST, AGENT_FILE_ROUTES_TEST],
   },
   {
     symbol: 'backend/services/agent/src/env.ts#env',
@@ -2081,6 +2276,7 @@ export const notes: SymbolNote[] = [
       'CHAT_SERVICE_URL and BILLING_SERVICE_URL default to http://localhost:8002 and :8004.',
       'LLM_MODE is live (real providers) or mock (canned answers, no keys), default mock.',
       'GROQ_API_KEY, OPENROUTER_API_KEY, GEMINI_API_KEY and TAVILY_API_KEY may be left out; empty counts as unset. Without TAVILY_API_KEY, the search agent is off in live mode.',
+      'AWS_REGION, S3_BUCKET, AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY (file storage: all four, or uploads stay off) and QDRANT_URL (the vector store) may be left out too.',
       'In live mode GROQ_API_KEY is required, because chat, routing and titles run on Groq. The other keys only turn on the providers that need them.',
     ],
     why: 'The app runs in tests and CI without any AI keys, and refuses to start in live mode with no way to answer. The schema lives apart from env.ts so tests can check the rules without a real environment.',
@@ -2202,10 +2398,11 @@ export const notes: SymbolNote[] = [
       'getChat and recentMessages read GET /internal/chats/:id and /recent-messages (each message keeps its ID, role and content), and lastTurn reads /last-turn, the latest user message and its answer.',
       'saveMessage posts to /internal/messages, and retries only when the message has a clientMessageId, because chat saves such a message once.',
       'updateMessage patches /internal/messages/:id and autoTitle patches /internal/chats/:id; both may retry.',
+      'deletedChats posts up to 200 chat IDs to /internal/chats/deleted and returns the ones that are gone for the user, for the file clean-up; it may retry.',
     ],
     why: "Each call goes through an internal client signed with the agent's own key for the user it acts for, so chat checks both the caller and the user.",
     returns: 'A ChatService.',
-    tests: [AGENT_SERVICES_TEST, AGENT_TURNS_TEST],
+    tests: [AGENT_SERVICES_TEST, AGENT_TURNS_TEST, AGENT_CLEANUP_TEST],
   },
   {
     symbol: 'backend/services/agent/src/services.ts#billingService',
@@ -2583,6 +2780,292 @@ export const notes: SymbolNote[] = [
   },
 
   // -------------------------------------------------------------------------------------------
+  // backend/services/agent: uploads, files and PDF indexing
+
+  {
+    symbol: 'backend/services/agent/src/files/file-checks.ts#UPLOAD_TYPES',
+    status: 'verified',
+    summary: 'What may be uploaded: PDFs up to 20 MB, and PNG, JPEG or WebP images up to 10 MB.',
+    how: [
+      'Each type maps to its purpose (pdf or image), its size limit and the extension a display name gets.',
+    ],
+    why: "One table drives the start check, the signed form's size range and the file name, so they cannot disagree.",
+    returns: 'A read-only object keyed by MIME type.',
+    tests: [AGENT_FILE_CHECKS_TEST, AGENT_FILE_ROUTES_TEST],
+  },
+  {
+    symbol: 'backend/services/agent/src/files/file-checks.ts#MAX_PDF_PAGES',
+    status: 'verified',
+    summary: 'The most pages an uploaded PDF may have: 200.',
+    why: 'Completing an upload refuses a longer PDF before anything tries to index it, which keeps indexing time and embedding calls bounded.',
+    returns: '200',
+  },
+  {
+    symbol: 'backend/services/agent/src/files/file-checks.ts#isUploadType',
+    status: 'verified',
+    summary: 'True when a MIME type is one of UPLOAD_TYPES.',
+    why: 'It narrows the type for TypeScript, so the size limit and signature check can be looked up safely.',
+    returns: 'true or false.',
+    tests: [AGENT_FILE_ROUTES_TEST],
+  },
+  {
+    symbol: 'backend/services/agent/src/files/file-checks.ts#matchesSignature',
+    status: 'verified',
+    summary: 'True when the first bytes are what files of this type always start with.',
+    how: [
+      'A PDF starts with %PDF-; a PNG with its 8-byte signature (89 50 4E 47 0D 0A 1A 0A); a JPEG with FF D8 FF; a WebP with RIFF, and WEBP at byte 8.',
+    ],
+    why: 'The type a browser claims is only a label. Checking the bytes means a renamed file cannot pass as a PDF or an image (SEC-07).',
+    returns: 'true or false.',
+    tests: [AGENT_FILE_CHECKS_TEST, AGENT_FILE_ROUTES_TEST],
+  },
+  {
+    symbol: 'backend/services/agent/src/files/file-checks.ts#displayName',
+    status: 'verified',
+    summary: 'A file name that is safe wherever it is shown or downloaded.',
+    how: [
+      'It drops control characters, keeps only the part after the last slash or backslash, removes the characters " < > | * ? :, the extension and any leading dots, trims it and cuts it to 120 characters.',
+      "Then it adds the type's own extension, so a PDF always ends in .pdf; an empty result becomes 'file'.",
+    ],
+    why: 'The name is shown in the app and used as the download name, but it never reaches a storage key.',
+    returns: "A name such as 'trip.pdf'.",
+    tests: [AGENT_FILE_CHECKS_TEST],
+  },
+  {
+    symbol: 'backend/services/agent/src/files/file-checks.ts#storageKey',
+    status: 'verified',
+    summary: 'The storage key of a file, built from IDs only: users/<user ID>/<kind>s/<file ID>.',
+    why: "A file name can never choose or change where a file is stored, so a name like ../../other-user cannot reach another user's files (SEC-07).",
+    returns: "A key such as 'users/<user ID>/uploads/<file ID>'.",
+    tests: [AGENT_FILE_CHECKS_TEST, AGENT_FILE_ROUTES_TEST],
+  },
+  {
+    symbol: 'backend/services/agent/src/files/file-store.ts#createS3FileStore',
+    status: 'verified',
+    summary: 'The file store on an S3 bucket, with the AWS SDK.',
+    how: [
+      'uploadForm signs a presigned POST for one key, with Content-Type fixed to the given type and a content-length-range from 1 byte to the limit, valid for 5 minutes.',
+      'head returns the size and type, or null when nothing is there; read returns the bytes, or only the first ones with a Range request; put stores bytes.',
+      'downloadUrl signs a GET link, valid for 5 minutes, that saves the file under its name (with quotes and line breaks replaced).',
+      'remove deletes many keys in one DeleteObjects call.',
+    ],
+    why: "A presigned POST lets S3 itself enforce the size range and the type, which a presigned PUT link cannot do for a range. Nothing in the bucket is public: every link is signed and short-lived. index.ts makes it only when all four S3 settings are set. No test calls a real bucket: the routes are tested against createMemoryFileStore, and a live run needs a bucket the agent's key can use.",
+    returns: 'A FileStore.',
+    sideEffects: ['Calls S3: signs, reads, writes and deletes objects.'],
+  },
+  {
+    symbol: 'backend/services/agent/src/files/file-store.ts#createMemoryFileStore',
+    status: 'verified',
+    summary: 'A bucket in memory, for tests.',
+    how: [
+      'Objects live in a Map. simulateUpload stands in for the client posting the form; the form and the download links are made-up URLs that carry the key, the type and the limit.',
+    ],
+    why: 'The upload checks, indexing and clean-up can be tested end to end without AWS.',
+    returns: 'A FileStore with its objects and simulateUpload.',
+    tests: [AGENT_FILE_ROUTES_TEST, AGENT_INDEXER_TEST, AGENT_CLEANUP_TEST],
+  },
+  {
+    symbol: 'backend/services/agent/src/files/models.ts#FileModel',
+    status: 'verified',
+    summary: "The agent's files, in gilder_agent.",
+    how: [
+      'Each file has its owner and chat, a kind (upload, the only kind written today, or generated), a purpose (pdf, image or slides), a display name, its storage key, type and size, a status (pending, ready or failed) and, for a PDF, its page count.',
+      "An index on userId, chatId and createdAt serves a chat's files.",
+    ],
+    why: 'Files are reached only by their ID and their owner, and links are signed on request, never stored.',
+    tests: [AGENT_FILE_ROUTES_TEST],
+  },
+  {
+    symbol: 'backend/services/agent/src/files/models.ts#DocumentModel',
+    status: 'verified',
+    summary: 'An uploaded PDF being made searchable, with its indexing status.',
+    how: [
+      'One per file (a unique fileId), with the owner, chat, page count, status (indexing, ready or failed) and the reason when it failed.',
+    ],
+    why: "GET /files/:fileId reports its status, and every piece in the vector store carries this document's ID.",
+    tests: [AGENT_FILE_ROUTES_TEST, AGENT_INDEXER_TEST],
+  },
+  {
+    symbol: 'backend/services/agent/src/files/models.ts#toFile',
+    status: 'verified',
+    summary: 'What the API shows of a file.',
+    how: ['ID, chat, kind, purpose, name, type, size, status and page count.'],
+    why: 'The storage key and the owner stay inside the agent; download links are made fresh on request.',
+    returns: 'A FileView.',
+    tests: [AGENT_FILE_ROUTES_TEST],
+  },
+  {
+    symbol: 'backend/services/agent/src/files/models.ts#findOwnedFile',
+    status: 'verified',
+    summary: 'The file with this ID if it belongs to the user, or null.',
+    how: [
+      'An ID that is not a valid ObjectId is null at once; otherwise it reads the file by its ID and owner.',
+    ],
+    why: "Another user's file and a missing one look the same, so file IDs cannot be probed.",
+    returns: 'The file, or null.',
+    tests: [AGENT_FILE_ROUTES_TEST],
+  },
+  {
+    symbol: 'backend/services/agent/src/files/file-routes.ts#countPdfPages',
+    status: 'verified',
+    summary: "A PDF's page count, read with unpdf.",
+    why: 'Completing an upload refuses an unreadable PDF, or one over MAX_PDF_PAGES, before it is indexed.',
+    returns: 'The number of pages. It throws for a file that is not a readable PDF.',
+    tests: [AGENT_FILE_ROUTES_TEST],
+  },
+  {
+    symbol: 'backend/services/agent/src/files/file-routes.ts#fileRouter',
+    status: 'verified',
+    summary:
+      "Uploads in two calls around the client's own upload to S3, a file's details, and fresh download links.",
+    how: [
+      "POST /files/uploads takes a strict { chatId, name, mime, sizeBytes }. It refuses another type (415) or a size over the type's limit (413), checks the chat with chat, records the file as pending with a cleaned name and an ID-only key, and answers 201 with the file and a signed upload form.",
+      "POST /files/:fileId/complete reads the owner's upload (404 otherwise). A ready file is returned as it is; a failed one is a 409, and so is an upload that has not arrived. The stored type must be the announced one, the size within the limit and the first 16 bytes the type's signature; a PDF must open and have at most 200 pages. A file that fails is deleted and marked failed (415). One that passes is marked ready; a PDF also gets a document and is handed to onPdfReady.",
+      'GET /files/:fileId answers the file and, for a PDF, its indexing status.',
+      'GET /files/:fileId/url answers a download link for a ready file, valid for 300 seconds.',
+      "Without a file store, every route that needs one answers 503 'File uploads are not set up on this server'.",
+    ],
+    why: "The client's claims are only a first filter: what counts is what arrived in the bucket. Links are signed on request and expire in minutes, so no stored link ever goes stale.",
+    returns: 'An Express Router.',
+    sideEffects: [
+      'Creates and updates files and documents in MongoDB; reads and deletes objects in storage.',
+    ],
+    tests: [AGENT_FILE_ROUTES_TEST, GATEWAY_ROUTE_TABLE_TEST],
+  },
+  {
+    symbol: 'backend/services/agent/src/files/test-pdf.ts#makePdf',
+    status: 'verified',
+    summary: 'Builds a small, valid PDF with one line of text per page, for tests.',
+    how: [
+      'It writes the catalog, the page tree, a Helvetica font, and a page and content stream per line, then a correct cross-reference table.',
+    ],
+    why: 'The upload and indexing tests need real PDFs that unpdf can open, count and read, without binary files in the repo.',
+    returns: 'The PDF as a Buffer.',
+    tests: [AGENT_FILE_ROUTES_TEST, AGENT_INDEXER_TEST],
+  },
+  {
+    symbol: 'backend/services/agent/src/rag/chunks.ts#chunkPages',
+    status: 'verified',
+    summary: "Splits a PDF's text into overlapping pieces, page by page.",
+    how: [
+      'Each page has its whitespace collapsed, then is cut into pieces of up to 1,000 characters (CHUNK_CHARS).',
+      'A piece ends at the last space before the limit when that space is in its second half, so words are not cut.',
+      'The next piece starts 200 characters (CHUNK_OVERLAP) before the last one ended, and always moves forward.',
+      'Every piece keeps its page number; empty pieces are dropped.',
+    ],
+    why: "Pieces never cross a page, so each one can be cited by its page. The overlap keeps a sentence cut at one piece's end whole in the next.",
+    returns: 'A list of { page, text }.',
+    tests: [AGENT_CHUNKS_TEST, AGENT_INDEXER_TEST],
+  },
+  {
+    symbol: 'backend/services/agent/src/rag/embeddings.ts#EMBEDDING_DIMENSIONS',
+    status: 'verified',
+    summary: 'The size of every vector: 768 numbers.',
+    why: 'Gemini is asked for 768 numbers, the stand-in makes 768, and the Qdrant collection is created for 768, so they always fit together.',
+    returns: '768',
+  },
+  {
+    symbol: 'backend/services/agent/src/rag/embeddings.ts#createGeminiEmbedder',
+    status: 'verified',
+    summary: "Turns text into vectors with Gemini's embedding model, over its REST API.",
+    how: [
+      "Texts go 100 at a time to gemini-embedding-001's batchEmbedContents, with the key in x-goog-api-key.",
+      'Each text is embedded for its role, RETRIEVAL_DOCUMENT for PDF pieces and RETRIEVAL_QUERY for questions, as 768 numbers.',
+      "Each call has a 30-second limit, combined with the caller's abort signal. A failed call is a 503; an aborted one passes the abort on.",
+    ],
+    why: 'fetch is enough, so there is no Google SDK. Embedding documents and questions with their own task types gives better matches. index.ts uses it when LLM_MODE is live and GEMINI_API_KEY is set, and a live check with a local Qdrant ranked the right page first. No test calls it.',
+    returns: 'An Embedder.',
+    sideEffects: ["Calls Gemini's API over HTTPS."],
+  },
+  {
+    symbol: 'backend/services/agent/src/rag/embeddings.ts#mockEmbedder',
+    status: 'verified',
+    summary: 'A stand-in embedder: the same text always gives the same vector.',
+    how: [
+      'Each word is hashed to one of the 768 places, which counts it; the vector is then scaled to length 1.',
+    ],
+    why: 'Mock mode and the tests can index and search without a key, and texts that share words still come out close.',
+    returns: '768-number vectors.',
+    tests: [AGENT_INDEXER_TEST],
+  },
+  {
+    symbol: 'backend/services/agent/src/rag/vector-store.ts#createQdrantStore',
+    status: 'verified',
+    summary: 'The vector store on Qdrant, over its REST API with fetch.',
+    how: [
+      'ensureReady creates the document_chunks collection the first time (768 dimensions, cosine distance), with keyword indexes on userId, documentId and chatId.',
+      'upsert writes points 256 at a time, each with a random ID, its vector and its payload (owner, document, chat, page and text), and waits until they are stored.',
+      'search and removeDocuments always filter by the owner and a list of document IDs.',
+      'Every call has a 15-second limit; no answer, or an error status, is a 503.',
+    ],
+    why: "Every query carries the owner filter, so one user's documents can never answer another user's question. fetch is enough, so there is no Qdrant SDK. index.ts uses it when QDRANT_URL is set, and a live check with real Gemini embeddings ranked the right page first. No test calls a real Qdrant.",
+    returns: 'A VectorStore.',
+    sideEffects: [
+      'Calls Qdrant over HTTP: creates the collection, and writes, searches and deletes points.',
+    ],
+  },
+  {
+    symbol: 'backend/services/agent/src/rag/vector-store.ts#createMemoryVectorStore',
+    status: 'verified',
+    summary: 'Qdrant in memory, for tests and when QDRANT_URL is not set.',
+    how: [
+      'Points live in an array. search ranks the points of the given owner and documents by cosine similarity; removeDocuments deletes them.',
+    ],
+    why: 'Indexing, search and clean-up run in tests with the same owner filter as the real store.',
+    returns: 'A VectorStore with its points.',
+    tests: [AGENT_INDEXER_TEST, AGENT_CLEANUP_TEST],
+  },
+  {
+    symbol: 'backend/services/agent/src/rag/indexer.ts#extractPages',
+    status: 'verified',
+    summary: "A PDF's text, one string per page, read with unpdf.",
+    why: 'Keeping the pages apart lets every piece keep its page number.',
+    returns: 'A list of page texts.',
+    tests: [AGENT_INDEXER_TEST],
+  },
+  {
+    symbol: 'backend/services/agent/src/rag/indexer.ts#indexPdf',
+    status: 'verified',
+    summary: 'Makes an uploaded PDF searchable, then marks its document ready or failed.',
+    how: [
+      "It finds the file's document; without one it stops.",
+      'It reads the file, extracts its text per page (extractPages) and cuts it into pieces (chunkPages). A PDF with no text at all fails with a message that it may be scanned images.',
+      'It embeds the pieces as documents, makes sure the collection exists and stores every piece with its owner, document, chat, page and text.',
+      "The document is saved as ready, and 'PDF indexed' is logged with the number of pieces. Any failure saves it as failed with the first 300 characters of the reason, and logs 'PDF indexing failed' at warn.",
+    ],
+    why: 'It runs after the upload has answered, so a long PDF does not hold up the client, and it never throws: the outcome is always on the document. The tests index a real PDF, check that the right page comes first for a question, and that another user finds nothing.',
+    sideEffects: [
+      'Reads the file from storage, calls the embedder and writes to the vector store; updates the document in MongoDB; writes a log line.',
+    ],
+    tests: [AGENT_INDEXER_TEST],
+  },
+  {
+    symbol: 'backend/services/agent/src/rag/cleanup.ts#cleanUpDeletedChats',
+    status: 'verified',
+    summary: 'Removes the files, documents and indexed pieces of chats that are gone.',
+    how: [
+      'It groups the chat IDs of all files by user.',
+      'For each user, up to 200 chat IDs at a time, it asks chat which are gone (deletedChats).',
+      "For those chats it deletes the documents' pieces from the vector store, the objects from storage (when there is a store), then the document and file records.",
+    ],
+    why: 'Files belong to their chat. Chat never calls the agent when a chat is deleted; the agent asks instead, so a delete stays one quick update in chat and nothing is missed if the agent was down.',
+    returns: 'How many files it removed.',
+    sideEffects: ['Deletes points, objects, documents and files.'],
+    tests: [AGENT_CLEANUP_TEST],
+  },
+  {
+    symbol: 'backend/services/agent/src/rag/cleanup.ts#startFileCleanup',
+    status: 'verified',
+    summary: 'Runs cleanUpDeletedChats every ten minutes, never two at once.',
+    how: [
+      "A run is skipped while the last one is still going. A run that removed files logs it at info; a failed one logs 'file clean-up failed; it runs again shortly' at error.",
+      'The timer is unref-ed, so it never keeps the process alive.',
+    ],
+    why: 'Clean-up is safe to repeat, so a plain timer is enough. index.ts starts it at startup and stops it first on shutdown.',
+    returns: 'A function that stops it.',
+  },
+
+  // -------------------------------------------------------------------------------------------
   // frontend: pages, the /api proxy, the login gate, theme and security headers
 
   {
@@ -2612,7 +3095,7 @@ export const notes: SymbolNote[] = [
     summary: 'Forwards one browser request to the gateway and streams the answer back.',
     how: [
       'The target is GATEWAY_URL plus the same /api path and query.',
-      'Only accept, accept-language, content-type, cookie, origin, user-agent and x-forwarded-for go along; the gateway needs the cookie for sessions, Origin for its CSRF check and the forwarded address for its per-IP limit.',
+      "Only accept, accept-language, content-type, cookie, origin, user-agent, x-forwarded-for and Razorpay's two webhook headers go along (FORWARDED_REQUEST_HEADERS); the gateway needs the cookie for sessions, Origin for its CSRF check and the forwarded address for its per-IP limit.",
       "It keeps the browser's X-Request-Id when it looks safe and otherwise makes one, and adds x-gilder-client: web.",
       "The body is read whole (calls are small JSON), and the request's abort signal is passed on, so a closed tab cancels the gateway call.",
       'The answer comes back with its status, a few headers and every Set-Cookie header, its body streamed as it arrives.',
@@ -2620,6 +3103,15 @@ export const notes: SymbolNote[] = [
     ],
     why: "The browser never sees a backend address or secret, and the session cookie belongs to the frontend's own domain because Set-Cookie comes back from it.",
     returns: 'A Response.',
+    tests: ['frontend/src/server/gateway-proxy.test.ts'],
+  },
+  {
+    symbol: 'frontend/src/server/gateway-proxy.ts#FORWARDED_REQUEST_HEADERS',
+    status: 'verified',
+    summary: 'The request headers the Next.js server passes on to the gateway.',
+    why: "The gateway needs the cookie (sessions), Origin (its CSRF check) and the forwarded address (its per-IP limit). Razorpay's webhook signs its body, so x-razorpay-signature and x-razorpay-event-id go along too; the gateway passes them on to billing for that route only.",
+    returns:
+      "['accept', 'accept-language', 'content-type', 'cookie', 'origin', 'user-agent', 'x-forwarded-for', 'x-razorpay-event-id', 'x-razorpay-signature']",
     tests: ['frontend/src/server/gateway-proxy.test.ts'],
   },
   {
@@ -2745,6 +3237,22 @@ export const notes: SymbolNote[] = [
     tests: ['frontend/src/components/ui/overlays.test.tsx', FRONTEND_CHATS_TEST],
   },
 
+  {
+    symbol: 'frontend/src/components/app-shell/account-menu.tsx#AccountMenu',
+    status: 'verified',
+    summary:
+      'The account button: who is signed in, the theme, Billing and credits, Usage, and sign out.',
+    how: [
+      'The button shows the avatar and the name (with the email under it), or only the avatar in the small-screen top bar.',
+      'The theme items (System, Light, Dark) save the choice and mark the current one.',
+      "'Billing and credits' opens /settings/billing and 'Usage' opens /settings/usage.",
+      "Sign out ends the session and goes to the sign-in page, also when the session had already ended (a 401); any other failure shows 'Could not sign out'.",
+    ],
+    why: 'Everything about the account sits behind one button at the bottom of the sidebar.',
+    returns: 'The menu as JSX.',
+    tests: ['frontend/src/components/app-shell/account-menu.test.tsx'],
+  },
+
   // -------------------------------------------------------------------------------------------
   // frontend: chat data in the browser
 
@@ -2752,18 +3260,20 @@ export const notes: SymbolNote[] = [
     symbol: 'frontend/src/store/api.ts#api',
     status: 'verified',
     summary:
-      "The browser's data layer for chats and the credits balance: an RTK Query API whose calls all go to the app's own /api.",
+      "The browser's data layer for chats, credits, payments and usage: an RTK Query API whose calls all go to the app's own /api.",
     how: [
       'fetchBaseQuery uses the base URL /api, so every call goes to the Next.js proxy, which forwards it to the gateway with the session cookie.',
       'listChats is an infinite query for the sidebar: the first page is GET /api/chats, later pages add ?cursor=, and getNextPageParam reads nextCursor (null ends the list).',
       'searchChats is GET /api/chats?query=, getChat is GET /api/chats/:id and createChat is POST /api/chats. getAccount is GET /api/billing/account, the plan and balance, with the Account tag.',
+      'getPlans is GET /api/billing/plans and getPayments GET /api/billing/payments (the Payment tag). createOrder posts { planId } to /api/billing/orders and invalidates Payment; verifyPayment posts the checkout result to /api/billing/orders/:orderId/verify and invalidates Account and Payment.',
+      'getUsageSummary is GET /api/usage/summary with the number of days and the time zone, and getUsageEvents GET /api/usage/events?limit=30. Both provide the Usage tag, which the chat thread invalidates when an answer finishes.',
       'updateChat (PATCH, to rename or pin) and deleteChat (DELETE) change the cached list straight away in onQueryStarted, and undo that change if the call fails.',
       'The list queries provide the Chat LIST tag and getChat its own Chat tag. createChat, updateChat and deleteChat invalidate LIST, and updateChat also its chat, so those are fetched again once the call is done.',
     ],
     why: "The sidebar, the small-screen panel and the recent chats in search use the same listChats cache, so one fetch serves them all. The optimistic changes make rename, pin and delete feel instant, and the undo keeps the list true when the server refuses. NewChatComposer calls createChat for a new chat's first message, and the chat thread writes the usage and title events of an answer into the getAccount and getChat caches.",
     returns:
       'The API object: its reducer, middleware, endpoints and hooks such as useListChatsInfiniteQuery and useUpdateChatMutation.',
-    tests: [FRONTEND_CHATS_TEST, FRONTEND_CREDITS_TEST],
+    tests: [FRONTEND_CHATS_TEST, FRONTEND_CREDITS_TEST, FRONTEND_BILLING_TEST],
   },
   {
     symbol: 'frontend/src/store/api.ts#errorMessage',
@@ -2967,6 +3477,7 @@ export const notes: SymbolNote[] = [
       'getAccount loads GET /api/billing/account in the browser; a skeleton shows meanwhile.',
       "It shows the balance (with Indian digit grouping, and 'credit' for exactly 1) and a badge with the plan's name.",
       "Below LOW_BALANCE (10) the coin turns to the warning color and 'Running low' appears.",
+      "A 'Get more' link opens the billing page (/settings/billing).",
       'If billing cannot answer, the card renders nothing: the rest of the app works without it.',
     ],
     why: 'Every answer costs credits, so the balance stays in view, in the sidebar and in the small-screen panel.',
@@ -3006,6 +3517,115 @@ export const notes: SymbolNote[] = [
     why: 'The tests answer most calls with JSON, so this keeps them short.',
     returns: 'A Response.',
     tests: [FRONTEND_CHATS_TEST, FRONTEND_CREDITS_TEST],
+  },
+
+  {
+    symbol: 'frontend/src/components/billing/billing-view.tsx#BillingView',
+    status: 'verified',
+    summary: 'The billing page: the current plan and balance, the plans to buy, and past payments.',
+    how: [
+      'It loads the account, the plans and the payments with RTK Query. Unless the plans say testMode is false, a note says only test payments are taken (a Razorpay test card, or the UPI ID success@razorpay).',
+      "Buy creates an order (createOrder), opens Razorpay's checkout (openCheckout) and sends the result to verifyPayment. While one purchase runs, every Buy button is off.",
+      "A grant shows '<credits> credits added', a payment already added says so, and a closed window does nothing. Any failure shows 'The payment did not go through' with the message and, for a server error, its request ID.",
+      "The history lists each payment's date, plan, credits, amount in rupees and status (Paid or Not paid).",
+    ],
+    why: 'Everything about credits is on one page, and the browser never decides a price or whether a payment counts.',
+    returns: 'The page as JSX.',
+    tests: [FRONTEND_BILLING_TEST],
+  },
+  {
+    symbol: 'frontend/src/components/billing/usage-view.tsx#UsageView',
+    status: 'verified',
+    summary: 'The usage page: where the credits went in the last 30 days.',
+    how: [
+      "It reads the browser's time zone once, and loads the summary for 30 days in that zone and the latest answers.",
+      'Two tiles show the credits used and the number of answers. A chart shows the credits per day (DailyChart, after fillDays); a bar per agent shows its credits and answers; a table lists the latest answers with their agent, credits, tokens in and out, and time taken.',
+      'Agents are shown by name (Chat, Search, Code and so on). Skeletons show while loading, and a short line when there is nothing yet.',
+    ],
+    why: 'People can see what each kind of answer costs them. The numbers come from the ledger, so they always match the balance.',
+    returns: 'The page as JSX.',
+    tests: [FRONTEND_BILLING_TEST],
+  },
+  {
+    symbol: 'frontend/src/components/billing/daily-chart.tsx#DailyChart',
+    status: 'verified',
+    summary: 'Credits per day as columns, with a tooltip and a table for screen readers.',
+    how: [
+      'One column per day in the --chart-bar colour, at most 24px wide with a 2px gap and a rounded top, all from one baseline. A day with usage is at least 2% tall; a day without has no column.',
+      'The axis shows 0 and a rounded top (niceMax), and the first and last days are labelled under it.',
+      'Hovering a day dims the others and shows its date and credits in a tooltip that stays inside the chart (tooltipPosition).',
+      'The chart is an image with a label that gives the total; a visually hidden table lists every day and its credits.',
+    ],
+    why: 'One series needs no legend, because the heading names it. --chart-bar is the accent in light mode and a step darker than the accent in dark mode, so the columns stay in the same lightness range as other data colours. The hidden table gives screen readers the same numbers.',
+    returns: 'A figure as JSX.',
+    tests: [FRONTEND_BILLING_TEST],
+  },
+  {
+    symbol: 'frontend/src/components/billing/daily-chart.tsx#fillDays',
+    status: 'verified',
+    summary:
+      "Every day in the window, oldest first, with 0 for days without usage, ending on the viewer's today.",
+    how: [
+      "It works out today's date in the given time zone (the one billing grouped by), then lists that many days back from it.",
+    ],
+    why: "Billing lists only the days that had usage. Counting today in the viewer's zone, not in UTC, keeps the last column on their today.",
+    returns: 'A list of { date, credits }.',
+    tests: [FRONTEND_DAILY_CHART_TEST],
+  },
+  {
+    symbol: 'frontend/src/components/billing/daily-chart.tsx#niceMax',
+    status: 'verified',
+    summary:
+      'A clean top for the axis: 1, 2 or 5 times a power of ten, at or above the largest value.',
+    why: 'An axis that ends at 50 reads more easily than one that ends at 43.',
+    returns: 'The axis top; 1 when there is no usage.',
+    tests: [FRONTEND_DAILY_CHART_TEST],
+  },
+  {
+    symbol: 'frontend/src/components/billing/daily-chart.tsx#tooltipPosition',
+    status: 'verified',
+    summary: 'Where the tooltip sits: over its day, but kept inside the chart near either edge.',
+    how: [
+      'It is centred over the day, except in the first and last fifth of the chart, where it lines up with the day on the inside instead.',
+    ],
+    why: "The tooltip's text is never cut off at the chart's edges.",
+    returns: '{ left, transform } for the style.',
+    tests: [FRONTEND_DAILY_CHART_TEST],
+  },
+  {
+    symbol: 'frontend/src/lib/razorpay-checkout.ts#openCheckout',
+    status: 'verified',
+    summary: "Opens Razorpay's payment window and waits for the result.",
+    how: [
+      'loadCheckout adds checkout.js to the page the first time it is needed, once even if two calls race; a failed load can be tried again.',
+      "It opens the window with the key ID, the amount, the currency, the order ID, the name GilderAi, the plan as the description and the app's --accent colour.",
+      'It resolves with the payment ID and signature when the payment succeeds, or with null when the user closes the window.',
+    ],
+    why: "The payment script loads only for people who buy, and card and UPI details stay inside Razorpay's window. The result counts for nothing until billing checks its signature.",
+    returns: '{ paymentId, signature }, or null.',
+  },
+  {
+    symbol: 'frontend/src/lib/billing.ts#formatRupees',
+    status: 'verified',
+    summary: 'Shows paise as rupees: 19900 becomes ₹199.',
+    how: ['It divides by 100 and formats with Indian digit grouping and at most two decimals.'],
+    why: 'Billing works in whole paise; people read rupees.',
+    returns: "A string such as '₹199'.",
+    tests: [FRONTEND_BILLING_TEST],
+  },
+  {
+    symbol: 'frontend/src/app/(app)/settings/billing/page.tsx#BillingPage',
+    status: 'verified',
+    summary: 'The /settings/billing page, titled Billing.',
+    why: 'It renders BillingView inside the signed-in app shell. The login gate sends a visitor without a session cookie to /login first.',
+    returns: 'BillingView.',
+  },
+  {
+    symbol: 'frontend/src/app/(app)/settings/usage/page.tsx#UsagePage',
+    status: 'verified',
+    summary: 'The /settings/usage page, titled Usage.',
+    why: 'It renders UsageView inside the signed-in app shell. The login gate sends a visitor without a session cookie to /login first.',
+    returns: 'UsageView.',
   },
 
   // -------------------------------------------------------------------------------------------
@@ -3063,7 +3683,7 @@ export const notes: SymbolNote[] = [
       'The messages of one chat, and the answer being written: send, regenerate, edit and stop.',
     how: [
       "Sending shows the user's message and an empty answer at once, then fills the answer in from the events: the IDs from meta, the agent, sources, files and each token.",
-      'A usage event writes the new balance into the cached account, and a title event the new title into the cached chat; afterwards the chat list and the chat are refetched.',
+      'A usage event writes the new balance into the cached account, and a title event the new title into the cached chat; afterwards the chat list, the chat and the usage page data (the Usage tag) are refetched.',
       'An error event marks the answer failed with its message and reference, and shows a toast.',
       "A refusal before the stream puts the thread back as it was and shows a toast ('Out of credits' for a 402); the composer gets the text back.",
       'regenerate hides the latest answer and asks for a new one; edit replaces the latest user message and what follows. Only one answer runs at a time.',

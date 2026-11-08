@@ -630,7 +630,7 @@ export const decisionsPage: DocPage = {
             },
             {
               label: 'Trade-off',
-              text: 'Deleted chats stay in the database until that clean-up exists, and it is not built yet. Every new query must keep the `deletedAt: null` filter: findOwnedConversation has it for every route about one chat, and message search loads the chats again to drop deleted ones.',
+              text: "Deleted chats and their messages stay in the database until that clean-up exists, and it is not built yet; only the chat's files are removed today, by the agent's file clean-up. Every new query must keep the `deletedAt: null` filter: findOwnedConversation has it for every route about one chat, and message search loads the chats again to drop deleted ones.",
             },
           ],
         },
@@ -1403,6 +1403,347 @@ export const decisionsPage: DocPage = {
       refs: [
         { symbol: 'frontend/src/hooks/use-chat-thread.ts#useChatThread' },
         { flow: 'stop-turn' },
+      ],
+    },
+    {
+      id: 'server-pricing',
+      title: 'Orders are priced on the server',
+      status: 'verified',
+      blocks: [
+        {
+          kind: 'fields',
+          fields: [
+            {
+              label: 'Decision',
+              text: 'The browser only names a plan. Billing takes the price and the credits from the shared plan config, creates the Razorpay order for that amount and saves both on a payment record before the checkout opens. The order body is strict, so an extra amount field is refused.',
+            },
+            {
+              label: 'Why',
+              text: 'Anything the browser sends can be changed by the user. With the amount fixed on the server and on the order, a tampered request cannot buy credits for less.',
+            },
+            {
+              label: 'Trade-off',
+              text: 'Every purchase needs a round trip to billing and to Razorpay before the payment window opens.',
+            },
+          ],
+        },
+        {
+          kind: 'quote',
+          file: 'backend/services/billing/src/payment-routes.ts',
+          text: '// The price comes from the plan config; the browser only says which plan.',
+        },
+      ],
+      refs: [
+        { symbol: 'backend/services/billing/src/payment-routes.ts#paymentRouter' },
+        { symbol: 'backend/shared/src/constants.ts#PLANS' },
+        { flow: 'buy-credits' },
+      ],
+    },
+    {
+      id: 'one-grant',
+      title: "One idempotent grant for the browser's check and the webhook",
+      status: 'verified',
+      blocks: [
+        {
+          kind: 'fields',
+          fields: [
+            {
+              label: 'Decision',
+              text: "Both reports of a payment, the browser's signed checkout result and Razorpay's webhook, call the same grantPurchase. It flips the payment from created to paid in a transaction and adds the credits only if that flip happened; a unique index allows one purchase entry per payment.",
+            },
+            {
+              label: 'Why',
+              text: 'The browser can close before it reports, and Razorpay can deliver an event more than once. One grant that is safe to repeat covers both, in any order and even at the same moment (SEC-05).',
+            },
+            {
+              label: 'Trade-off',
+              text: "The credits arrive with whichever report is first, so a user whose browser closed waits for Razorpay's webhook.",
+            },
+          ],
+        },
+        {
+          kind: 'quote',
+          file: 'backend/services/billing/src/credits.ts',
+          text: "Grants a paid order's credits, once, whoever reports the payment first: the browser's verify",
+        },
+      ],
+      refs: [
+        { symbol: 'backend/services/billing/src/credits.ts#grantPurchase' },
+        { file: 'backend/services/billing/src/payments.test.ts' },
+        { flow: 'buy-credits' },
+        { flow: 'payment-webhook' },
+      ],
+    },
+    {
+      id: 'webhooks-in-gateway',
+      title: 'Webhooks go through the gateway, as marked routes',
+      status: 'verified',
+      blocks: [
+        {
+          kind: 'fields',
+          fields: [
+            {
+              label: 'Decision',
+              text: "Razorpay's webhook reaches billing through the same public path as everything else: the Next.js server, then a gateway route marked webhook. That mark skips the Origin check and passes the route's two signature headers on; billing checks the signature over the raw body, which the gateway forwards unchanged.",
+            },
+            {
+              label: 'Why',
+              text: 'Billing stays private behind the gateway, and the one exception is written on one route in the table, where it is easy to review. The signature takes the place of the Origin check, which a server-to-server call cannot pass.',
+            },
+            {
+              label: 'Trade-off',
+              text: "The Next.js server has to pass Razorpay's headers on for every request, though only the webhook route uses them.",
+            },
+          ],
+        },
+        {
+          kind: 'quote',
+          file: 'backend/gateway/src/guards.ts',
+          text: '// A webhook comes from another server, not a browser; its service checks its signature.',
+        },
+      ],
+      refs: [
+        { symbol: 'backend/gateway/src/route-table.ts#PublicRoute' },
+        { symbol: 'backend/gateway/src/guards.ts#originCheck' },
+        { symbol: 'backend/shared/src/service.ts#rawBodyOf' },
+        { flow: 'payment-webhook' },
+      ],
+    },
+    {
+      id: 'usage-time-zone',
+      title: "Usage days are counted in the viewer's time zone",
+      status: 'verified',
+      blocks: [
+        {
+          kind: 'fields',
+          fields: [
+            {
+              label: 'Decision',
+              text: "The usage page sends the browser's time zone, billing groups the usage entries by calendar day in that zone, and the page fills in the quiet days ending on the viewer's today. Billing accepts any zone the runtime knows, aliases included.",
+            },
+            {
+              label: 'Why',
+              text: "Grouped by UTC days, late-evening answers in India would land on the next day, and the last column would not be the viewer's today.",
+            },
+            {
+              label: 'Trade-off',
+              text: 'The same usage can show on different days for two people in different zones.',
+            },
+          ],
+        },
+        {
+          kind: 'quote',
+          file: 'frontend/src/components/billing/usage-view.tsx',
+          text: "// Days are counted on the viewer's own clock.",
+        },
+      ],
+      refs: [
+        { symbol: 'backend/services/billing/src/usage-routes.ts#usageRouter' },
+        { symbol: 'frontend/src/components/billing/daily-chart.tsx#fillDays' },
+        { flow: 'usage-summary' },
+      ],
+    },
+    {
+      id: 'chart-token',
+      title: 'A colour token of its own for charts',
+      status: 'verified',
+      blocks: [
+        {
+          kind: 'fields',
+          fields: [
+            {
+              label: 'Decision',
+              text: 'Chart columns and agent bars use --chart-bar: the accent in light mode, and a step darker than the accent in dark mode. Its values were checked for contrast in both themes. The chart has one series, so it has no legend, and a hidden table repeats its numbers.',
+            },
+            {
+              label: 'Why',
+              text: 'The dark-mode accent is tuned for buttons and links; as a large filled area it is too bright next to other data colours. A token of its own lets charts change without touching the accent.',
+            },
+            {
+              label: 'Trade-off',
+              text: 'One more token to keep in line with the accent when the palette changes.',
+            },
+          ],
+        },
+        {
+          kind: 'quote',
+          file: 'frontend/src/styles/tokens.css',
+          text: '/* Chart bars: the accent, a step darker in dark mode to stay in the data-colour lightness band. */',
+        },
+      ],
+      refs: [
+        { symbol: 'frontend/src/components/billing/daily-chart.tsx#DailyChart' },
+        { file: 'frontend/src/styles/tokens.css' },
+      ],
+    },
+    {
+      id: 'presigned-post',
+      title: 'Uploads go straight to S3 with a presigned POST',
+      status: 'verified',
+      blocks: [
+        {
+          kind: 'fields',
+          fields: [
+            {
+              label: 'Decision',
+              text: 'The agent signs a short-lived upload form for one key, fixing the Content-Type and a size range, and the client posts the file straight to S3. The bytes never pass through the Next.js server, the gateway or the agent.',
+            },
+            {
+              label: 'Why',
+              text: 'S3 itself refuses a file of the wrong size or type, which a presigned PUT link cannot do for a size range, and large files do not tie up the servers on the way.',
+            },
+            {
+              label: 'Trade-off',
+              text: "An upload takes two calls to the agent around the client's own post, and the agent must check afterwards what actually arrived. It has been tested only against an in-memory bucket: a live run needs a bucket the agent's key can use.",
+            },
+          ],
+        },
+        {
+          kind: 'quote',
+          file: 'backend/services/agent/src/files/file-store.ts',
+          text: "['content-length-range', 1, maxBytes],",
+        },
+      ],
+      refs: [
+        { symbol: 'backend/services/agent/src/files/file-store.ts#createS3FileStore' },
+        { symbol: 'backend/services/agent/src/files/file-routes.ts#fileRouter' },
+        { flow: 'upload-file' },
+      ],
+    },
+    {
+      id: 'content-sniffing',
+      title: 'Uploads are checked by their bytes, not their names',
+      status: 'verified',
+      blocks: [
+        {
+          kind: 'fields',
+          fields: [
+            {
+              label: 'Decision',
+              text: "When an upload completes, the agent reads what S3 holds: the stored type must be the announced one, the size within the type's limit, the first bytes the type's signature, and a PDF must open with at most 200 pages. A file that fails is deleted.",
+            },
+            {
+              label: 'Why',
+              text: "A browser's type is only a label, and a file name says nothing. Checking the bytes means a renamed file cannot pass as a PDF or an image (SEC-07).",
+            },
+            {
+              label: 'Trade-off',
+              text: 'Completing a PDF reads the whole file once to count its pages.',
+            },
+          ],
+        },
+        {
+          kind: 'quote',
+          file: 'backend/services/agent/src/files/file-checks.ts',
+          text: 'The type a browser claims is only a first filter: after the upload the',
+        },
+      ],
+      refs: [
+        { symbol: 'backend/services/agent/src/files/file-checks.ts#matchesSignature' },
+        { symbol: 'backend/services/agent/src/files/file-routes.ts#countPdfPages' },
+        { flow: 'upload-file' },
+      ],
+    },
+    {
+      id: 'id-only-keys',
+      title: 'Storage keys are built from IDs only',
+      status: 'verified',
+      blocks: [
+        {
+          kind: 'fields',
+          fields: [
+            {
+              label: 'Decision',
+              text: "A file's key is users/<user ID>/uploads/<file ID>, made by the server. The name the user gave is cleaned and kept only for display and downloads.",
+            },
+            {
+              label: 'Why',
+              text: "A name such as ../../other-user/file can never choose or change where a file is stored (SEC-07). Every file is reached through its ID and its owner's session.",
+            },
+            {
+              label: 'Trade-off',
+              text: 'The bucket cannot be browsed by file name; the database is the only map from names to files.',
+            },
+          ],
+        },
+        {
+          kind: 'quote',
+          file: 'backend/services/agent/src/files/file-checks.ts',
+          text: '/** The storage key: built from IDs only, so a file name can never choose or change it. */',
+        },
+      ],
+      refs: [
+        { symbol: 'backend/services/agent/src/files/file-checks.ts#storageKey' },
+        { symbol: 'backend/services/agent/src/files/file-checks.ts#displayName' },
+      ],
+    },
+    {
+      id: 'rag-over-rest',
+      title: 'Embeddings and vectors over REST, without SDKs',
+      status: 'verified',
+      blocks: [
+        {
+          kind: 'fields',
+          fields: [
+            {
+              label: 'Decision',
+              text: "The agent calls Gemini's embedding API and Qdrant's REST API with fetch, behind two small interfaces (Embedder and VectorStore) with in-memory stand-ins. Every search and delete carries an owner and document filter.",
+            },
+            {
+              label: 'Why',
+              text: 'The agent needs a handful of calls, which fetch handles in a few lines, as it already does for the AI providers. The stand-ins let indexing and clean-up run in tests and mock mode with no keys and no Qdrant. A live check with real Gemini embeddings and a local Qdrant ranked the right page first.',
+            },
+            {
+              label: 'Trade-off',
+              text: 'Changes in those APIs have to be followed by hand, without an SDK to update.',
+            },
+          ],
+        },
+        {
+          kind: 'quote',
+          file: 'backend/services/agent/src/rag/embeddings.ts',
+          text: "'https://generativelanguage.googleapis.com/v1beta/models/gemini-embedding-001:batchEmbedContents',",
+        },
+      ],
+      refs: [
+        { symbol: 'backend/services/agent/src/rag/embeddings.ts#createGeminiEmbedder' },
+        { symbol: 'backend/services/agent/src/rag/vector-store.ts#createQdrantStore' },
+        { flow: 'index-pdf' },
+        { component: 'qdrant' },
+      ],
+    },
+    {
+      id: 'cleanup-by-asking',
+      title: 'The agent asks chat which chats are gone',
+      status: 'verified',
+      blocks: [
+        {
+          kind: 'fields',
+          fields: [
+            {
+              label: 'Decision',
+              text: "Deleting a chat stays one update in chat. Every ten minutes the agent asks chat which of its files' chats are gone for each user, and removes their files, documents and indexed pieces.",
+            },
+            {
+              label: 'Why',
+              text: "Chat never has to know about files or call the agent, and nothing is missed if the agent was down when a chat was deleted. Chat counts someone else's chat as gone, so a file never outlives its owner's chat.",
+            },
+            {
+              label: 'Trade-off',
+              text: "A deleted chat's files stay for up to ten minutes.",
+            },
+          ],
+        },
+        {
+          kind: 'quote',
+          file: 'backend/services/agent/src/rag/cleanup.ts',
+          text: "Every few minutes the agent asks chat which of its files' chats are gone,",
+        },
+      ],
+      refs: [
+        { symbol: 'backend/services/agent/src/rag/cleanup.ts#cleanUpDeletedChats' },
+        { symbol: 'backend/services/chat/src/internal-routes.ts#internalRouter' },
+        { flow: 'chat-file-cleanup' },
       ],
     },
   ],

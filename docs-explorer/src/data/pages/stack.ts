@@ -13,7 +13,7 @@ export const stackPage: DocPage = {
       blocks: [
         {
           kind: 'text',
-          text: "A request goes from the browser to the Next.js server, then to the gateway, then to one service, which reads and writes its data stores. Today that path carries sign-in, logout, the profile, chats (the list and search, renaming, pinning and deleting, and each chat's history), answers streamed back from the agent, and the credits balance, end to end.",
+          text: "A request goes from the browser to the Next.js server, then to the gateway, then to one service, which reads and writes its data stores. Today that path carries sign-in, logout, the profile, chats (the list and search, renaming, pinning and deleting, and each chat's history), answers streamed back from the agent, the credits balance, buying credits, the usage page and file uploads, end to end.",
         },
         {
           kind: 'list',
@@ -22,8 +22,9 @@ export const stackPage: DocPage = {
             "Next.js server → gateway (port 8000): the Next.js server forwards every `/api/*` call to the gateway (`forwardToGateway`), so backend addresses and secrets never reach the browser. Server components also call the gateway directly with the browser's cookie (`gatewayGet`), for the signed-in user and for a chat page.",
             'Gateway → services: the gateway checks the rate limits, its route table, the Origin and the session, then calls the service with fetch and a short-lived signed token: auth (8001), chat (8002), the agent (8003) and billing (8004), for the routes in its table. An answer streams back through the gateway and the Next.js server as it is written.',
             'Service → service: auth calls billing for the sign-up grant, and the agent calls chat and billing during a turn, each with fetch and a token signed with its own key (`createInternalClient`).',
-            'Agent → outside services: the agent streams answers from Groq (and code from OpenRouter when its key is set) over their OpenAI-compatible APIs, and searches the web with Tavily, all with fetch and no SDK. By default (`LLM_MODE=mock`) a mock provider and canned search results answer instead, so nothing needs a key.',
-            'Services → data stores: auth, chat, agent and billing connect to MongoDB at startup, and the gateway, auth and agent open a Redis client. Auth keeps its users in MongoDB and its sessions in Redis; chat keeps conversations and messages, and billing accounts, credit holds and the ledger, in MongoDB; the agent keeps a record of every model attempt in MongoDB, and a short memory of each chat, request locks, per-agent limits and stop signals in Redis. Qdrant runs in Docker, but nothing connects to it yet. AWS S3 will hold files.',
+            "Agent → outside services: the agent streams answers from Groq (and code from OpenRouter when its key is set) over their OpenAI-compatible APIs, and searches the web with Tavily, all with fetch and no SDK. It embeds the pieces of uploaded PDFs with Gemini's embedding API, also with fetch. By default (`LLM_MODE=mock`) a mock provider, canned search results and a stand-in embedder answer instead, so nothing needs a key.",
+            "Services → data stores: auth, chat, agent and billing connect to MongoDB at startup, and the gateway, auth and agent open a Redis client. Auth keeps its users in MongoDB and its sessions in Redis; chat keeps conversations and messages, and billing accounts, credit holds and the ledger, in MongoDB; the agent keeps a record of every model attempt in MongoDB, and a short memory of each chat, request locks, per-agent limits and stop signals in Redis. Billing also keeps payments and webhook events, and the agent its files and indexed documents, in MongoDB. The agent stores PDF pieces in Qdrant (over its REST API) when QDRANT_URL is set, and files in AWS S3 when its four S3 settings are set; S3 has been tested only against an in-memory bucket, and a live run needs a bucket the agent's key can use.",
+            "Billing → Razorpay: billing creates each order over Razorpay's REST API with fetch, no SDK, and checks every payment's HMAC signature. The browser pays in Razorpay's checkout window, and Razorpay's webhook comes back through the Next.js server and the gateway to billing.",
             'Every backend app is built from the shared library, `@gilder/shared`, so they all start, log and fail in the same way.',
           ],
         },
@@ -43,6 +44,9 @@ export const stackPage: DocPage = {
         { component: 'tavily' },
         { component: 'qdrant' },
         { component: 's3' },
+        { component: 'razorpay' },
+        { flow: 'buy-credits' },
+        { flow: 'upload-file' },
       ],
     },
     {
@@ -118,6 +122,10 @@ export const stackPage: DocPage = {
           text: '`LLM_MODE=live` calls the real providers and needs `GROQ_API_KEY`; `mock`, the default, streams canned text word by word from a mock provider, so development, tests and CI need no keys.',
         },
         {
+          kind: 'text',
+          text: "PDF pieces are embedded apart from these routes, with Gemini's `gemini-embedding-001` over its own `batchEmbedContents` API (`createGeminiEmbedder`), in live mode with `GEMINI_API_KEY`. Mock mode uses a stand-in that hashes words into a vector (`mockEmbedder`). A live check with a local Qdrant ranked the right page first.",
+        },
+        {
           kind: 'quote',
           file: 'backend/services/agent/src/llm/providers.ts',
           text: "baseUrl: 'https://api.groq.com/openai/v1',",
@@ -134,7 +142,9 @@ export const stackPage: DocPage = {
             'backend/services/agent/src/llm/openai-compatible.ts#createOpenAiCompatibleProvider',
         },
         { symbol: 'backend/services/agent/src/llm/mock.ts#createMockProvider' },
+        { symbol: 'backend/services/agent/src/rag/embeddings.ts#createGeminiEmbedder' },
         { flow: 'run-turn' },
+        { flow: 'index-pdf' },
       ],
     },
     {
@@ -257,6 +267,11 @@ export const packageNotes: PackageNote[] = [
     why: 'Writes one log line for each finished request. It skips only health probes: a GET or HEAD on `/healthz` or `/readyz`.',
   },
   {
+    name: 'unpdf',
+    layer: 'backend',
+    why: 'Reads uploaded PDFs in the agent: their page count when an upload completes (`countPdfPages`), and their text page by page for indexing (`extractPages`).',
+  },
+  {
     name: 'pino-pretty',
     layer: 'backend',
     why: 'Turns log lines into colored, readable text when an app runs in development.',
@@ -266,12 +281,28 @@ export const packageNotes: PackageNote[] = [
   {
     name: 'mongoose',
     layer: 'data',
-    why: 'Connects the services to MongoDB (`connectMongo`) and checks the connection for `/readyz` (`pingMongo`). Auth defines its users model with it, chat its conversations and messages models, and billing its accounts, reservations and ledger, whose changes run in its transactions. The shared library re-exports it, so every app uses one copy and the connection `connectMongo` opens.',
+    why: 'Connects the services to MongoDB (`connectMongo`) and checks the connection for `/readyz` (`pingMongo`). Auth defines its users model with it, chat its conversations and messages models, billing its accounts, reservations, ledger, payments and webhook events, whose changes run in its transactions, and the agent its call records, files and documents. The shared library re-exports it, so every app uses one copy and the connection `connectMongo` opens.',
   },
   {
     name: 'ioredis',
     layer: 'data',
     why: "The Redis client. `createRedis` makes one for the gateway, auth and agent, and `pingRedis` checks it for `/readyz`. The shared sessions and rate limits use it too: auth creates and deletes sessions, and the gateway looks them up and counts requests. The agent keeps each chat's recent messages and a lock per message being answered in it. Their tests run against a real Redis.",
+  },
+
+  {
+    name: '@aws-sdk/client-s3',
+    layer: 'data',
+    why: "The AWS S3 client behind the agent's file store (`createS3FileStore`): it checks, reads, writes and deletes objects. Used only when the agent's four S3 settings are set; the tests use an in-memory bucket instead.",
+  },
+  {
+    name: '@aws-sdk/s3-presigned-post',
+    layer: 'data',
+    why: 'Signs the upload form (`uploadForm`): a presigned POST that fixes the key, the Content-Type and a size range, so S3 itself refuses anything else.',
+  },
+  {
+    name: '@aws-sdk/s3-request-presigner',
+    layer: 'data',
+    why: 'Signs the 5-minute download links (`downloadUrl`).',
   },
 
   // Quality
@@ -352,7 +383,7 @@ export const plannedTools: PlannedTool[] = [
   {
     name: 'Gemini',
     layer: 'ai',
-    why: "Google's models, for questions about images and PDF embeddings. Its client is built (used when GEMINI_API_KEY is set), but no running agent sends it anything yet.",
+    why: "Google's gemini-2.5-flash, for questions about images. Its chat client is built (used when GEMINI_API_KEY is set), but no running agent sends it anything yet. Gemini's embedding model already indexes PDFs.",
     plannedIn: 'PDF and image Q&A',
   },
   {
@@ -360,31 +391,6 @@ export const plannedTools: PlannedTool[] = [
     layer: 'ai',
     why: 'An image generation API for the image agent.',
     plannedIn: 'File generation',
-  },
-
-  // Data
-  {
-    name: 'Qdrant client',
-    package: '@qdrant/js-client-rest',
-    layer: 'data',
-    why: 'Stores and searches the vectors of uploaded PDFs in Qdrant, which already runs in Docker.',
-    plannedIn: 'PDF and image Q&A',
-  },
-  {
-    name: 'AWS S3 client',
-    package: '@aws-sdk/client-s3',
-    layer: 'data',
-    why: 'Stores uploaded and generated files in AWS S3, even in development.',
-    plannedIn: 'PDF and image Q&A',
-  },
-
-  // Payments
-  {
-    name: 'Razorpay',
-    package: 'razorpay',
-    layer: 'payments',
-    why: 'Sells credit plans, in test mode. Payment results come back by webhook.',
-    plannedIn: 'Payments and usage',
   },
 
   // Quality

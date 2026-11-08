@@ -87,7 +87,7 @@ function originForRead(): FlowStep {
     kind: 'middleware',
     status: 'verified',
     symbol: 'backend/gateway/src/guards.ts#originCheck',
-    highlight: 'if (SAFE_METHODS.has(req.method)) {',
+    highlight: 'if (SAFE_METHODS.has(req.method) || matched?.route.webhook) {',
     what: 'GET only reads, so originCheck lets it through without looking at the Origin header.',
     why: 'Only requests that change something need to prove they come from the app.',
   };

@@ -43,15 +43,15 @@ export const loggingPage: DocPage = {
           rows: [
             [
               'error',
-              "Requests that ended with a 5xx, 'request failed', 'redis error', 'shutdown failed', 'shutdown timed out', the agent's 'the answer failed', 'could not settle an unfinished answer' and 'redis stop-signal subscriber error', and billing's 'the stale reservation sweep failed; it runs again shortly'",
+              "Requests that ended with a 5xx, 'request failed', 'redis error', 'shutdown failed', 'shutdown timed out', the agent's 'the answer failed', 'could not settle an unfinished answer' and 'redis stop-signal subscriber error', billing's 'the stale reservation sweep failed; it runs again shortly', and the agent's 'file clean-up failed; it runs again shortly'",
             ],
             [
               'warn',
-              "Requests that ended with a 4xx, 'readiness check failed', and at auth's startup 'Google sign-in is not set up: the FIREBASE_* settings are empty' and 'dev sign-in is on: anyone who can reach auth can sign in with just an email', auth's 'sign-up credits could not be granted; the next sign-in asks again', and the agent's 'model failed before answering; trying the next one', 'routing failed; answering with chat', 'could not title the chat' and 'could not save an AI call record'",
+              "Requests that ended with a 4xx, 'readiness check failed', and at auth's startup 'Google sign-in is not set up: the FIREBASE_* settings are empty' and 'dev sign-in is on: anyone who can reach auth can sign in with just an email', auth's 'sign-up credits could not be granted; the next sign-in asks again', and the agent's 'model failed before answering; trying the next one', 'routing failed; answering with chat', 'could not title the chat', 'could not save an AI call record' and 'PDF indexing failed', at startup the agent's 'uploads are off: set AWS_REGION, S3_BUCKET, AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY' and billing's 'payments are off: set RAZORPAY_KEY_ID, RAZORPAY_KEY_SECRET and RAZORPAY_WEBHOOK_SECRET', and billing's 'webhook for an unknown order'",
             ],
             [
               'info',
-              "Other requests, 'listening', 'mongodb connected', 'shutting down', 'already shutting down', 'shut down cleanly', auth's 'signed in' (with the method and whether the user is new) and 'signed out', the agent's 'AI answers are live' or 'AI answers are mocked' and 'agents ready' (with the agents it runs) at startup, and billing's 'released stale credit reservations' (with the count)",
+              "Other requests, 'listening', 'mongodb connected', 'shutting down', 'already shutting down', 'shut down cleanly', auth's 'signed in' (with the method and whether the user is new) and 'signed out', the agent's 'AI answers are live' or 'AI answers are mocked' and 'agents ready' (with the agents it runs) at startup, the agent's 'PDF indexed' (with the number of pieces) and 'removed the files of deleted chats' (with the count), and billing's 'released stale credit reservations' (with the count) and 'payment webhook handled' (with the order and whether it granted)",
             ],
           ],
         },

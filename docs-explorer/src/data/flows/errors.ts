@@ -31,8 +31,8 @@ const errorHandling: Flow = {
       kind: 'middleware',
       status: 'verified',
       symbol: 'backend/shared/src/service.ts#createService',
-      highlight: 'app.use(express.json({ limit: bodyLimit }));',
-      what: 'express.json reads the body of every request sent as application/json, on any path, before routing. createService adds it only when parseJson is true, the default; the gateway turns it off and reads bodies as raw bytes (express.raw, up to 1 MB) only for a request it forwards. If the body is not valid JSON, is over the limit (64kb unless an app sets bodyLimit, and none does), or uses a charset or Content-Encoding the parser does not support, it calls next(err) with an error that has a `type` field. A body that fails to decompress, such as invalid gzip, gives an error without one, which becomes a 500. Express then skips the routes and the 404 handler and goes straight to the error handler. So broken JSON sent to a service on a path that does not exist gets a 400, not a 404 or 401.',
+      highlight: 'express.json({',
+      what: 'express.json reads the body of every request sent as application/json, on any path, before routing, and keeps the exact bytes too (rawBodyOf reads them, for a webhook signature). createService adds it only when parseJson is true, the default; the gateway turns it off and reads bodies as raw bytes (express.raw, up to 1 MB) only for a request it forwards. If the body is not valid JSON, is over the limit (64kb unless an app sets bodyLimit, as chat does with 2mb), or uses a charset or Content-Encoding the parser does not support, it calls next(err) with an error that has a `type` field. A body that fails to decompress, such as invalid gzip, gives an error without one, which becomes a 500. Express then skips the routes and the 404 handler and goes straight to the error handler. So broken JSON sent to a service on a path that does not exist gets a 400, not a 404 or 401.',
       why: 'Bad bodies are rejected before any route code sees them, and the size limit stops very large bodies.',
       next: [
         { to: 'routes', kind: 'next', label: 'the body is fine, or there is none' },
