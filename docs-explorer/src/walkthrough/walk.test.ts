@@ -60,8 +60,8 @@ function firstChoicePath(flow: Flow): string[] {
 const each = docs.flows.map((flow) => [flow.id, flow] as const);
 
 describe('walking the real flows', () => {
-  it('covers all seventeen flows', () => {
-    expect(docs.flows).toHaveLength(17);
+  it('covers all twenty-three flows', () => {
+    expect(docs.flows).toHaveLength(23);
   });
 
   it.each(each)('%s: taking the first option ends after a finite number of moves', (_id, f) => {

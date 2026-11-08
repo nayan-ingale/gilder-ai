@@ -1,34 +1,103 @@
-import type { Flow, SymbolRef } from '../schema.ts';
+import type { Flow, FlowEdge, FlowStep, SymbolRef } from '../schema.ts';
 
 /**
- * One answer in the agent service, followed from the request through the checks, the credit
- * hold, the streamed answer and the settled credits, with the agent's calls to chat and billing.
+ * Answers, end to end: a new message from the composer to the streamed answer and the settled
+ * credits, and the actions on an answer (stop, regenerate, edit). Send, regenerate and edit share
+ * the agent's runTurn core; the steps they share are built once below.
  */
 
 const TURNS: SymbolRef = 'backend/services/agent/src/turns.ts#turnRouter';
+const RUN: SymbolRef = 'backend/services/agent/src/turns.ts#runTurn';
 const STREAM: SymbolRef = 'backend/services/agent/src/turns.ts#streamAnswer';
 const SETTLE: SymbolRef = 'backend/services/agent/src/turns.ts#settleUnfinished';
+const STOPS: SymbolRef = 'backend/services/agent/src/stops.ts#createStopSignals';
+const THREAD: SymbolRef = 'frontend/src/hooks/use-chat-thread.ts#useChatThread';
+const STREAM_TURN: SymbolRef = 'frontend/src/lib/turns.ts#streamTurn';
+const GATEWAY_APP: SymbolRef = 'backend/gateway/src/app.ts#createApp';
+
+const APPS = ['frontend', 'gateway', 'agent', 'chat', 'billing'];
+
+// ---------------------------------------------------------------------------------------------
+// Shared steps
+
+function gateway(route: string, target: string): FlowStep {
+  return {
+    id: 'gateway',
+    title: 'Next.js server and gateway: forward to the agent',
+    kind: 'middleware',
+    status: 'verified',
+    symbol: GATEWAY_APP,
+    highlight: 'const matched = matchRoute(req.method, req.path);',
+    what: `The app's /api route forwards the request to the gateway (forwardToGateway), which counts it for the per-IP limit, finds ${route} in its table (service agent, target ${target}, session required), checks the Origin, looks the session up, counts it for the per-user limit and requires a session. proxyToService signs a token for the agent that names the user and pipes the answer back as it arrives; the Next.js server streams it on to the browser.`,
+    why: 'The browser never talks to the agent directly, and the gateway proves who is asking.',
+  };
+}
+
+function refused(): FlowStep {
+  return {
+    id: 'refused',
+    title: 'In the browser: put the thread back and say why',
+    kind: 'error',
+    status: 'verified',
+    symbol: THREAD,
+    highlight: 'setMessages(before);',
+    what: "A refusal before the stream comes back as problem+json, and streamTurn throws it as an ApiError with its code, message and request ID. Nothing was saved or charged, so useChatThread puts the messages back as they were, the composer gets the text back, and a toast says why ('Out of credits' for a 402).",
+    why: 'The thread never shows a message the server did not take.',
+    next: [],
+  };
+}
+
+function toRefused(what: string): FlowEdge {
+  return { to: 'refused', kind: 'error', label: what };
+}
+
+// ---------------------------------------------------------------------------------------------
+// A new message
 
 const runTurn: Flow = {
   id: 'run-turn',
   title: 'POST /chats/:chatId/turns',
   category: 'api',
   route: { method: 'POST', path: '/chats/:chatId/turns' },
-  apps: ['agent', 'chat', 'billing'],
+  apps: APPS,
   summary:
-    "One answer. The agent checks the body, that the chat is the user's (through chat), that the same message is not already being answered, and that the user has any credits at all, before any AI call (SEC-03). It loads the chat's memory, picks the agent, and holds the answer's credits in billing with one conditional update. It saves the user's message and an empty answer in chat, then streams the answer as server-sent events. A finished answer is saved and charged; a failure is released and reported in the stream; a client that goes away after text started is charged for what it got, and before that is released. The gateway does not forward this route yet; turns.test.ts runs it with the real chat and billing apps and a scripted mock model.",
+    "One answer. The composer sends the message, the thread shows it at once with an empty answer, and streamTurn posts it to /api/chats/<id>/messages, which the gateway forwards to the agent's POST /chats/:chatId/turns. The agent checks the body, that the chat is the user's, that the same message is not already being answered and that the user has any credits at all, before any AI call (SEC-03). It loads the memory, picks the agent, applies that agent's per-minute limit, and holds the credits in billing with one conditional update. It saves the user's message and an empty answer in chat, then streams the answer as server-sent events while the browser fills it in. A finished answer is saved and charged; a failure is released and reported in the stream; a stop after text started is charged for what was sent. turns.test.ts runs it with the real chat and billing apps and a scripted mock model, and chat-thread.test.tsx follows the browser's side.",
   status: 'verified',
   steps: [
     {
-      id: 'caller',
-      title: 'A request for an answer',
+      id: 'composer',
+      title: 'The user sends a message',
       kind: 'trigger',
       status: 'verified',
-      what: "POST /chats/<chat ID>/turns reaches the agent (port 8003) with a JSON body { content, clientMessageId, agent? } and an internal token for the user, signed with the gateway's key. The gateway's route table has no agent route yet and no page sends a message, so today the callers are turns.test.ts, which signs its tokens like the gateway, and developers by hand.",
-      why: "Each message the user sends becomes one turn: their message and the agent's answer.",
-      input:
-        'POST /chats/<chat ID>/turns, x-internal-token, { "content": "...", "clientMessageId": "...", "agent": "search" }',
+      symbol: 'frontend/src/components/chat/composer.tsx#Composer',
+      highlight: 'const accepted = await onSend(content, agent);',
+      what: 'Enter (or the Send button) submits the composer. An empty message, one over 20,000 characters, or a user out of credits cannot send. The box is cleared at once and gets the text back if the message is refused. The agent menu (Auto, Chat, Search, Code) sets an optional agent.',
+      why: 'Each message the user sends becomes one turn: their message and the answer.',
+      input: 'The text, and the agent picked in the menu, if any.',
     },
+    {
+      id: 'thread-send',
+      title: 'The thread shows it at once',
+      kind: 'function',
+      status: 'verified',
+      symbol: THREAD,
+      highlight: "{ key: answerKey, role: 'assistant', content: '', status: 'streaming' },",
+      what: "useChatThread's send gives the message a fresh client ID (newClientMessageId), adds it to the thread with an empty answer marked 'streaming', and starts the request. Only one answer can run at a time.",
+      why: 'The user sees their message straight away, and the client ID makes a retried request recognisable.',
+    },
+    {
+      id: 'stream-turn',
+      title: 'Post the message and read the stream',
+      kind: 'external',
+      status: 'verified',
+      symbol: STREAM_TURN,
+      highlight: "headers: { 'content-type': 'application/json', accept: 'text/event-stream' },",
+      what: 'streamTurn posts { content, clientMessageId, agent? } to /api/chats/<chat ID>/messages with an abort signal, then reads the body with readServerEvents and yields each named event as it arrives.',
+      why: 'One request both sends the message and carries the answer back.',
+      input:
+        'POST /api/chats/<chat ID>/messages, { "content": "...", "clientMessageId": "...", "agent": "search" }',
+    },
+    gateway('POST /api/chats/:id/messages', '/chats/<id>/turns'),
     {
       id: 'agent-token',
       title: 'Agent: check the internal token',
@@ -36,7 +105,7 @@ const runTurn: Flow = {
       status: 'verified',
       symbol: 'backend/shared/src/internalToken.ts#requireInternalToken',
       highlight: 'res.locals.userId = claims.userId;',
-      what: "The agent trusts only the gateway's key. A valid token sets res.locals.caller and res.locals.userId; a missing or bad one is a 401 (the test 'refuses a direct call without the gateway token').",
+      what: "The agent trusts only the gateway's key. A valid token sets res.locals.caller and res.locals.userId; a missing or bad one is a 401.",
       why: 'Only a request that came through the gateway may spend credits.',
     },
     {
@@ -46,24 +115,9 @@ const runTurn: Flow = {
       status: 'verified',
       symbol: TURNS,
       highlight: 'validate({ params: turnParams, body: turnBody }),',
-      what: 'requireUser needs a user in the token. validate checks the chat ID (1 to 64 characters) and the body: content is trimmed and 1 to 20,000 characters, clientMessageId 8 to 64 letters, digits, - or _, and agent, when given, one of the agents. The body is strict.',
-      why: 'The client ID makes a retried send recognisable, so it must be safe to use in a key.',
-      next: [
-        { to: 'shortcut', kind: 'next' },
-        { to: 'bad-input', kind: 'error', label: 'a bad ID, content or field' },
-      ],
-    },
-    {
-      id: 'bad-input',
-      title: 'Bad body: 400',
-      kind: 'error',
-      status: 'verified',
-      symbol: 'backend/shared/src/validate.ts#validate',
-      highlight:
-        "next(new AppError('validation_failed', 'Some fields are invalid', { fieldErrors: errors }));",
-      what: 'The agent answers 400 problem+json with a field error per problem. Nothing else has happened.',
-      why: 'The turn can trust its input.',
-      next: [],
+      what: 'requireUser needs a user in the token. validate checks the chat ID and the body: content is trimmed and 1 to 20,000 characters, clientMessageId 8 to 64 letters, digits, - or _, and agent, when given, one of the agents. The body is strict.',
+      why: 'The client ID goes into keys, so it must be safe to use there.',
+      next: [{ to: 'shortcut', kind: 'next' }, toRefused('a bad ID, content or field')],
     },
     {
       id: 'shortcut',
@@ -71,23 +125,8 @@ const runTurn: Flow = {
       kind: 'function',
       status: 'verified',
       symbol: 'backend/services/agent/src/routing.ts#parseShortcut',
-      what: 'parseShortcut takes /search, /code, /pdf, /slides or /image off the start of the message and notes the agent it names. The agent answers the text without it; the saved message keeps what the user wrote.',
+      what: "parseShortcut takes /search, /code, /pdf, /slides or /image off the start of the message and notes the agent it names. The agent answers the text without it; the saved message keeps what the user wrote. requireText refuses a shortcut with nothing after it: 400 'Write a message after the shortcut'.",
       why: 'Typing a shortcut is a quick way to choose the agent.',
-      next: [
-        { to: 'own-chat', kind: 'next' },
-        { to: 'empty-message', kind: 'error', label: 'a shortcut with nothing after it' },
-      ],
-    },
-    {
-      id: 'empty-message',
-      title: 'Only a shortcut: 400',
-      kind: 'error',
-      status: 'verified',
-      symbol: TURNS,
-      highlight: "throw new AppError('bad_request', 'Write a message after the shortcut');",
-      what: "The agent answers 400 bad_request 'Write a message after the shortcut'.",
-      why: 'There is nothing to answer.',
-      next: [],
     },
     {
       id: 'own-chat',
@@ -96,78 +135,32 @@ const runTurn: Flow = {
       status: 'verified',
       symbol: TURNS,
       highlight: 'const chat = await deps.chat.getChat(userId, chatId);',
-      what: "chatService.getChat calls chat's GET /internal/chats/:id with a token signed with the agent's own key for this user. Chat accepts only the agent there, and finds the chat only if it is this user's and not deleted.",
-      why: "The first check, so someone else's chat costs nothing: no lock, no AI call, no charge.",
-      next: [
-        { to: 'lock', kind: 'next' },
-        {
-          to: 'not-yours',
-          kind: 'error',
-          label: "someone else's chat, a deleted one or a wrong ID",
-        },
-      ],
-    },
-    {
-      id: 'not-yours',
-      title: "Not the user's chat: 404",
-      kind: 'error',
-      status: 'verified',
-      symbol: 'backend/shared/src/internalClient.ts#createInternalClient',
-      highlight: 'if (response.status < 500 && isErrorCode(problem.code)) {',
-      what: "Chat answers 404 'No such chat'. The internal client throws it again as the same AppError, so the agent answers 404 problem+json too. The test checks that no AI call and no charge happen.",
-      why: "The same 404 as everywhere else for a chat that isn't yours.",
-      next: [],
+      what: "chatService.getChat calls chat's GET /internal/chats/:id with the agent's own key for this user. Someone else's chat, a deleted one or a wrong ID is chat's 404 'No such chat', which the internal client throws again unchanged.",
+      why: "Someone else's chat costs nothing: no lock, no AI call, no charge.",
+      next: [{ to: 'lock', kind: 'next' }, toRefused("404: not the user's chat")],
     },
     {
       id: 'lock',
-      title: 'Lock this message',
+      title: 'runTurn: lock this request',
       kind: 'datastore',
       status: 'verified',
-      symbol: TURNS,
+      symbol: RUN,
       highlight: "if (!(await deps.redis.set(lockKey, '1', 'EX', LOCK_SECONDS, 'NX'))) {",
-      what: 'A Redis SET with NX writes turn-lock:<chat ID>:<client message ID> for 15 minutes, only if it is not there yet. Every exit from here on removes it again.',
-      why: 'A double click or a retried request cannot start a second answer to the same message.',
+      what: "Send, regenerate and edit all continue in runTurn, set up by a TurnPlan. First a Redis SET with NX writes turn-lock:<chat ID>:<client message ID> for 15 minutes, only if it is not there; a second copy of the same request gets 409 'This message is already being answered'. Every exit from here on removes the lock.",
+      why: 'A double click or a retried request cannot start a second answer.',
       sideEffects: ['Writes a lock key in Redis, with a 15-minute expiry.'],
-      next: [
-        { to: 'balance', kind: 'next' },
-        { to: 'locked', kind: 'error', label: 'the same message is being answered' },
-      ],
-    },
-    {
-      id: 'locked',
-      title: 'Already being answered: 409',
-      kind: 'error',
-      status: 'verified',
-      symbol: TURNS,
-      highlight: "throw new AppError('conflict', 'This message is already being answered');",
-      what: "The agent answers 409 conflict 'This message is already being answered'.",
-      why: 'One answer per message.',
-      next: [],
+      next: [{ to: 'balance', kind: 'next' }, toRefused('409: already being answered')],
     },
     {
       id: 'balance',
       title: 'Any credits at all?',
       kind: 'external',
       status: 'verified',
-      symbol: TURNS,
+      symbol: RUN,
       highlight: 'if ((await deps.billing.balance(userId)) < CREDIT_COSTS.chat) {',
-      what: "billingService.balance reads billing's GET /account for the user, with the agent's key. A balance below the price of a chat answer (1 credit) stops the turn here.",
-      why: 'A user with no credits must cost nothing: not even the router call, which is free to the user but not to the server (SEC-03).',
-      next: [
-        { to: 'memory', kind: 'next' },
-        { to: 'no-credits', kind: 'error', label: 'less than 1 credit' },
-      ],
-    },
-    {
-      id: 'no-credits',
-      title: 'Out of credits: 402',
-      kind: 'error',
-      status: 'verified',
-      symbol: TURNS,
-      highlight: "throw new AppError('insufficient_credits', 'You are out of credits');",
-      what: "The agent answers 402 insufficient_credits 'You are out of credits' and removes the lock. The test checks that no AI call of any kind was made.",
-      why: 'The refusal comes before any work.',
-      next: [],
+      what: "billingService.balance reads billing's GET /account. Below the price of a chat answer (1 credit), the turn stops with 402 'You are out of credits'.",
+      why: 'A user with no credits must not make the server call any model, not even the router (SEC-03).',
+      next: [{ to: 'memory', kind: 'next' }, toRefused('402: no credits')],
     },
     {
       id: 'memory',
@@ -176,9 +169,8 @@ const runTurn: Flow = {
       status: 'verified',
       symbol: 'backend/services/agent/src/memory.ts#createMemory',
       highlight: 'const cached = await redis.lrange(memoryKey(chatId), 0, -1);',
-      what: 'The memory reads the Redis list mem:<chat ID>. When it is empty, it asks chat for the latest finished messages (GET /internal/chats/:id/recent-messages), keeps the last 20 and caches them for an hour. What the model will see is trimmed to about 24,000 characters, newest first.',
-      why: 'The model needs the conversation so far, and most turns can skip the call to chat.',
-      sideEffects: ['May write mem:<chat ID> in Redis, with a one-hour expiry.'],
+      what: 'For a new message the plan loads the memory: the Redis list mem:<chat ID>, or, when it is empty, the latest finished messages from chat, cached for an hour. What the model sees is trimmed to about 24,000 characters. It is read before the new message is saved, so the question is not in it twice.',
+      why: 'The model needs the conversation so far, and most turns skip the call to chat.',
     },
     {
       id: 'route',
@@ -187,18 +179,45 @@ const runTurn: Flow = {
       status: 'verified',
       symbol: 'backend/services/agent/src/routing.ts#routeMessage',
       highlight: 'const { value } = await completeJson(',
-      what: 'An agent chip or shortcut wins. Otherwise the router model is asked for { agent, confidence } as JSON, with one repair if the reply does not fit. Low confidence, a bad reply or a failed call means chat, and so does an agent this server does not run: today only chat runs, so every turn is answered by chat.',
+      what: 'An agent chip or shortcut wins. Otherwise the router model is asked for { agent, confidence } as JSON. Low confidence, a bad reply or a failed call means chat, and so does an agent this server does not run: chat and code always run, search only with a Tavily key or in mock mode.',
       why: 'A routing problem never costs the user more: chat is the cheapest agent.',
+    },
+    {
+      id: 'agent-limit',
+      title: "Apply the agent's per-minute limit",
+      kind: 'datastore',
+      status: 'verified',
+      symbol: RUN,
+      highlight: 'const limit = await hitRateLimit(',
+      what: "hitRateLimit counts the request under rl:agent-<agent>:<user ID> with that agent's limit from AGENT_RATE_LIMITS: 20 a minute for chat, 5 for every other agent.",
+      why: 'The costly agents are held tighter than chat, and the limit comes before anything is charged.',
+      sideEffects: ['Increments rl:agent-<agent>:<user ID> in Redis, with a 60-second expiry.'],
+      next: [
+        { to: 'reserve', kind: 'next' },
+        { to: 'too-many', kind: 'error', label: "over this agent's limit" },
+      ],
+    },
+    {
+      id: 'too-many',
+      title: 'Too many: 429',
+      kind: 'error',
+      status: 'verified',
+      symbol: RUN,
+      highlight: "res.setHeader('Retry-After', String(limit.retryAfterSeconds));",
+      what: "The agent sets Retry-After and answers 429 'Too many <agent> requests. Try again in <n>s.' Nothing is held; the test checks the balance is untouched.",
+      why: 'The refusal costs the user nothing.',
+      next: [toRefused('back to the browser')],
     },
     {
       id: 'reserve',
       title: "Hold the answer's credits",
       kind: 'external',
       status: 'verified',
-      symbol: TURNS,
-      highlight: 'const { reservation } = await deps.billing.reserve(',
-      what: "billingService.reserve posts to billing's /internal/credits/reserve, which only the agent may call, with the agent's name and the idempotency key turn:<chat ID>:<client message ID>. A retry is safe: the same key returns the same hold.",
-      why: 'The credits leave the balance before the AI runs, so a user can never start answers they cannot pay for.',
+      symbol: RUN,
+      highlight:
+        'const { reservation } = await deps.billing.reserve(userId, route.agent, plan.reserveKey);',
+      what: "billingService.reserve posts to billing's /internal/credits/reserve with the agent and the plan's key, turn:<chat ID>:<client message ID> for a new message. A retry is safe: the same key returns the same hold.",
+      why: 'The credits leave the balance before the AI runs.',
     },
     {
       id: 'hold',
@@ -207,25 +226,14 @@ const runTurn: Flow = {
       status: 'verified',
       symbol: 'backend/services/billing/src/credits.ts#reserveCredits',
       highlight: '{ _id: userId, balance: { $gte: amount } },',
-      what: 'The amount comes from CREDIT_COSTS for the agent (1 for chat). In one transaction, one findOneAndUpdate takes it off the account only where the balance is at least the amount, and a held reservation is created. A key seen before returns its existing hold.',
-      why: 'The check and the decrease are one update, so parallel answers can never overdraw (SEC-08: 50 reservations at once against 100 credits give exactly 10 holds).',
+      what: 'The amount comes from CREDIT_COSTS for the agent (chat 1, search 5, code 10). In one transaction, one findOneAndUpdate takes it off the account only where the balance is at least the amount, and a held reservation is created.',
+      why: 'Parallel answers can never overdraw (SEC-08).',
       sideEffects: ['Lowers the balance and creates a hold, in MongoDB.'],
       next: [
         { to: 'save', kind: 'next' },
-        { to: 'answered', kind: 'branch', label: 'this send was already answered' },
         { to: 'too-few', kind: 'error', label: "the balance is below this agent's price" },
+        { to: 'answered', kind: 'branch', label: 'this request was already answered' },
       ],
-    },
-    {
-      id: 'answered',
-      title: 'Already answered: 409',
-      kind: 'error',
-      status: 'verified',
-      symbol: TURNS,
-      highlight: "throw new AppError('conflict', 'This message was already answered');",
-      what: "The key's hold is no longer held: the message was answered (or released) before. The agent answers 409 'This message was already answered'; the test resends a finished message and gets this.",
-      why: 'A resent message is never charged or answered twice.',
-      next: [],
     },
     {
       id: 'too-few',
@@ -234,37 +242,33 @@ const runTurn: Flow = {
       status: 'verified',
       symbol: 'backend/services/billing/src/credits.ts#reserveCredits',
       highlight:
-        "throw new AppError('insufficient_credits', `This answer needs ${amount} credits`);",
-      what: "No account matched, so billing answers 402 'This answer needs <n> credits' and nothing is held. The internal client keeps the 402, and the agent answers it as problem+json.",
-      why: 'A user with a little credit left can still be refused an expensive agent.',
-      next: [],
+        "`This answer needs ${amount} ${amount === 1 ? 'credit' : 'credits'}; you have ${current?.balance ?? 0}`,",
+      what: "Billing answers 402 with a message such as 'This answer needs 10 credits; you have 4', and nothing is held. The internal client keeps the 402.",
+      why: 'The user learns what the answer costs and what they have.',
+      next: [toRefused('back to the browser')],
+    },
+    {
+      id: 'answered',
+      title: 'Already answered: 409',
+      kind: 'error',
+      status: 'verified',
+      symbol: RUN,
+      highlight: "throw new AppError('conflict', 'This message was already answered');",
+      what: "The key's hold is no longer held, so the request was answered before. The agent answers 409 'This message was already answered'.",
+      why: 'A resent request is never answered or charged twice.',
+      next: [toRefused('back to the browser')],
     },
     {
       id: 'save',
       title: "Save the user's message and an empty answer",
       kind: 'external',
       status: 'verified',
-      symbol: TURNS,
-      highlight: 'const { message: userMessage } = await deps.chat.saveMessage(userId, {',
-      what: "chatService.saveMessage posts to chat's /internal/messages twice: the user's message as written, with its clientMessageId (chat saves it once), and an empty answer from the routed agent with status 'streaming'.",
-      why: 'Both messages exist before any text is streamed, so a crash mid-answer still leaves a visible, honest history.',
-      sideEffects: ['Creates two messages in chat, and moves the chat to the top of the list.'],
-      next: [
-        { to: 'stream-open', kind: 'next' },
-        { to: 'save-failed', kind: 'error', label: 'chat refused or did not answer' },
-      ],
-    },
-    {
-      id: 'save-failed',
-      title: 'Saving failed: release, then the error',
-      kind: 'error',
-      status: 'verified',
-      symbol: TURNS,
-      highlight: 'await deps.billing.release(userId, reservation.id).catch(() => undefined);',
-      what: 'The hold is released (a failure to release is ignored; the sweeper catches it later) and the error is answered as problem+json.',
-      why: 'No answer, no charge.',
-      sideEffects: ['Releases the hold in billing.'],
-      next: [],
+      symbol: RUN,
+      highlight: 'const { message: answer } = await deps.chat.saveMessage(userId, {',
+      what: "chatService.saveMessage posts to chat's /internal/messages: the user's message as written, with its client ID, then an empty answer from the routed agent with status 'streaming'. If saving fails, the hold is released and the error is answered.",
+      why: 'Both messages exist before any text is streamed, so a crash mid-answer still leaves an honest history.',
+      sideEffects: ['Creates two messages in chat.'],
+      next: [{ to: 'stream-open', kind: 'next' }, toRefused('chat refused or is down')],
     },
     {
       id: 'stream-open',
@@ -273,18 +277,19 @@ const runTurn: Flow = {
       status: 'verified',
       symbol: STREAM,
       highlight: 'const stream = openEventStream(res, deps.heartbeatMs);',
-      what: "The reply becomes server-sent events: 200 text/event-stream with a ': ping' every 15 seconds. A meta event names the turn and the two message IDs, and an agent event the agent and why it was chosen. If the chat is still 'New chat', a title is written at the same time. If the client goes away before the end (a closed tab), the answer is aborted like a stop.",
+      what: "The reply becomes server-sent events, with a ': ping' every 15 seconds. The answer is registered for stops (turn:<answer ID> in Redis, with its owner), and aborted too if the client goes away. A meta event gives the turn and message IDs, and an agent event the agent and why. A chat still called 'New chat' is titled at the same time.",
       why: 'From here on errors are events in the stream, and the credits are settled whatever happens.',
+      sideEffects: ['Writes turn:<answer ID> in Redis, with a 15-minute expiry.'],
       output: 'event: meta, then event: agent',
     },
     {
       id: 'agent-run',
-      title: 'The chat agent builds the prompt',
+      title: 'The agent builds its prompt',
       kind: 'function',
       status: 'verified',
       symbol: 'backend/services/agent/src/agents/chat.ts#chatAgent',
       highlight: "purpose: 'chat',",
-      what: "chatAgent sends the fixed system prompt, the memory and the new message to the model layer for the 'chat' purpose, with the turn's abort signal.",
+      what: "The chat agent sends its fixed system prompt, the memory and the message for the 'chat' purpose, tagged with the agent and answer ID for telemetry. The search and code agents add their own work around the model call (see their flows).",
       why: 'Nothing a user writes can change the system prompt.',
     },
     {
@@ -295,8 +300,9 @@ const runTurn: Flow = {
       symbol: 'backend/services/agent/src/llm/llm.ts#createLlm',
       highlight:
         '!started && !call.signal?.aborted && error instanceof LlmError && error.retryable;',
-      what: "In mock mode the mock provider answers. In live mode the chat models are Groq's openai/gpt-oss-120b, then openai/gpt-oss-20b. If the first fails before its first token with a retryable error (a rate limit, a server error, a timeout), the next one is tried; after text has started, or after a stop, an error goes up instead.",
+      what: 'In mock mode the mock provider answers. In live mode chat runs on Groq (openai/gpt-oss-120b, then openai/gpt-oss-20b); a model that fails before its first token with a retryable error hands over to the next. Every attempt is reported to telemetry (onCall) and saved in the llmCalls collection.',
       why: 'Switching models mid-answer would mix two answers.',
+      sideEffects: ['Saves one llmCalls record per attempt, without waiting for it.'],
     },
     {
       id: 'provider',
@@ -305,15 +311,15 @@ const runTurn: Flow = {
       status: 'verified',
       symbol: 'backend/services/agent/src/llm/openai-compatible.ts#createOpenAiCompatibleProvider',
       highlight: 'response = await fetch(`${baseUrl}/chat/completions`, {',
-      what: "The OpenAI-compatible client posts to the provider's /chat/completions with stream: true and reads the server-sent events back. It gives up if the answer has not started within 20 seconds or goes silent for 30.",
-      why: 'One small client serves Groq, OpenRouter and Gemini, and a stuck provider cannot hold the answer forever.',
+      what: "The OpenAI-compatible client posts to the provider's /chat/completions with stream: true and reads the events back. It gives up if the answer has not started within 20 seconds or goes silent for 30.",
+      why: 'A stuck provider cannot hold the answer forever.',
       sideEffects: ["Calls the AI provider's API (in live mode)."],
       next: [
         { to: 'tokens', kind: 'next' },
         {
           to: 'settle',
           kind: 'error',
-          label: 'every model failed before its first token, or the client went away',
+          label: 'every model failed before its first token, or a stop',
         },
       ],
     },
@@ -324,16 +330,12 @@ const runTurn: Flow = {
       status: 'verified',
       symbol: STREAM,
       highlight: "stream.send('token', { text: event.text });",
-      what: 'Each piece of answer text is added to the answer and sent as a token event. The model in use and the token usage are kept for the charge.',
+      what: 'Each piece of text is added to the answer and sent as a token event; sources and files, when an agent has them, go out as sources and artifact events. In the browser, useChatThread appends each token to the answer, which renders as Markdown as it grows, and the thread keeps the bottom in view unless the user scrolled up.',
       why: 'The user reads the answer as it is written.',
       output: 'event: token, data: { "text": "..." }',
       next: [
         { to: 'complete', kind: 'next', label: 'the answer ended' },
-        {
-          to: 'settle',
-          kind: 'error',
-          label: 'the provider failed mid-answer, or the client went away',
-        },
+        { to: 'settle', kind: 'error', label: 'the provider failed mid-answer, or a stop' },
       ],
     },
     {
@@ -343,8 +345,8 @@ const runTurn: Flow = {
       status: 'verified',
       symbol: STREAM,
       highlight: "status: 'complete',",
-      what: "chatService.updateMessage fills in the answer's text with status 'complete', through chat's PATCH /internal/messages/:id.",
-      why: 'The history holds the whole answer before the user is charged for it.',
+      what: "chatService.updateMessage fills the answer in with status 'complete', with its sources and files when it has them.",
+      why: 'The history holds the whole answer before the user is charged.',
       sideEffects: ['Updates the answer in chat.'],
     },
     {
@@ -354,8 +356,8 @@ const runTurn: Flow = {
       status: 'verified',
       symbol: 'backend/services/billing/src/credits.ts#commitCredits',
       highlight: "{ _id: reservationId, userId, status: 'held' },",
-      what: 'The agent posts to /internal/credits/commit with the model, the tokens, the latency, the chat and the message. In one transaction billing marks the hold committed, only while it is held, and appends a usage ledger entry of minus the amount with that metadata.',
-      why: 'The charge becomes final, with a record of what the answer used. Committing twice changes nothing.',
+      what: 'The agent commits the hold with the model, the tokens, the latency, the chat and the message. Billing marks it committed and appends a usage ledger entry, in one transaction.',
+      why: 'The charge becomes final, with a record of what the answer used.',
       sideEffects: ['Marks the hold committed and appends a ledger entry, in MongoDB.'],
     },
     {
@@ -365,8 +367,8 @@ const runTurn: Flow = {
       status: 'verified',
       symbol: STREAM,
       highlight: "stream.send('done', {});",
-      what: "A usage event gives the credits charged and the new balance. The turn is appended to the memory cache, a title event follows if a new chat was named (saved through chat's auto-title route, which keeps a title the user chose), and done ends the stream.",
-      why: 'The browser can update the balance and the title without another request.',
+      what: 'A usage event gives the credits charged and the new balance, which the browser writes into the cached account, so the credits card updates. The turn is appended to the memory cache, a title event follows for a newly named chat (the browser puts it in the cached chat, so the header changes), and done ends the stream. The browser marks the answer complete and refreshes the chat list.',
+      why: 'The balance and the title update without another request.',
       output: 'event: usage, event: title (new chats), event: done',
       next: [{ to: 'release-lock', kind: 'next' }],
     },
@@ -377,11 +379,10 @@ const runTurn: Flow = {
       status: 'verified',
       symbol: SETTLE,
       highlight: "status: outcome.stopped ? 'stopped' : 'failed',",
-      what: "settleUnfinished saves the text so far, with status 'stopped' when the client went away and 'failed' otherwise, and drops the chat's memory cache. If chat or billing cannot be reached for this, the error is logged and the sweeper later gives the hold back.",
+      what: "settleUnfinished saves the text so far with status 'stopped' for a stop and 'failed' otherwise, keeps any sources, and drops the memory cache. If chat or billing cannot be reached for this, the error is logged and the sweeper later gives the hold back.",
       why: 'The history shows what the user actually saw.',
-      sideEffects: ['Updates the answer in chat and deletes mem:<chat ID> in Redis.'],
       next: [
-        { to: 'stop-charged', kind: 'branch', label: 'the client went away after text started' },
+        { to: 'stop-charged', kind: 'branch', label: 'a stop after text started' },
         { to: 'released', kind: 'branch', label: 'a failure, or a stop before any text' },
       ],
     },
@@ -392,9 +393,8 @@ const runTurn: Flow = {
       status: 'verified',
       symbol: SETTLE,
       highlight: 'const committed = await deps.billing.commit(userId, reservation.id, {',
-      what: "The hold is committed and a usage event is sent, since the user got part of an answer. The test hangs up after the first token and finds the answer saved as 'stopped', shorter than the full text, and the balance one credit lower.",
+      what: 'The hold is committed and a usage event is sent, since the user got part of an answer.',
       why: 'The model already did the work the user saw.',
-      sideEffects: ['Commits the hold in billing.'],
       next: [{ to: 'unfinished-done', kind: 'next' }],
     },
     {
@@ -404,9 +404,8 @@ const runTurn: Flow = {
       status: 'verified',
       symbol: SETTLE,
       highlight: 'await deps.billing.release(userId, reservation.id);',
-      what: 'billing releases the hold: it is marked released and its credits go back to the balance, with no ledger entry. This covers every failure, before or after text started, and a stop before the first token.',
+      what: 'Billing releases the hold and the credits go back to the balance. This covers every failure, before or after text started, and a stop before the first token.',
       why: 'The user pays only for text they received from an answer that did not fail.',
-      sideEffects: ['Releases the hold in billing.'],
       next: [
         { to: 'error-event', kind: 'branch', label: 'a failure' },
         { to: 'unfinished-done', kind: 'branch', label: 'a stop' },
@@ -419,7 +418,7 @@ const runTurn: Flow = {
       status: 'verified',
       symbol: SETTLE,
       highlight: "stream.send('error', {",
-      what: "The agent logs 'the answer failed' and sends an error event with the request ID: an AppError's own code and message, or answer_failed with 'The answer failed. Your credits were not charged.' The test makes the model fail before answering and gets meta, agent, error and done, with the balance unchanged.",
+      what: "The agent logs 'the answer failed' and sends an error event with the request ID: an AppError's code and message, or answer_failed with 'The answer failed. Your credits were not charged.' The browser marks the answer failed, shows the message and reference under it, and a toast.",
       why: 'The headers were already sent, so the error travels as an event.',
       output:
         'event: error, data: { "code": "answer_failed", "message": "...", "requestId": "..." }',
@@ -441,14 +440,408 @@ const runTurn: Flow = {
       title: 'Remove the lock',
       kind: 'datastore',
       status: 'verified',
-      symbol: TURNS,
+      symbol: RUN,
       highlight: 'await deps.redis.del(lockKey);',
-      what: "The lock key is deleted and the stream is closed. A resend of the same message now gets the 409 'already answered' from its hold, not a second answer.",
+      what: 'The stop registration is removed, the stream is closed and the lock key is deleted. A resend of the same request now gets the 409 from its hold.',
       why: 'The lock only guards the answer in progress; the hold remembers the outcome.',
-      sideEffects: ['Deletes the lock key in Redis.'],
+      sideEffects: ['Deletes the lock and the stop registration in Redis.'],
+      next: [],
+    },
+    refused(),
+  ],
+};
+
+// ---------------------------------------------------------------------------------------------
+// Stop
+
+const stopTurn: Flow = {
+  id: 'stop-turn',
+  title: 'POST /turns/:turnId/stop',
+  category: 'api',
+  route: { method: 'POST', path: '/turns/:turnId/stop' },
+  apps: ['frontend', 'gateway', 'agent', 'billing'],
+  summary:
+    'Stopping an answer. The Stop button (or Esc) stops reading in the browser and posts /api/turns/<turn ID>/stop, which the gateway forwards to the agent. The agent checks in Redis that the answer is running and belongs to the user, then publishes the turn ID; whichever agent instance runs the answer aborts it. The partial text is saved as stopped and charged if any text had started, released if not. turns.test.ts stops a running answer for its owner (another user gets 404), and stops.test.ts stops an answer running on another instance.',
+  status: 'verified',
+  steps: [
+    {
+      id: 'click',
+      title: 'The user stops the answer',
+      kind: 'trigger',
+      status: 'verified',
+      symbol: 'frontend/src/components/chat/composer.tsx#Composer',
+      highlight: "if (event.key === 'Escape' && !event.defaultPrevented) {",
+      what: 'While an answer is being written, the send button becomes a stop button, and Esc stops it from anywhere on the page.',
+      why: 'A long or wrong answer can be cut short.',
+    },
+    {
+      id: 'thread-stop',
+      title: 'The browser stops reading and asks the server to stop',
+      kind: 'function',
+      status: 'verified',
+      symbol: THREAD,
+      highlight: 'void stopTurn(current.turnId);',
+      what: "Once the meta event has given the turn ID, stopTurn posts /api/turns/<turn ID>/stop (failures are ignored). Then the thread aborts its request: readServerEvents cancels the reader at once, and the answer is marked 'stopped' with the text so far. Closing the stream also reaches the agent on its own, so either path stops the answer.",
+      why: 'The answer stops on screen straight away, whatever the server does next.',
+    },
+    gateway('POST /api/turns/:turnId/stop', '/turns/<turn ID>/stop'),
+    {
+      id: 'agent-route',
+      title: 'Agent: POST /turns/:turnId/stop',
+      kind: 'handler',
+      status: 'verified',
+      symbol: TURNS,
+      highlight: 'if (!(await deps.stops.stop(turnId, res.locals.userId as string))) {',
+      what: 'requireUser needs a user in the token, and validate checks the turn ID (1 to 64 characters). The route then asks the stop signals to stop that turn for this user.',
+      why: 'Only the user who asked for an answer can stop it.',
+    },
+    {
+      id: 'owner',
+      title: 'Is it running, and whose is it?',
+      kind: 'datastore',
+      status: 'verified',
+      symbol: STOPS,
+      highlight: 'if ((await redis.get(turnKey(turnId))) !== userId) {',
+      what: 'When an answer starts, its instance writes turn:<turn ID> with the owner for 15 minutes, and deletes it when the answer ends. The stop reads it and compares the owner.',
+      why: "Another user's turn, or one already finished, cannot be stopped.",
+      next: [
+        { to: 'publish', kind: 'next' },
+        { to: 'no-turn', kind: 'error', label: "not running, or not the user's" },
+      ],
+    },
+    {
+      id: 'no-turn',
+      title: 'Nothing to stop: 404',
+      kind: 'error',
+      status: 'verified',
+      symbol: TURNS,
+      highlight: "throw new AppError('not_found', 'No answer is being written for this turn');",
+      what: "The agent answers 404 'No answer is being written for this turn'. The browser ignores the answer; it has already stopped reading.",
+      why: "The answer gives nothing away about other users' turns.",
+      next: [],
+    },
+    {
+      id: 'publish',
+      title: 'Publish the stop',
+      kind: 'datastore',
+      status: 'verified',
+      symbol: STOPS,
+      highlight: 'await redis.publish(CHANNEL, turnId);',
+      what: 'The turn ID is published on the Redis channel turn-stops.',
+      why: 'The answer may be running on any agent instance; every instance hears the channel.',
+    },
+    {
+      id: 'accepted',
+      title: 'Answer 202',
+      kind: 'response',
+      status: 'verified',
+      symbol: TURNS,
+      highlight: 'res.status(202).json({ stopping: true });',
+      what: 'The route answers 202 { stopping: true } at once; the stop itself happens on the instance that runs the answer.',
+      why: 'The caller does not wait for the answer to wind down.',
+      output: '202 { "stopping": true }',
+      next: [{ to: 'receive', kind: 'async', label: 'on every agent instance' }],
+    },
+    {
+      id: 'receive',
+      title: 'The running instance aborts the answer',
+      kind: 'function',
+      status: 'verified',
+      symbol: STOPS,
+      highlight: 'running.get(turnId)?.abort();',
+      what: 'Each instance listens on turn-stops with its own Redis connection (one in subscriber mode can run no other command). Only the instance running that turn has its abort controller, and it aborts it.',
+      why: 'A stop works across instances with no sticky sessions.',
+    },
+    {
+      id: 'abort-provider',
+      title: 'The model call stops',
+      kind: 'function',
+      status: 'verified',
+      symbol: 'backend/services/agent/src/llm/openai-compatible.ts#createOpenAiCompatibleProvider',
+      highlight: 'const abort = () => controller.abort(request.signal?.reason);',
+      what: "The turn's signal aborts the provider's fetch. The abort is passed on as an abort, not a provider failure, so no fallback model is tried, and telemetry records the attempt as stopped.",
+      why: 'The provider stops writing, and the server stops paying for tokens nobody will read.',
+    },
+    {
+      id: 'settle',
+      title: 'Save the partial answer as stopped',
+      kind: 'function',
+      status: 'verified',
+      symbol: SETTLE,
+      highlight: "status: outcome.stopped ? 'stopped' : 'failed',",
+      what: "settleUnfinished saves the text so far with status 'stopped' (sources included), and drops the memory cache.",
+      why: 'The history keeps what the user saw.',
+      next: [
+        { to: 'charged', kind: 'branch', label: 'text had started' },
+        { to: 'released', kind: 'branch', label: 'no text yet' },
+      ],
+    },
+    {
+      id: 'charged',
+      title: 'Charged for the text sent',
+      kind: 'function',
+      status: 'verified',
+      symbol: SETTLE,
+      highlight: 'const committed = await deps.billing.commit(userId, reservation.id, {',
+      what: 'The hold is committed and a usage event sent. The test stops after the first tokens and finds the balance one credit lower and the answer shorter than the full text.',
+      why: 'The model already did the work the user saw.',
+      next: [{ to: 'done', kind: 'next' }],
+    },
+    {
+      id: 'released',
+      title: 'Released before any text',
+      kind: 'function',
+      status: 'verified',
+      symbol: SETTLE,
+      highlight: 'await deps.billing.release(userId, reservation.id);',
+      what: 'With no text yet, the hold is released and the credits go back.',
+      why: 'Nothing was delivered, so nothing is charged.',
+      next: [{ to: 'done', kind: 'next' }],
+    },
+    {
+      id: 'done',
+      title: 'Done, with no error event',
+      kind: 'response',
+      status: 'verified',
+      symbol: SETTLE,
+      highlight: "stream.send('done', {});",
+      what: 'A stop sends no error event, only done. The stop registration and the lock are removed.',
+      why: "A stop is the user's choice, not a failure.",
+      output: 'event: done',
       next: [],
     },
   ],
 };
 
-export const agentTurnFlows: Flow[] = [runTurn];
+// ---------------------------------------------------------------------------------------------
+// Regenerate and edit
+
+function lastTurnStep(highlight: string, what: string): FlowStep {
+  return {
+    id: 'last-turn',
+    title: "Ask chat for the chat's last turn",
+    kind: 'external',
+    status: 'verified',
+    symbol: TURNS,
+    highlight,
+    what,
+    why: 'Regenerate and edit act only on the latest turn, so the agent checks what that is first.',
+  };
+}
+
+function chatLastTurn(): FlowStep {
+  return {
+    id: 'chat-last-turn',
+    title: 'Chat: GET /internal/chats/:id/last-turn',
+    kind: 'datastore',
+    status: 'verified',
+    symbol: 'backend/services/chat/src/internal-routes.ts#internalRouter',
+    highlight:
+      "router.get('/internal/chats/:id/last-turn', validate({ params: idParams }), async (req, res) => {",
+    what: "Chat (agent only) finds the user's own chat, then its latest user message that is not superseded, and the latest answer after it, whatever their status. It answers { user, answer }, either of which may be null.",
+    why: 'The latest turn includes a failed or stopped answer, which can be regenerated too.',
+  };
+}
+
+function rerun(highlight: string, what: string): FlowStep {
+  return {
+    id: 'run-turn',
+    title: 'runTurn: the same core as a new message',
+    kind: 'function',
+    status: 'verified',
+    symbol: RUN,
+    highlight,
+    what,
+    why: 'Locks, credit checks, limits, holds and settling work the same for every kind of turn.',
+    sideEffects: ['Holds and later settles credits, and saves messages in chat.'],
+  };
+}
+
+function streamAndForget(): FlowStep {
+  return {
+    id: 'stream',
+    title: 'Stream the answer, then drop the memory cache',
+    kind: 'response',
+    status: 'verified',
+    symbol: STREAM,
+    highlight: 'await deps.memory.forget(chatId);',
+    what: 'The answer streams exactly as for a new message (see POST /chats/:chatId/turns), with the same settling. When it finishes, the memory cache is dropped instead of appended to, because earlier history changed; the next turn reloads it from chat. In the browser the new answer fills in where the old one was.',
+    why: 'The cache never holds messages that were replaced.',
+    output: 'event: meta, agent, token…, usage, done',
+    next: [],
+  };
+}
+
+const regenerate: Flow = {
+  id: 'regenerate-answer',
+  title: 'POST /chats/:chatId/messages/:messageId/regenerate',
+  category: 'api',
+  route: { method: 'POST', path: '/chats/:chatId/messages/:messageId/regenerate' },
+  apps: APPS,
+  summary:
+    "A new answer to the latest message, with the same agent. The browser hides the old answer and posts the regenerate route; the agent checks with chat that this is the latest answer and that it is not still being written, then runs the same turn core with a plan that keeps the agent, builds the memory from chat without the old turn, saves no new user message and makes the new answer supersede the old one, which chat then hides. It is charged like any answer. turns.test.ts covers regenerate and the latest-turn rule, chat's internal-routes.test.ts the last-turn route, and chat-thread.test.tsx the browser.",
+  status: 'verified',
+  steps: [
+    {
+      id: 'click',
+      title: 'The user regenerates the latest answer',
+      kind: 'trigger',
+      status: 'verified',
+      symbol: 'frontend/src/components/chat/chat-thread.tsx#ChatThread',
+      highlight: '? () => void thread.regenerate()',
+      what: 'The Regenerate button appears only on the latest answer, once it has an ID and nothing is being written.',
+      why: 'A disappointing answer can be tried again without retyping the question.',
+    },
+    {
+      id: 'thread',
+      title: 'The thread hides the old answer',
+      kind: 'function',
+      status: 'verified',
+      symbol: THREAD,
+      highlight: '(current) => current.filter((message) => message.id !== lastId),',
+      what: 'regenerate removes the old answer from the thread at once, adds an empty one, and streamTurn posts { clientMessageId } (a new one) to /api/chats/<chat ID>/messages/<answer ID>/regenerate.',
+      why: "The new answer takes the old one's place on screen.",
+    },
+    gateway(
+      'POST /api/chats/:id/messages/:messageId/regenerate',
+      '/chats/<id>/messages/<messageId>/regenerate',
+    ),
+    {
+      id: 'agent-route',
+      title: 'Agent: the regenerate route',
+      kind: 'handler',
+      status: 'verified',
+      symbol: TURNS,
+      highlight: 'validate({ params: messageParams, body: regenerateBody }),',
+      what: "requireUser needs a user, validate checks both IDs and a strict body of only clientMessageId, and getChat makes someone else's chat a 404.",
+      why: 'The body carries nothing but the action ID: the question and the agent come from the saved turn.',
+      next: [{ to: 'last-turn', kind: 'next' }, toRefused("404: not the user's chat")],
+    },
+    lastTurnStep(
+      'const last = await deps.chat.lastTurn(userId, chatId);',
+      "chatService.lastTurn calls chat's GET /internal/chats/:id/last-turn.",
+    ),
+    chatLastTurn(),
+    {
+      id: 'check',
+      title: 'Only the latest answer, and not while it is written',
+      kind: 'function',
+      status: 'verified',
+      symbol: TURNS,
+      highlight: 'if (!last.user || !last.answer || last.answer.id !== messageId) {',
+      what: "An answer that is not the latest gets 409 'Only the latest answer can be regenerated', and one still streaming 409 'This answer is still being written'.",
+      why: 'Regenerating an older answer would leave later messages answering a question that changed.',
+      next: [
+        { to: 'plan', kind: 'next' },
+        toRefused('409: not the latest answer, or still being written'),
+      ],
+    },
+    {
+      id: 'plan',
+      title: 'The regenerate plan',
+      kind: 'function',
+      status: 'verified',
+      symbol: TURNS,
+      highlight: "chooseAgent: { fixed: answer.agent ?? 'chat' },",
+      what: "The TurnPlan keeps the old answer's agent (chat if that agent no longer runs, and no routing call), answers the saved user message without saving it again, uses the reserve key regenerate:<old answer ID>:<action ID>, makes the new answer supersede the old one, and marks the history as changed.",
+      why: 'Only these details differ from a new message.',
+    },
+    {
+      id: 'history',
+      title: 'Memory without the old turn',
+      kind: 'datastore',
+      status: 'verified',
+      symbol: 'backend/services/agent/src/turns.ts#historyWithout',
+      highlight: '.filter((message) => !replaced.includes(message.id))',
+      what: "historyWithout reads the chat's recent finished messages fresh from chat (not the cache), drops the user message and the old answer, and trims the rest to the memory budget.",
+      why: 'The model must not see the answer it is replacing, nor the question twice.',
+    },
+    rerun(
+      'const { message: answer } = await deps.chat.saveMessage(userId, {',
+      "runTurn takes the lock, checks the balance, applies the agent's per-minute limit and holds the credits as for a new message. It saves only the new answer, with supersedes set to the old one, so chat marks the old answer superseded and hides it from history and memory.",
+    ),
+    streamAndForget(),
+    refused(),
+  ],
+};
+
+const edit: Flow = {
+  id: 'edit-message',
+  title: 'POST /chats/:chatId/messages/:messageId/edit',
+  category: 'api',
+  route: { method: 'POST', path: '/chats/:chatId/messages/:messageId/edit' },
+  apps: APPS,
+  summary:
+    "The latest message, rewritten and answered again. The browser replaces the message (and its answer) with the new text and posts the edit route; the agent checks with chat that this is the user's latest message and that its answer is not still being written, then runs the same turn core: the new message is routed like any other, the memory leaves out the old message and answer, and the new message supersedes both. turns.test.ts covers edit and the latest-turn rule.",
+  status: 'verified',
+  steps: [
+    {
+      id: 'click',
+      title: 'The user edits their latest message',
+      kind: 'trigger',
+      status: 'verified',
+      symbol: 'frontend/src/components/chat/chat-thread.tsx#ChatThread',
+      highlight: 'const accepted = await thread.edit(content);',
+      what: 'The Edit button on the latest user message, or ↑ in an empty composer, opens an edit box with the text; Save and send submits it and Esc cancels. If the edit is refused, the box opens again.',
+      why: 'A typo or a better question can replace the last one.',
+    },
+    {
+      id: 'thread',
+      title: 'The thread replaces the message',
+      kind: 'function',
+      status: 'verified',
+      symbol: THREAD,
+      highlight: "kind: 'edit',",
+      what: 'edit drops the old message and everything after it from the thread, shows the new text and an empty answer, and streamTurn posts { content, clientMessageId, agent? } to /api/chats/<chat ID>/messages/<message ID>/edit.',
+      why: 'The thread shows the conversation as it will be.',
+    },
+    gateway(
+      'POST /api/chats/:id/messages/:messageId/edit',
+      '/chats/<id>/messages/<messageId>/edit',
+    ),
+    {
+      id: 'agent-route',
+      title: 'Agent: the edit route',
+      kind: 'handler',
+      status: 'verified',
+      symbol: TURNS,
+      highlight: 'validate({ params: messageParams, body: turnBody }),',
+      what: "The body is the same as for a new message. A shortcut with nothing after it is a 400, and getChat makes someone else's chat a 404.",
+      why: 'An edit is a new message that replaces the old one.',
+      next: [{ to: 'chat-last-turn', kind: 'next' }, toRefused('400 or 404')],
+    },
+    chatLastTurn(),
+    {
+      id: 'check',
+      title: 'Only the latest message, and not while its answer is written',
+      kind: 'function',
+      status: 'verified',
+      symbol: TURNS,
+      highlight: 'if (!last.user || last.user.id !== messageId) {',
+      what: "With chat's answer (chatService.lastTurn), a message that is not the user's latest gets 409 'Only your latest message can be edited', and one whose answer is still streaming 409 'This answer is still being written'.",
+      why: 'Editing an older message would leave later answers replying to a question that changed.',
+      next: [
+        { to: 'plan', kind: 'next' },
+        toRefused('409: not the latest message, or still being written'),
+      ],
+    },
+    {
+      id: 'plan',
+      title: 'The edit plan',
+      kind: 'function',
+      status: 'verified',
+      symbol: TURNS,
+      highlight: 'const replaced = [last.user.id, ...(last.answer ? [last.answer.id] : [])];',
+      what: 'The TurnPlan routes the new text like any message (chip, shortcut or router), builds the memory without the old message and its answer (historyWithout), uses the reserve key turn:<chat ID>:<client message ID>, saves the new message superseding both, and marks the history as changed.',
+      why: 'Only these details differ from a new message.',
+    },
+    rerun(
+      'supersedes: plan.userMessage.supersedes,',
+      'runTurn takes the lock, checks the balance, routes, applies the per-minute limit and holds the credits. It saves the new message with supersedes set to the old message and its answer, which chat hides, then an empty answer.',
+    ),
+    streamAndForget(),
+    refused(),
+  ],
+};
+
+export const agentTurnFlows: Flow[] = [runTurn, stopTurn, regenerate, edit];

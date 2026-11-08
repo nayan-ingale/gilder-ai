@@ -1085,7 +1085,7 @@ const openChat: Flow = {
       status: 'verified',
       symbol: CHAT_VIEW,
       highlight: '<ChatHeader chat={loaded.chat} />',
-      what: "ChatView renders ChatHeader with the chat and MessageList with the messages, and the HTML streams in place of the skeleton. generateMetadata titles the tab with the chat's title.",
+      what: "ChatView renders ChatHeader with the chat and ChatThread with the messages, and the HTML streams in place of the skeleton. ChatThread is a client component, but the server renders it to HTML too; in the browser it then takes over, with the composer. generateMetadata titles the tab with the chat's title.",
       why: 'The history is in the first HTML, with no loading spinner for it.',
       output: 'The chat page as HTML.',
     },

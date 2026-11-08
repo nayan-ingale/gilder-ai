@@ -13,17 +13,17 @@ export const stackPage: DocPage = {
       blocks: [
         {
           kind: 'text',
-          text: "A request goes from the browser to the Next.js server, then to the gateway, then to one service, which reads and writes its data stores. Today that path carries sign-in, logout, the profile, chats (the list and search, renaming, pinning and deleting, and each chat's history) and the credits balance, end to end. The agent's turn route is built and tested, but the gateway does not forward it yet.",
+          text: "A request goes from the browser to the Next.js server, then to the gateway, then to one service, which reads and writes its data stores. Today that path carries sign-in, logout, the profile, chats (the list and search, renaming, pinning and deleting, and each chat's history), answers streamed back from the agent, and the credits balance, end to end.",
         },
         {
           kind: 'list',
           items: [
             'Browser → Next.js server (port 3000): the browser only ever talks to the frontend app. Its chat data lives in a Redux store, fetched and cached with RTK Query.',
             "Next.js server → gateway (port 8000): the Next.js server forwards every `/api/*` call to the gateway (`forwardToGateway`), so backend addresses and secrets never reach the browser. Server components also call the gateway directly with the browser's cookie (`gatewayGet`), for the signed-in user and for a chat page.",
-            'Gateway → services: the gateway checks the rate limits, its route table, the Origin and the session, then calls the service with fetch and a short-lived signed token: today auth (8001), chat (8002) and billing (8004), for the routes in its table. The agent (8003) refuses any call without a valid token, and its turn route is not in the table yet.',
+            'Gateway → services: the gateway checks the rate limits, its route table, the Origin and the session, then calls the service with fetch and a short-lived signed token: auth (8001), chat (8002), the agent (8003) and billing (8004), for the routes in its table. An answer streams back through the gateway and the Next.js server as it is written.',
             'Service → service: auth calls billing for the sign-up grant, and the agent calls chat and billing during a turn, each with fetch and a token signed with its own key (`createInternalClient`).',
-            'Agent → AI providers: the agent streams answers from Groq over its OpenAI-compatible API, with fetch and no SDK. By default (`LLM_MODE=mock`) a mock provider answers instead, so nothing needs a key.',
-            'Services → data stores: auth, chat, agent and billing connect to MongoDB at startup, and the gateway, auth and agent open a Redis client. Auth keeps its users in MongoDB and its sessions in Redis; chat keeps conversations and messages, and billing accounts, credit holds and the ledger, in MongoDB; the agent keeps a short memory of each chat and a lock per message in Redis. Qdrant runs in Docker, but nothing connects to it yet. AWS S3 will hold files.',
+            'Agent → outside services: the agent streams answers from Groq (and code from OpenRouter when its key is set) over their OpenAI-compatible APIs, and searches the web with Tavily, all with fetch and no SDK. By default (`LLM_MODE=mock`) a mock provider and canned search results answer instead, so nothing needs a key.',
+            'Services → data stores: auth, chat, agent and billing connect to MongoDB at startup, and the gateway, auth and agent open a Redis client. Auth keeps its users in MongoDB and its sessions in Redis; chat keeps conversations and messages, and billing accounts, credit holds and the ledger, in MongoDB; the agent keeps a record of every model attempt in MongoDB, and a short memory of each chat, request locks, per-agent limits and stop signals in Redis. Qdrant runs in Docker, but nothing connects to it yet. AWS S3 will hold files.',
             'Every backend app is built from the shared library, `@gilder/shared`, so they all start, log and fail in the same way.',
           ],
         },
@@ -40,6 +40,7 @@ export const stackPage: DocPage = {
         { component: 'mongodb' },
         { component: 'redis' },
         { component: 'llm-providers' },
+        { component: 'tavily' },
         { component: 'qdrant' },
         { component: 's3' },
       ],
@@ -97,13 +98,17 @@ export const stackPage: DocPage = {
           kind: 'table',
           columns: ['Kind of call', 'Models, first choice first', 'Used today by'],
           rows: [
-            ['router, title', 'Groq openai/gpt-oss-20b', 'Routing and new-chat titles'],
+            [
+              'router, title',
+              'Groq openai/gpt-oss-20b',
+              'Routing, new-chat titles and search queries',
+            ],
             ['chat', 'Groq openai/gpt-oss-120b, then openai/gpt-oss-20b', 'The chat agent'],
-            ['write', 'Groq openai/gpt-oss-120b, then openai/gpt-oss-20b', 'No agent yet'],
+            ['write', 'Groq openai/gpt-oss-120b, then openai/gpt-oss-20b', 'The search agent'],
             [
               'code',
               'OpenRouter deepseek/deepseek-chat, then Groq openai/gpt-oss-120b',
-              'No agent yet',
+              'The code agent',
             ],
             ['vision', 'Gemini gemini-2.5-flash', 'No agent yet'],
           ],
@@ -173,6 +178,26 @@ export const packageNotes: PackageNote[] = [
     name: 'firebase',
     layer: 'frontend',
     why: 'Google sign-in in the browser: a popup that returns the Firebase ID token the app exchanges for a session. Loaded only when the Google button is clicked.',
+  },
+  {
+    name: 'react-markdown',
+    layer: 'frontend',
+    why: 'Renders answers as Markdown (`Markdown`). Raw HTML in an answer is shown as text and unsafe links are removed; the app also turns images into links and adds highlighted code blocks.',
+  },
+  {
+    name: 'remark-gfm',
+    layer: 'frontend',
+    why: 'Adds GitHub-style Markdown to react-markdown: tables, task lists, strikethrough and bare links.',
+  },
+  {
+    name: 'highlight.js',
+    layer: 'frontend',
+    why: 'Colours code in answers and in the files panel (`highlightCode`). Only its core and thirteen common languages are loaded, to keep the bundle small.',
+  },
+  {
+    name: 'fflate',
+    layer: 'frontend',
+    why: 'Zips the files of a code answer in the browser for Download all (`zipFiles`).',
   },
   {
     name: '@reduxjs/toolkit',
@@ -325,22 +350,10 @@ export const packageNotes: PackageNote[] = [
 export const plannedTools: PlannedTool[] = [
   // AI
   {
-    name: 'OpenRouter',
-    layer: 'ai',
-    why: 'One API for many language models, for the code agent. Its client is built (an OpenAI-compatible provider, used when OPENROUTER_API_KEY is set), but no running agent sends it anything yet.',
-    plannedIn: 'Web search and code',
-  },
-  {
     name: 'Gemini',
     layer: 'ai',
     why: "Google's models, for questions about images and PDF embeddings. Its client is built (used when GEMINI_API_KEY is set), but no running agent sends it anything yet.",
     plannedIn: 'PDF and image Q&A',
-  },
-  {
-    name: 'Tavily',
-    layer: 'ai',
-    why: 'A web search API that gives the search agent its sources.',
-    plannedIn: 'Web search and code',
   },
   {
     name: 'Pollinations',

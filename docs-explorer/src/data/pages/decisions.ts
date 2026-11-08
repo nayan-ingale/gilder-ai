@@ -30,7 +30,7 @@ export const decisionsPage: DocPage = {
         },
         {
           kind: 'text',
-          text: 'Built today: the gateway checks every /api request (rate limits, its route table, the Origin and the session) and forwards the sign-in, logout and /me routes to auth, the chat routes to chat and the balance to billing, each with a signed internal token. Every service turns on the internal-token check, so a direct call to any service path except the health checks gets 401, even though each service listens on its own port. Services also call each other directly, each with its own key: auth calls billing, and the agent calls chat and billing. The route table has no route to the agent yet; it comes with AI answers.',
+          text: 'Built today: the gateway checks every /api request (rate limits, its route table, the Origin and the session) and forwards the sign-in, logout and /me routes to auth, the chat routes to chat, the answer routes to the agent and the balance to billing, each with a signed internal token. Every service turns on the internal-token check, so a direct call to any service path except the health checks gets 401, even though each service listens on its own port. Services also call each other directly, each with its own key: auth calls billing, and the agent calls chat and billing.',
         },
         {
           kind: 'quote',
@@ -202,7 +202,7 @@ export const decisionsPage: DocPage = {
         },
         {
           kind: 'text',
-          text: 'The table lists the auth and chat routes and `GET /api/billing/account` today; each of those needs a session, and `/api/chats/:id` becomes `/chats/<id>` on chat. The gateway tests and journey.test.ts check that internal paths, such as `/api/internal/users/<id>`, `/api/internal/messages` and `/api/internal/accounts`, get 404 without reaching a service (SEC-01).',
+          text: "The table lists the auth and chat routes, the answer routes (send, regenerate, edit and stop) and `GET /api/billing/account` today; each of those needs a session, and `/api/chats/:id/messages` becomes the agent's `/chats/<id>/turns`. The gateway tests and journey.test.ts check that internal paths, such as `/api/internal/users/<id>`, `/api/internal/messages` and `/api/internal/accounts`, get 404 without reaching a service (SEC-01).",
         },
         {
           kind: 'quote',
@@ -278,7 +278,7 @@ export const decisionsPage: DocPage = {
         },
         {
           kind: 'text',
-          text: 'The per-IP limit runs first, for every request that reaches the `/api` router, including paths the gateway does not forward. The per-user limit runs after the session lookup, so a request without a session is counted only per IP. The per-agent limits in the shared constants are not used yet.',
+          text: 'The per-IP limit runs first, for every request that reaches the `/api` router, including paths the gateway does not forward. The per-user limit runs after the session lookup, so a request without a session is counted only per IP. Answers have a third limit, per agent, in the agent service (see below).',
         },
         {
           kind: 'quote',
@@ -394,7 +394,7 @@ export const decisionsPage: DocPage = {
         },
         {
           kind: 'text',
-          text: "The policy is set in Docker Compose. The shared code sets a TTL on every key it writes: a session (`sess:` and the SHA-256 of its ID) lasts 7 days, renewed on each lookup, and a rate-limit counter (`rl:<scope>:<id>`) gets its expiry in the same MULTI as its count. Auth's sign-in writes sessions and its logout deletes them; the gateway renews a session on each lookup and counts every request per IP and per signed-in user. The agent's chat memory (`mem:<chat ID>`) expires after an hour and its per-message lock (`turn-lock:...`) after 15 minutes. No memory limit (`--maxmemory`) is set, so the policy does not come into play today.",
+          text: "The policy is set in Docker Compose. The shared code sets a TTL on every key it writes: a session (`sess:` and the SHA-256 of its ID) lasts 7 days, renewed on each lookup, and a rate-limit counter (`rl:<scope>:<id>`) gets its expiry in the same MULTI as its count. Auth's sign-in writes sessions and its logout deletes them; the gateway renews a session on each lookup and counts every request per IP and per signed-in user. The agent's chat memory (`mem:<chat ID>`) expires after an hour, its per-request lock (`turn-lock:...`) and its stop registration (`turn:<turn ID>`) after 15 minutes, and its per-agent counters (`rl:agent-...`) with their minute. Stop messages travel on a channel and are never stored. No memory limit (`--maxmemory`) is set, so the policy does not come into play today.",
         },
         {
           kind: 'quote',
@@ -765,7 +765,7 @@ export const decisionsPage: DocPage = {
     {
       id: 'new-chat-first-message',
       title: 'A new chat is created by its first message',
-      status: 'partial',
+      status: 'verified',
       blocks: [
         {
           kind: 'fields',
@@ -786,7 +786,7 @@ export const decisionsPage: DocPage = {
         },
         {
           kind: 'text',
-          text: 'Built: every New chat link and the shortcut go to `/`, and `POST /chats` creates a chat (tested, and forwarded by the gateway). Not built yet: the composer that sends the first message, which comes with AI answers; nothing in the frontend calls `createChat` yet.',
+          text: "Every New chat link and the shortcut go to `/`. There, NewChatComposer creates the chat when the first message is sent, puts the message in the store's pending slice and opens `/c/<id>`, where the chat thread sends it once, so the answer streams on the chat's own address. chat-thread.test.tsx checks that the queued message is sent as soon as the chat opens.",
         },
         {
           kind: 'quote',
@@ -799,7 +799,10 @@ export const decisionsPage: DocPage = {
         { symbol: 'frontend/src/components/app-shell/sidebar.tsx#SidebarFrame' },
         { symbol: 'frontend/src/components/chats/chat-commands.tsx#ChatCommands' },
         { symbol: 'frontend/src/app/(app)/page.tsx#NewChatPage' },
+        { symbol: 'frontend/src/components/chat/new-chat.tsx#NewChatComposer' },
+        { symbol: 'frontend/src/store/pending-slice.ts#pendingSlice' },
         { symbol: 'backend/services/chat/src/chat-routes.ts#chatRouter' },
+        { flow: 'first-message' },
       ],
     },
     {
@@ -1082,6 +1085,324 @@ export const decisionsPage: DocPage = {
         { symbol: 'backend/services/agent/src/llm/models.ts#MODEL_ROUTES' },
         { symbol: 'backend/services/agent/src/llm/types.ts#LlmError' },
         { flow: 'run-turn' },
+      ],
+    },
+    {
+      id: 'one-turn-core',
+      title: 'Send, regenerate and edit share one turn core',
+      status: 'verified',
+      blocks: [
+        {
+          kind: 'fields',
+          fields: [
+            {
+              label: 'Decision',
+              text: 'Each answer route builds a TurnPlan (how to choose the agent, which memory to load, the reserve key, which messages to save and which to supersede, and whether the history changed) and hands it to runTurn, which does everything else: the lock, the credit check, routing, the per-agent limit, the hold, saving, streaming and settling.',
+            },
+            {
+              label: 'Why',
+              text: 'The rules that protect credits and history live in one place, so regenerate and edit cannot drift from a new message: a fix to one is a fix to all three.',
+            },
+            {
+              label: 'Trade-off',
+              text: 'A plan has several optional parts, and each route must fill them in correctly; the turn tests cover all three routes.',
+            },
+          ],
+        },
+        {
+          kind: 'quote',
+          file: 'backend/services/agent/src/turns.ts',
+          text: 'How one turn is set up; send, regenerate and edit differ only in these.',
+        },
+      ],
+      refs: [
+        { symbol: 'backend/services/agent/src/turns.ts#runTurn' },
+        { symbol: 'backend/services/agent/src/turns.ts#turnRouter' },
+        { flow: 'run-turn' },
+        { flow: 'regenerate-answer' },
+        { flow: 'edit-message' },
+      ],
+    },
+    {
+      id: 'latest-turn-only',
+      title: 'Regenerate and edit act only on the latest turn',
+      status: 'verified',
+      blocks: [
+        {
+          kind: 'fields',
+          fields: [
+            {
+              label: 'Decision',
+              text: "Only the latest answer can be regenerated and only the user's latest message edited, never while that answer is still being written. Chat's last-turn route says what the latest turn is. The replaced messages are kept but superseded, and the memory for the new answer is read fresh from chat without them.",
+            },
+            {
+              label: 'Why',
+              text: 'Changing an older turn would leave the later messages answering a question that no longer exists. Keeping superseded messages means nothing is lost, and the cache is dropped so the next turn sees the new history.',
+            },
+            {
+              label: 'Trade-off',
+              text: 'There is no branching history: to change an older question, the user starts a new message.',
+            },
+          ],
+        },
+        {
+          kind: 'text',
+          text: 'turns.test.ts checks that regenerate keeps the agent and hides the old answer, that edit replaces the message and its answer, and that both refuse anything but the latest turn with 409.',
+        },
+        {
+          kind: 'quote',
+          file: 'backend/services/agent/src/turns.ts',
+          text: "throw new AppError('conflict', 'Only the latest answer can be regenerated');",
+        },
+      ],
+      refs: [
+        { symbol: 'backend/services/agent/src/turns.ts#turnRouter' },
+        { symbol: 'backend/services/agent/src/turns.ts#historyWithout' },
+        { symbol: 'backend/services/chat/src/internal-routes.ts#internalRouter' },
+        { flow: 'regenerate-answer' },
+        { flow: 'edit-message' },
+      ],
+    },
+    {
+      id: 'stop-over-redis',
+      title: 'A stop reaches the answer through Redis',
+      status: 'verified',
+      blocks: [
+        {
+          kind: 'fields',
+          fields: [
+            {
+              label: 'Decision',
+              text: 'A running answer registers its owner in Redis under its turn ID. POST /turns/:turnId/stop checks the owner, then publishes the turn ID on the turn-stops channel; every agent instance listens, and the one running that answer aborts it. The browser also stops reading at once, and a closed stream stops the answer on its own.',
+            },
+            {
+              label: 'Why',
+              text: "The stop request can land on any agent instance, not the one writing the answer, and no sticky sessions are needed. The owner check means nobody can stop another user's answer.",
+            },
+            {
+              label: 'Trade-off',
+              text: 'Each instance keeps a second Redis connection for listening. A published stop that arrives after the answer ended does nothing, and the route still answers 202 once the owner check passed.',
+            },
+          ],
+        },
+        {
+          kind: 'text',
+          text: 'A stop after text started is charged for what was sent; before any text it is released. stops.test.ts stops an answer running on another instance, for its owner only, and the turn test stops a real streaming answer.',
+        },
+        {
+          kind: 'quote',
+          file: 'backend/services/agent/src/stops.ts',
+          text: "const CHANNEL = 'turn-stops';",
+        },
+      ],
+      refs: [
+        { symbol: 'backend/services/agent/src/stops.ts#createStopSignals' },
+        { symbol: 'frontend/src/lib/turns.ts#stopTurn' },
+        { flow: 'stop-turn' },
+      ],
+    },
+    {
+      id: 'per-agent-limits',
+      title: 'Each agent has its own per-minute limit, checked before charging',
+      status: 'verified',
+      blocks: [
+        {
+          kind: 'fields',
+          fields: [
+            {
+              label: 'Decision',
+              text: "After routing and before the credit hold, the turn counts the request against the routed agent's limit for the user (AGENT_RATE_LIMITS: 20 a minute for chat, 5 for every other agent). Over it, the answer is refused with 429 and Retry-After.",
+            },
+            {
+              label: 'Why',
+              text: 'The costly agents are held tighter than chat, and a refusal before the hold costs the user nothing.',
+            },
+            {
+              label: 'Trade-off',
+              text: 'The limit comes after routing, so a refused message has already used one free router call.',
+            },
+          ],
+        },
+        {
+          kind: 'quote',
+          file: 'backend/services/agent/src/turns.ts',
+          text: '// Each agent has its own per-minute limit: the costly ones are held tighter than chat.',
+        },
+      ],
+      refs: [
+        { symbol: 'backend/shared/src/constants.ts#AGENT_RATE_LIMITS' },
+        { symbol: 'backend/shared/src/rateLimit.ts#hitRateLimit' },
+        { symbol: 'backend/services/agent/src/turns.ts#runTurn' },
+        { flow: 'run-turn' },
+      ],
+    },
+    {
+      id: 'telemetry-per-attempt',
+      title: 'Every model attempt is recorded, and recording never slows an answer',
+      status: 'verified',
+      blocks: [
+        {
+          kind: 'fields',
+          fields: [
+            {
+              label: 'Decision',
+              text: "The model layer reports every attempt, a failed one before a fallback included, with its purpose, agent, answer, provider, model, tokens, time to the first token, latency and outcome (ok, error or stopped). The agent saves each one in its llmCalls collection with the request's user and ID, without waiting for the write.",
+            },
+            {
+              label: 'Why',
+              text: 'What an answer really cost, and which models are slow or failing, can only be seen if every attempt is kept.',
+            },
+            {
+              label: 'Trade-off',
+              text: 'A record can be lost if its write fails; the failure is only logged, because an answer must never wait for or fail on telemetry.',
+            },
+          ],
+        },
+        {
+          kind: 'quote',
+          file: 'backend/services/agent/src/telemetry.ts',
+          text: ' * the first token came, and how it ended. Saving is fire-and-forget: telemetry must never slow',
+        },
+      ],
+      refs: [
+        { symbol: 'backend/services/agent/src/llm/llm.ts#createLlm' },
+        { symbol: 'backend/services/agent/src/telemetry.ts#llmCallRecorder' },
+        { symbol: 'backend/services/agent/src/telemetry.ts#LlmCallModel' },
+      ],
+    },
+    {
+      id: 'code-as-markdown',
+      title: 'Code files stream as Markdown and are parsed afterwards',
+      status: 'verified',
+      blocks: [
+        {
+          kind: 'fields',
+          fields: [
+            {
+              label: 'Decision',
+              text: 'The code agent asks the model to write each file as a heading with its path and a fenced block. The text streams like any answer; when it ends, the files are parsed, their paths and sizes checked, and they are sent as an artifact and saved with the answer.',
+            },
+            {
+              label: 'Why',
+              text: 'The user watches the code being written instead of waiting for a finished JSON payload, and any model that writes Markdown can do it.',
+            },
+            {
+              label: 'Trade-off',
+              text: 'A file the model formats wrongly is simply not in the artifact (it stays readable in the text), and a stopped answer gets no files.',
+            },
+          ],
+        },
+        {
+          kind: 'quote',
+          file: 'backend/services/agent/src/agents/code-files.ts',
+          text: ' * The files a code answer contains. The model writes them as Markdown, so the user sees the code',
+        },
+      ],
+      refs: [
+        { symbol: 'backend/services/agent/src/agents/code-files.ts#parseCodeFiles' },
+        { symbol: 'backend/services/agent/src/agents/code.ts#codeAgent' },
+        { flow: 'code-answer' },
+      ],
+    },
+    {
+      id: 'files-viewer',
+      title: 'A read-only file viewer and a sealed preview, not an editor',
+      status: 'verified',
+      blocks: [
+        {
+          kind: 'fields',
+          fields: [
+            {
+              label: 'Decision',
+              text: "The files panel shows each file as read-only, highlighted code (highlight.js with common languages only), with copy, download and a zip. A web page previews in an iframe sandboxed with allow-scripts only, its CSS and JavaScript put inline and a Content-Security-Policy of default-src 'none'. No code editor such as Monaco is loaded.",
+            },
+            {
+              label: 'Why',
+              text: 'Reading, copying and trying the code is what users need, and an editor would add megabytes to the page. Generated code can run in the preview, but cannot reach the app, its cookies or storage, or the network.',
+            },
+            {
+              label: 'Trade-off',
+              text: 'Files cannot be changed in place; a preview that needs a library from the web will not load it.',
+            },
+          ],
+        },
+        {
+          kind: 'quote',
+          file: 'frontend/src/components/chat/artifact-panel.tsx',
+          text: '// Scripts may run, but with no same-origin access: no cookies, no storage, no page.',
+        },
+      ],
+      refs: [
+        { symbol: 'frontend/src/components/chat/artifact-panel.tsx#ArtifactPanel' },
+        { symbol: 'frontend/src/lib/code-files.ts#previewDocument' },
+        { symbol: 'frontend/src/lib/highlight.ts#highlightCode' },
+        { flow: 'code-answer' },
+      ],
+    },
+    {
+      id: 'safe-markdown',
+      title: 'Answers render as Markdown that cannot run or load anything',
+      status: 'verified',
+      blocks: [
+        {
+          kind: 'fields',
+          fields: [
+            {
+              label: 'Decision',
+              text: 'Answers render with react-markdown: raw HTML is shown as text and javascript: links are dropped. An image the model writes becomes a plain link, never loaded (SEC-10), and every link opens in a new tab with noopener, noreferrer and nofollow.',
+            },
+            {
+              label: 'Why',
+              text: "Answers are model output, which can be steered by what users or web pages write. An image would let an answer call any server with the reader's details, like a tracking pixel.",
+            },
+            {
+              label: 'Trade-off',
+              text: 'Answers cannot show images inline; the reader clicks the link to see one.',
+            },
+          ],
+        },
+        {
+          kind: 'quote',
+          file: 'frontend/src/components/chat/markdown.tsx',
+          text: '// A model-written image is shown as a link to it, never loaded (SEC-10).',
+        },
+      ],
+      refs: [
+        { symbol: 'frontend/src/components/chat/markdown.tsx#Markdown' },
+        { file: 'frontend/src/components/chat/markdown.test.tsx' },
+      ],
+    },
+    {
+      id: 'abort-on-unmount',
+      title: 'Leaving a chat stops reading, safely under React development mode',
+      status: 'verified',
+      blocks: [
+        {
+          kind: 'fields',
+          fields: [
+            {
+              label: 'Decision',
+              text: "When the chat thread unmounts, it aborts the running answer's stream, but only after a tick, and only if it has not mounted again. The server then settles the answer as a stop.",
+            },
+            {
+              label: 'Why',
+              text: "React's development mode mounts, unmounts and mounts again on purpose. Aborting straight away would stop every first answer in development; waiting a tick tells a real departure from that rehearsal.",
+            },
+            {
+              label: 'Trade-off',
+              text: 'Leaving a chat mid-answer counts as a stop: text already sent is charged.',
+            },
+          ],
+        },
+        {
+          kind: 'quote',
+          file: 'frontend/src/hooks/use-chat-thread.ts',
+          text: '// development mode unmounts and remounts once on purpose, so the abort waits a tick and only',
+        },
+      ],
+      refs: [
+        { symbol: 'frontend/src/hooks/use-chat-thread.ts#useChatThread' },
+        { flow: 'stop-turn' },
       ],
     },
   ],

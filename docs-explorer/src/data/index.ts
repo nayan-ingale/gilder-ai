@@ -1,6 +1,7 @@
 // Everything hand-written about the code, in one place for the UI and the checker
 // (scripts/verify-docs.ts). The facts these point at come from generated/source-index.json.
 import { components, links } from './architecture.ts';
+import { agentAnswerFlows } from './flows/agent-answers.ts';
 import { agentTurnFlows } from './flows/agent-turns.ts';
 import { authRouteFlows } from './flows/auth-routes.ts';
 import { billingRouteFlows } from './flows/billing-routes.ts';
@@ -20,6 +21,7 @@ export const flows: Flow[] = [
   ...chatRouteFlows,
   ...billingRouteFlows,
   ...agentTurnFlows,
+  ...agentAnswerFlows,
   ...errorFlows,
   ...chatErrorFlows,
   ...lifecycleFlows,

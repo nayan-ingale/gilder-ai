@@ -114,7 +114,7 @@ export const deploymentPage: DocPage = {
         },
         {
           kind: 'text',
-          text: "Service URLs for calls between services default to localhost: auth's `BILLING_SERVICE_URL`, and the agent's `CHAT_SERVICE_URL` and `BILLING_SERVICE_URL`. The agent's `LLM_MODE` is `mock` by default, so it answers with canned text and needs no AI keys; `live` calls the real providers and needs `GROQ_API_KEY`. `OPENROUTER_API_KEY` and `GEMINI_API_KEY` are optional, and empty counts as unset.",
+          text: "Service URLs for calls between services default to localhost: auth's `BILLING_SERVICE_URL`, and the agent's `CHAT_SERVICE_URL` and `BILLING_SERVICE_URL`. The agent's `LLM_MODE` is `mock` by default, so it answers with canned text and needs no AI keys; `live` calls the real providers and needs `GROQ_API_KEY`. `OPENROUTER_API_KEY` (code answers), `GEMINI_API_KEY` and `TAVILY_API_KEY` (web search) are optional, and empty counts as unset; without a Tavily key, live mode has no search agent, while mock mode always searches with canned results.",
         },
         {
           kind: 'quote',

@@ -3,12 +3,12 @@ import type { ArchComponent, ArchLink } from './schema.ts';
 /**
  * The system map: every app, data store and outside service, and how they connect.
  *
- * Built today: the frontend (sign-in page, app shell, chat list, search, chat page and credits
- * card) and its /api proxy; the gateway, which checks each /api request and forwards the sign-in,
- * logout, profile, chat and balance routes; auth, chat and billing, which serve them; auth's call
- * to billing for the sign-up grant; the agent's turn route, which calls chat, billing and the AI
- * providers but is not forwarded by the gateway yet; and local MongoDB, Redis and Qdrant in
- * Docker. Everything else is marked `planned`, with the roadmap feature that adds it.
+ * Built today: the frontend (sign-in page, app shell, chat list, search, the chat thread with
+ * streamed answers, and the credits card) and its /api proxy; the gateway, which checks each /api
+ * request and forwards the sign-in, logout, profile, chat, answer and balance routes; auth, chat,
+ * billing and the agent, which serve them; auth's call to billing for the sign-up grant; the
+ * agent's calls to chat, billing, the AI providers and Tavily; and local MongoDB, Redis and Qdrant
+ * in Docker. Everything else is marked `planned`, with the roadmap feature that adds it.
  *
  * Link kinds used here: `http` for HTTP calls between programs, `internal` for an app importing
  * the shared library (same process, no network), `data` for a connection to a data store, and
@@ -28,7 +28,7 @@ export const components: ArchComponent[] = [
       "The user's web browser. It loads the GilderAi pages from the frontend and calls only the frontend's own /api routes, so it never sees a backend address. Google sign-in opens a Firebase popup.",
     responsibilities: [
       'Loads the pages from the frontend on port 3000: /login, and the signed-in app at / (a new chat) and /c/<chat ID>, which the login gate sends to /login when there is no session cookie.',
-      "Calls /api/* on the frontend itself: the chat list, search, rename, pin and delete through RTK Query (the store's api), and sign-in and the account through apiFetch, which turns problem+json errors into ApiError with the code and request ID.",
+      "Calls /api/* on the frontend itself: the chat list, search, rename, pin, delete and the balance through RTK Query (the store's api); sign-in and the account through apiFetch, which turns problem+json errors into ApiError with the code and request ID; and answers through streamTurn, which posts a message and reads the server-sent events as they arrive.",
       'Keeps the HttpOnly session cookie, which page scripts cannot read, and a gilder_theme cookie for the theme.',
       'Google sign-in opens a Firebase popup and sends the ID token to /api/auth/session.',
     ],
@@ -47,7 +47,11 @@ export const components: ArchComponent[] = [
       "App shell (the (app) layout): a sidebar (a top bar on small screens) with New chat, Search chats, the chat list and the account menu (theme, sign out). Server components confirm the session with the gateway's /api/me (getCurrentUser) inside a Suspense boundary, so the shell is prerendered.",
       'Chat list (ChatList): loaded in the browser with RTK Query a page at a time and grouped into Pinned, Today, Previous 7 days and Older. Each row has a menu to rename, pin or delete, which changes the list at once and undoes it if the call fails. On small screens the same list opens in a panel (MobileNav).',
       'Search (SearchDialog, ⌘K or Ctrl+K): searches titles and message text through GET /api/chats?query=, with the keyboard. ⌘⇧O or Ctrl+Shift+O goes to / for a new chat (ChatCommands).',
-      "Chat page (/c/<chat ID>): the server reads the chat and its latest messages from the gateway with the browser's cookie (getChatWithHistory, gatewayGet) and renders them, so the history shows on first paint. A missing, deleted or someone else's chat gets one 'This chat isn't available' page.",
+      "Chat page (/c/<chat ID>): the server reads the chat and its latest messages from the gateway with the browser's cookie (getChatWithHistory, gatewayGet) and renders them in the chat thread, so the history shows on first paint. A missing, deleted or someone else's chat gets one 'This chat isn't available' page.",
+      'Chat thread (ChatThread, useChatThread): the conversation and the composer. A sent message shows at once, and the answer fills in token by token from the stream; a refusal puts the thread back and says why. Stop (or Esc), Regenerate on the latest answer, Edit on the latest message (or ↑), copy on every message.',
+      'Composer: Enter to send, an agent menu (Auto, Chat, Search, Code), / shortcut hints, and an out-of-credits state. On / it is the new-chat composer: the first message creates the chat, queues the message (the pending slice) and opens the chat, which sends it.',
+      'Answers render as safe Markdown (react-markdown and remark-gfm): raw HTML is shown as text, images become links (SEC-10), code blocks are highlighted (highlight.js) with a copy button, and search citations link to their sources.',
+      'Code answers get a files card and a side panel: highlighted read-only files, copy, downloads and a zip (fflate), and a preview in a sandboxed frame whose page cannot reach the network.',
       'Credits card (CreditsCard): the balance and plan from GET /api/billing/account, in the sidebar and the small-screen panel, with a warning below 10 credits.',
       'Data in the browser: a Redux store with RTK Query (makeStore, StoreProvider), whose calls all go to /api.',
       'Design system: Light minimal tokens in light and dark, Radix-based components, and a theme remembered in a cookie and applied before the first paint.',
@@ -71,11 +75,11 @@ export const components: ArchComponent[] = [
     kind: 'app',
     status: 'verified',
     summary:
-      "The one public entry to the backend. Each /api request goes through its checks (rate limits, the route allowlist, the origin check and the session lookup) and is then forwarded to its service with a fresh signed internal token. Its route table lists the auth and chat routes and billing's account route so far; nothing reaches the agent through it yet. The services also listen on their own ports, but each one answers 401 to anything without a valid token except its health checks.",
+      "The one public entry to the backend. Each /api request goes through its checks (rate limits, the route allowlist, the origin check and the session lookup) and is then forwarded to its service with a fresh signed internal token. Its route table lists the auth, chat and answer routes and billing's account route. The services also listen on their own ports, but each one answers 401 to anything without a valid token except its health checks.",
     responsibilities: [
       "Builds its Express app with createService, with parseJson: false and its /api router as its routes, after the shared middleware and GET /healthz and GET /readyz. Express's trust proxy is set to TRUST_PROXY_HOPS, so req.ip is the client's address.",
       'Limits each IP address to 120 requests a minute (ipRateLimit), for every request that reaches the router, and each signed-in user to 60 (userRateLimit). Over the limit is a 429 with Retry-After.',
-      "Forwards only what its route table (PUBLIC_ROUTES) lists: POST /api/auth/session, POST /api/auth/dev-session, DELETE /api/auth/session, and GET and PATCH /api/me to auth; GET and POST /api/chats, GET, PATCH and DELETE /api/chats/:id and GET /api/chats/:id/messages to chat; GET /api/billing/account to billing. A :id must be 1 to 64 letters, digits, - or _. Anything else gets the gateway's own 404 and never reaches a service.",
+      "Forwards only what its route table (PUBLIC_ROUTES) lists: POST /api/auth/session, POST /api/auth/dev-session, DELETE /api/auth/session, and GET and PATCH /api/me to auth; GET and POST /api/chats, GET, PATCH and DELETE /api/chats/:id and GET /api/chats/:id/messages to chat; POST /api/chats/:id/messages, the regenerate and edit routes under it, and POST /api/turns/:turnId/stop to the agent; GET /api/billing/account to billing. A :id must be 1 to 64 letters, digits, - or _. Anything else gets the gateway's own 404 and never reaches a service.",
       'Refuses a request that changes something (any method but GET, HEAD and OPTIONS) unless its Origin is one of FRONTEND_ORIGIN, with 403 (originCheck).',
       'Looks the session cookie up in Redis on every matched request, which renews it (sessionLookup), and answers 401 itself for a route that needs a session when there is none (requireSession).',
       'Forwards the request (proxyToService) with fetch: raw body up to 1 MB, a few allowed headers, the cookie only to auth, X-Request-Id, and an internal token signed for that service that names the user. It passes back the status, a few headers, every Set-Cookie and the streamed body. A service that is down or does not start answering within 10 seconds gives 503.',
@@ -134,7 +138,7 @@ export const components: ArchComponent[] = [
     responsibilities: [
       'Builds its Express app with createService: the shared middleware, GET /healthz and GET /readyz, then the internal-token check (audience chat; it trusts the gateway and the agent) in front of chatRouter and internalRouter. A call without a valid token gets 401 on any path except the health checks.',
       'Serves the chat routes (chatRouter): GET /chats (every pinned chat on the first page, then the others by latest activity, with a keyset cursor; or a search of titles and message text with ?query=), POST /chats, GET, PATCH (rename or pin) and DELETE (soft) /chats/:id, and GET /chats/:id/messages (pages from the newest back).',
-      "Serves the internal routes (internalRouter) for the agent service: read a chat, auto-title it while it is still 'New chat', read its recent finished messages, save a message once per clientMessageId, and fill in an answer. Only tokens signed with the agent's key may use them (requireCaller), and the gateway has no route to them.",
+      "Serves the internal routes (internalRouter) for the agent service: read a chat, auto-title it while it is still 'New chat', read its recent finished messages and its last turn (for regenerate and edit), save a message once per clientMessageId, and fill in an answer. Answers can be long (code files), so chat takes request bodies up to 2 MB and message text up to 400,000 characters. Only tokens signed with the agent's key may use them (requireCaller), and the gateway has no route to them.",
       'Keeps conversations and messages in MongoDB (ConversationModel, MessageModel). findOwnedConversation reads a chat only for its owner and only if it is not deleted, and toChat and toMessage are the public shapes.',
       'Connects to MongoDB at startup and does not start serving until the connection works. /readyz pings it.',
       'Imports INTERNAL_PUBLIC_KEY and AGENT_PUBLIC_KEY with importInternalPublicKey at startup. A key it cannot read stops startup with exit code 1.',
@@ -157,18 +161,21 @@ export const components: ArchComponent[] = [
     kind: 'app',
     status: 'verified',
     summary:
-      'Runs a turn: POST /chats/:chatId/turns checks the chat and the credits, picks the agent, holds the credits in billing, saves the messages in chat and streams the answer from an AI provider as server-sent events, then charges or releases the credits. Only the chat agent runs so far, and the gateway does not forward the turn route yet. Planned: web search with Tavily (Web search and code), files in S3 and vectors in Qdrant (PDF and image Q&A), and images from Pollinations (File generation).',
+      'Writes the answers. A message, a regenerate or an edit reaches it through the gateway; it checks the chat and the credits, picks the agent (chat, search or code), holds the credits in billing, saves the messages in chat and streams the answer from an AI provider as server-sent events, then charges or releases the credits. A stop can reach the answer from any instance. Planned: files in S3 and vectors in Qdrant (PDF and image Q&A), and images from Pollinations (File generation).',
     responsibilities: [
       'Builds its Express app with createService: the shared middleware, GET /healthz and GET /readyz, then the internal-token check (audience agent; only the gateway is trusted) in front of turnRouter.',
-      "Serves POST /chats/:chatId/turns (turnRouter): 404 for someone else's chat, 409 for a message already being answered, 402 before any AI call when the user has no credits (SEC-03), then memory, routing, a credit hold, the two messages in chat, and the streamed answer (meta, agent, token, usage, title, error and done events). A finished answer is committed; a failure, or a stop before the first token, is released; a stop after text started is committed.",
-      "Calls chat and billing with its own key (SERVICE_PRIVATE_KEY) through createInternalClient: chat's /internal routes to read the chat and its recent messages, save and fill in messages and name a new chat; billing's GET /account and /internal/credits/reserve, commit and release.",
+      "Serves the answer routes (turnRouter): POST /chats/:chatId/turns, POST /chats/:chatId/messages/:messageId/regenerate and /edit (latest turn only), all through one runTurn core, and POST /turns/:turnId/stop. Before the stream: 404 for someone else's chat, 409 for a request already being answered, 402 before any AI call when the user has no credits (SEC-03), and 429 over the routed agent's per-minute limit. Then the streamed answer (meta, agent, sources, artifact, token, usage, title, error and done events). A finished answer is committed; a failure, or a stop before the first token, is released; a stop after text started is committed.",
+      'Stops an answer on whichever instance runs it (createStopSignals): the owner is checked in Redis, then the turn ID is published on a Redis channel every instance listens to.',
+      'Runs three agents (buildAgents): chat, code (Markdown files parsed into an artifact) and search (Tavily, or canned results in mock mode; only with a Tavily key in live mode), with sources sent before the answer.',
+      'Records every model attempt in its llmCalls collection (llmCallRecorder), without waiting for the write.',
+      "Calls chat and billing with its own key (SERVICE_PRIVATE_KEY) through createInternalClient: chat's /internal routes to read the chat, its recent messages and its last turn, save and fill in messages and name a new chat; billing's GET /account and /internal/credits/reserve, commit and release.",
       'Calls the AI providers through its own fetch-based layer (createLlm, createOpenAiCompatibleProvider): Groq, OpenRouter and Gemini over their OpenAI-compatible APIs, with a fallback to the next model only before the first token, a 20-second start limit and a 30-second idle limit. LLM_MODE=mock (the default) answers from a mock provider with no keys.',
-      'Picks the agent (routeMessage): a chip or /shortcut, an attachment, or a small router model asked for JSON (completeJson, with one repair); anything unclear becomes chat. Titles a new chat while the answer streams (generateTitle).',
-      "Keeps each chat's last 20 messages in Redis for an hour (createMemory), and a 15-minute lock per message (turn-lock:...).",
-      'Connects to MongoDB at startup and does not start serving until the connection works.',
+      'Picks the agent (routeMessage): a chip or /shortcut, an attachment, or a small router model asked for JSON (completeJson, with one repair); anything unclear, or an agent that is not running, becomes chat. Titles a new chat while the answer streams (generateTitle).',
+      "Keeps each chat's last 20 messages in Redis for an hour (createMemory), a 15-minute lock per request (turn-lock:...), a stop registration per running answer (turn:...) and per-agent rate-limit counters.",
+      'Connects to MongoDB at startup and does not start serving until the connection works; the llmCalls records live there.',
       'Opens a Redis client at startup. /readyz says ready only when both MongoDB and Redis answer.',
-      'Checks its settings at startup (rules in env-schema.ts) and refuses to start if a required variable (MONGODB_URI, REDIS_URL, INTERNAL_PUBLIC_KEY, SERVICE_PRIVATE_KEY) is missing, if any value is invalid, or if LLM_MODE is live without GROQ_API_KEY. Its .env.example also lists QDRANT_URL, TAVILY_API_KEY and the S3 settings for later features, which the schema does not read yet.',
-      'On SIGTERM or SIGINT, finishes in-flight requests, then disconnects MongoDB and closes Redis.',
+      'Checks its settings at startup (rules in env-schema.ts) and refuses to start if a required variable (MONGODB_URI, REDIS_URL, INTERNAL_PUBLIC_KEY, SERVICE_PRIVATE_KEY) is missing, if any value is invalid, or if LLM_MODE is live without GROQ_API_KEY. TAVILY_API_KEY turns on the search agent in live mode. Its .env.example also lists QDRANT_URL and the S3 settings for later features, which the schema does not read yet.',
+      'On SIGTERM or SIGINT, finishes in-flight requests, then closes the stop signals, disconnects MongoDB and closes Redis.',
     ],
     path: 'backend/services/agent',
     port: 8003,
@@ -176,6 +183,8 @@ export const components: ArchComponent[] = [
       'backend/services/agent/src/index.ts#(module)',
       'backend/services/agent/src/app.ts#createApp',
       'backend/services/agent/src/turns.ts#turnRouter',
+      'backend/services/agent/src/turns.ts#runTurn',
+      'backend/services/agent/src/agents/index.ts#buildAgents',
       'backend/services/agent/src/llm/llm.ts#createLlm',
     ],
   },
@@ -252,6 +261,7 @@ export const components: ArchComponent[] = [
       'auth, chat, agent and billing connect at startup. Each .env.example points the app at its own database: gilder_auth, gilder_chat, gilder_agent and gilder_billing.',
       'Auth keeps its users here (a unique Firebase ID and email each): its sign-in routes create or update them, and the /me routes read and save them.',
       "Chat keeps conversations and messages in gilder_chat. The indexes serve the chat list (userId, pinnedAt, lastMessageAt), a chat's messages in order, one message per clientMessageId, and text search of titles and message text, each behind userId.",
+      "The agent keeps a record of every model attempt in gilder_agent's llmCalls collection (indexed by user and time).",
       'Billing keeps accounts (keyed by the user ID), reservations and the ledger in gilder_billing. Partial unique indexes allow one sign-up grant per user and one usage entry per reservation; a unique idempotency key makes each reserve happen once.',
     ],
     port: 27018,
@@ -268,7 +278,7 @@ export const components: ArchComponent[] = [
       'Listens on host port 6380, not the usual 6379. It saves to disk (append-only file) in the redis-data volume.',
       'Sets the noeviction policy, so if a memory limit is added later, Redis will refuse new writes instead of quietly deleting keys. No memory limit (--maxmemory) is set today, so the policy does not come into play yet.',
       'gateway, auth and agent open a client at startup and send PING for /readyz.',
-      "The agent caches each chat's last 20 messages as the list mem:<chat ID> for an hour, and locks a message being answered with turn-lock:<chat ID>:<client message ID> for up to 15 minutes.",
+      "The agent caches each chat's last 20 messages as the list mem:<chat ID> for an hour, locks a request being answered with turn-lock:<chat ID>:<client message ID> for up to 15 minutes, registers a running answer's owner as turn:<turn ID>, counts per-agent limits as rl:agent-<agent>:<user ID>, and carries stops between its instances on the turn-stops channel (publish and subscribe).",
       "The shared library stores sessions as sess:<SHA-256 of the session ID>, with a 7-day expiry that each lookup renews, and rate-limit counters as rl:<scope>:<id>, whose expiry is set with the count in one MULTI. Auth's sign-in creates sessions and its logout deletes them; the gateway looks a session up on each request and counts requests per IP (rl:ip:...) and per user (rl:user:...).",
       'Tests run against a real Redis on port 6380, using database 15: the local container, or a Redis service in CI.',
     ],
@@ -300,7 +310,7 @@ export const components: ArchComponent[] = [
   },
 
   // -------------------------------------------------------------------------------------------
-  // Outside services (Firebase from auth, and the AI providers from the agent, are called today)
+  // Outside services (Firebase from auth, and the AI providers and Tavily from the agent, are called today)
 
   {
     id: 'llm-providers',
@@ -310,17 +320,18 @@ export const components: ArchComponent[] = [
     summary:
       'The language models the agent calls to write answers, all over their OpenAI-compatible chat-completions APIs with fetch. Each is used only when its key is set and LLM_MODE is live; the default, mock, calls none of them.',
     responsibilities: [
-      'Groq: the chat answers (openai/gpt-oss-120b, then openai/gpt-oss-20b), routing and titles (openai/gpt-oss-20b). Live mode needs its key.',
-      'OpenRouter (deepseek/deepseek-chat) for code and Gemini (gemini-2.5-flash) for image questions are set up in MODEL_ROUTES and buildProviders, but no running agent uses them yet.',
+      'Groq: chat and search answers (openai/gpt-oss-120b, then openai/gpt-oss-20b), routing, titles and search queries (openai/gpt-oss-20b), and code when OpenRouter has no key (openai/gpt-oss-120b). Live mode needs its key.',
+      'OpenRouter: code answers (deepseek/deepseek-chat), when OPENROUTER_API_KEY is set.',
+      'Gemini (gemini-2.5-flash) for image questions is set up in MODEL_ROUTES and buildProviders, but no running agent uses it yet.',
     ],
   },
   {
     id: 'tavily',
     name: 'Tavily',
     kind: 'external',
-    status: 'planned',
-    plannedIn: 'Web search and code',
-    summary: 'A web search API the agent will use for answers with sources. Not built yet.',
+    status: 'verified',
+    summary:
+      'The web search API behind the search agent: up to 5 results with images per answer, called with fetch when TAVILY_API_KEY is set and LLM_MODE is live. Mock mode uses canned results instead.',
     responsibilities: [],
   },
   {
@@ -471,13 +482,16 @@ export const links: ArchLink[] = [
     from: 'agent',
     to: 'mongodb',
     kind: 'data',
-    label: 'Connects at startup; /readyz pings it',
+    label:
+      'Connects at startup; /readyz pings it. Saves a record of every model attempt in llmCalls (gilder_agent), without waiting for the write',
     status: 'verified',
     evidence: [
       'backend/services/agent/src/index.ts#(module)',
       'backend/services/agent/src/index.ts#app',
       'backend/shared/src/mongo.ts#connectMongo',
       'backend/shared/src/mongo.ts#pingMongo',
+      'backend/services/agent/src/telemetry.ts#LlmCallModel',
+      'backend/services/agent/src/telemetry.ts#llmCallRecorder',
     ],
   },
   {
@@ -542,7 +556,7 @@ export const links: ArchLink[] = [
     to: 'redis',
     kind: 'data',
     label:
-      "Opens a client at startup; /readyz sends PING. Caches each chat's last 20 messages (mem:...) and locks a message while it is answered (turn-lock:...)",
+      "Opens a client at startup; /readyz sends PING. Caches each chat's last 20 messages (mem:...), locks a request while it is answered (turn-lock:...), counts per-agent limits (rl:agent-...), and registers running answers (turn:...) and carries stops between instances on the turn-stops channel, over a second connection",
     status: 'verified',
     evidence: [
       'backend/services/agent/src/index.ts#redis',
@@ -550,7 +564,8 @@ export const links: ArchLink[] = [
       'backend/shared/src/redis.ts#createRedis',
       'backend/shared/src/redis.ts#pingRedis',
       'backend/services/agent/src/memory.ts#createMemory',
-      'backend/services/agent/src/turns.ts#turnRouter',
+      'backend/services/agent/src/turns.ts#runTurn',
+      'backend/services/agent/src/stops.ts#createStopSignals',
     ],
   },
 
@@ -664,7 +679,7 @@ export const links: ArchLink[] = [
     to: 'chat',
     kind: 'http',
     label:
-      "During a turn: reads the chat and its recent messages, saves the user's message and the answer, fills the answer in and names a new chat, through chat's /internal routes with the agent's own key",
+      "During a turn: reads the chat, its recent messages and its last turn, saves the user's message and the answer (superseding replaced ones), fills the answer in with its sources and files, and names a new chat, through chat's /internal routes with the agent's own key",
     status: 'verified',
     evidence: [
       'backend/services/agent/src/services.ts#chatService',
@@ -692,7 +707,7 @@ export const links: ArchLink[] = [
     to: 'llm-providers',
     kind: 'external',
     label:
-      'Streams answers, routing and titles from Groq (and OpenRouter or Gemini when their keys are set) over their OpenAI-compatible APIs, in live mode only',
+      'Streams answers, routing, titles and search queries from Groq, and code from OpenRouter when its key is set, over their OpenAI-compatible APIs, in live mode only',
     status: 'verified',
     evidence: [
       'backend/services/agent/src/llm/openai-compatible.ts#createOpenAiCompatibleProvider',
@@ -702,26 +717,35 @@ export const links: ArchLink[] = [
     ],
   },
 
-  // -------------------------------------------------------------------------------------------
-  // Planned: not built yet
-
+  // Gateway → agent: the answer routes, streamed back.
   {
     from: 'gateway',
     to: 'agent',
     kind: 'http',
     label:
-      "Turn requests (POST /chats/:chatId/turns), each with a short-lived signed internal token: the agent serves the route, but the gateway's route table does not list it yet",
-    status: 'planned',
-    plannedIn: 'AI answers',
+      'Send, regenerate and edit (each streams the answer back) and stop, from the route table, each with a fresh internal token for the agent that names the user',
+    status: 'verified',
+    evidence: [
+      'backend/gateway/src/route-table.ts#PUBLIC_ROUTES',
+      'backend/gateway/src/proxy.ts#proxyToService',
+      'backend/services/agent/src/turns.ts#turnRouter',
+    ],
   },
   {
     from: 'agent',
     to: 'tavily',
     kind: 'external',
-    label: 'Web search queries',
-    status: 'planned',
-    plannedIn: 'Web search and code',
+    label: 'One web search per search answer (up to 5 results), in live mode with TAVILY_API_KEY',
+    status: 'verified',
+    evidence: [
+      'backend/services/agent/src/search/web-search.ts#createTavilySearch',
+      'backend/services/agent/src/agents/search.ts#createSearchAgent',
+    ],
   },
+
+  // -------------------------------------------------------------------------------------------
+  // Planned: not built yet
+
   {
     from: 'agent',
     to: 'qdrant',
