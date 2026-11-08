@@ -8,11 +8,21 @@ import { readServerEvents } from './sse';
  * stream starts, everything arrives as events.
  */
 
-export const BUILT_AGENTS = ['chat'] as const;
+export const BUILT_AGENTS = ['chat', 'search'] as const;
+
+/** A web source a search answer cites as [n]. */
+export interface Source {
+  n: number;
+  title: string;
+  url: string;
+  snippet: string;
+  image?: string;
+}
 
 export type TurnEvent =
   | { event: 'meta'; data: { turnId: string; userMessageId: string; assistantMessageId: string } }
   | { event: 'agent'; data: { agent: string; reason: string } }
+  | { event: 'sources'; data: { items: Source[] } }
   | { event: 'token'; data: { text: string } }
   | { event: 'usage'; data: { creditsCharged: number; balance: number } }
   | { event: 'title'; data: { title: string } }
@@ -134,4 +144,6 @@ export type ThreadMessage = Pick<ChatMessage, 'role' | 'content' | 'status'> & {
   agent?: string | null;
   /** For a failed answer: why, and the request ID to quote. */
   error?: { message: string; requestId?: string };
+  /** Web sources a search answer cites. */
+  sources?: Source[];
 };

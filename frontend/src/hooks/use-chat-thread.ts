@@ -6,6 +6,7 @@ import { useToast } from '@/components/ui/toast';
 import { ApiError } from '@/lib/api';
 import type { ChatMessage } from '@/lib/chats';
 import {
+  type Source,
   newClientMessageId,
   stopTurn,
   streamTurn,
@@ -29,6 +30,7 @@ export function toThreadMessage(message: ChatMessage): ThreadMessage {
     content: message.content,
     status: message.status,
     agent: message.agent,
+    ...(message.sources.length > 0 ? { sources: message.sources as Source[] } : {}),
   };
 }
 
@@ -110,6 +112,9 @@ export function useChatThread(chatId: string, initial: ChatMessage[]): ChatThrea
               );
               break;
             }
+            case 'sources':
+              updateAnswer((message) => ({ ...message, sources: turnEvent.data.items }));
+              break;
             case 'agent':
               updateAnswer((message) => ({ ...message, agent: turnEvent.data.agent }));
               break;

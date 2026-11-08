@@ -4,8 +4,65 @@ import { Check, Copy, Pencil, RotateCcw } from 'lucide-react';
 import { useState } from 'react';
 import { IconButton } from '@/components/ui/button';
 import { cn } from '@/components/ui/cn';
-import type { ThreadMessage } from '@/lib/turns';
+import type { Source, ThreadMessage } from '@/lib/turns';
 import { Markdown } from './markdown';
+
+/**
+ * Turns the answer's [n] markers (or 【n】) into links to the matching source. Numbers with no
+ * source are left as written; code spans and blocks are left alone.
+ */
+export function linkCitations(text: string, sources: readonly Source[] | undefined): string {
+  if (!sources?.length) {
+    return text;
+  }
+  const byNumber = new Map(sources.map((source) => [source.n, source.url]));
+  return text
+    .split(/(```[\s\S]*?```|`[^`\n]*`)/)
+    .map((part, index) =>
+      index % 2 === 1
+        ? part
+        : part
+            // Some models cite with full-width brackets, like 【1】 or 【1†source】.
+            .replace(/【(\d{1,2})(?:†[^】]*)?】/g, '[$1]')
+            .replace(/\[(\d{1,2})\](?!\()/g, (marker: string, n: string) => {
+              const url = byNumber.get(Number(n));
+              return url ? `[\\[${n}\\]](${url})` : marker;
+            }),
+    )
+    .join('');
+}
+
+function Sources({ sources }: { sources: readonly Source[] }) {
+  return (
+    <section aria-label="Sources" className="mt-3">
+      <h3 className="mb-1.5 text-xs font-medium text-fg-subtle">Sources</h3>
+      <ol className="flex flex-wrap gap-2">
+        {sources.map((source) => (
+          <li key={source.n}>
+            <a
+              href={source.url}
+              target="_blank"
+              rel="noopener noreferrer nofollow"
+              title={source.title}
+              className="inline-flex max-w-64 items-center gap-1.5 rounded-md border border-line bg-raised px-2 py-1 text-xs text-fg-muted hover:bg-surface hover:text-fg"
+            >
+              <span className="font-medium text-fg">{source.n}</span>
+              <span className="truncate">{hostOf(source.url)}</span>
+            </a>
+          </li>
+        ))}
+      </ol>
+    </section>
+  );
+}
+
+function hostOf(url: string): string {
+  try {
+    return new URL(url).hostname.replace(/^www\./, '');
+  } catch {
+    return url;
+  }
+}
 
 export interface MessageItemProps {
   message: ThreadMessage;
@@ -36,7 +93,9 @@ export function MessageItem({ message, onRegenerate, onEdit }: MessageItemProps)
         </div>
       ) : (
         <div className="text-sm leading-relaxed text-fg" aria-busy={writing}>
-          {message.content ? <Markdown>{message.content}</Markdown> : null}
+          {message.content ? (
+            <Markdown>{linkCitations(message.content, message.sources)}</Markdown>
+          ) : null}
           {writing && !message.content ? (
             <span className="inline-flex gap-1 py-2" aria-label="Writing the answer">
               {[0, 1, 2].map((dot) => (
@@ -48,6 +107,7 @@ export function MessageItem({ message, onRegenerate, onEdit }: MessageItemProps)
               ))}
             </span>
           ) : null}
+          {message.sources?.length ? <Sources sources={message.sources} /> : null}
           {message.status === 'stopped' ? (
             <p className="mt-1 text-xs text-fg-subtle">Stopped</p>
           ) : null}

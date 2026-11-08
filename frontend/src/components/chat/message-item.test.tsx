@@ -1,0 +1,58 @@
+// @vitest-environment jsdom
+import { cleanup, render, screen, within } from '@testing-library/react';
+import { afterEach, describe, expect, it } from 'vitest';
+import type { Source } from '@/lib/turns';
+import { linkCitations, MessageItem } from './message-item';
+
+afterEach(() => {
+  cleanup();
+});
+
+const SOURCES: Source[] = [
+  { n: 1, title: 'TypeScript blog', url: 'https://devblogs.microsoft.com/typescript', snippet: '' },
+  { n: 2, title: 'Wikipedia', url: 'https://en.wikipedia.org/wiki/TypeScript', snippet: '' },
+];
+
+describe('linkCitations', () => {
+  it('links [n] to its source, leaving unknown numbers, links and code alone', () => {
+    const text =
+      'Fact [1], more [2][1], none [7], a [link](https://x.dev) and `arr[1]`.\n```\nlist[2]\n```';
+
+    expect(linkCitations(text, SOURCES)).toBe(
+      'Fact [\\[1\\]](https://devblogs.microsoft.com/typescript), more [\\[2\\]](https://en.wikipedia.org/wiki/TypeScript)[\\[1\\]](https://devblogs.microsoft.com/typescript), none [7], a [link](https://x.dev) and `arr[1]`.\n```\nlist[2]\n```',
+    );
+    expect(linkCitations('No sources [1]', undefined)).toBe('No sources [1]');
+    expect(linkCitations('Wide 【2】 and 【1†source】', SOURCES)).toBe(
+      'Wide [\\[2\\]](https://en.wikipedia.org/wiki/TypeScript) and [\\[1\\]](https://devblogs.microsoft.com/typescript)',
+    );
+  });
+});
+
+describe('MessageItem', () => {
+  it('shows a search answer with clickable citations and its sources', () => {
+    render(
+      <ol>
+        <MessageItem
+          message={{
+            key: 'a1',
+            id: 'a1',
+            role: 'assistant',
+            content: 'TypeScript 6.0 is out [1].',
+            status: 'complete',
+            agent: 'search',
+            sources: SOURCES,
+          }}
+        />
+      </ol>,
+    );
+
+    const citation = screen.getByRole('link', { name: '[1]' });
+    expect(citation.getAttribute('href')).toBe('https://devblogs.microsoft.com/typescript');
+    const sources = screen.getByRole('region', { name: 'Sources' });
+    expect(
+      within(sources)
+        .getAllByRole('link')
+        .map((link) => link.textContent),
+    ).toEqual(['1devblogs.microsoft.com', '2en.wikipedia.org']);
+  });
+});
