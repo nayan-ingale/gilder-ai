@@ -96,6 +96,32 @@ describe('Avatar', () => {
     expect(screen.getByText('NI').getAttribute('aria-label')).toBe('Nayan Ingale');
   });
 
+  it('loads the picture without saying which site asked, as Google photos need', () => {
+    const preloads: { referrerPolicy: string }[] = [];
+    // jsdom never loads images, so this one reports a loaded picture straight away.
+    class LoadedImage extends EventTarget {
+      referrerPolicy = '';
+      crossOrigin: string | null = null;
+      src = '';
+      complete = true;
+      naturalWidth = 96;
+      constructor() {
+        super();
+        preloads.push(this);
+      }
+    }
+    vi.stubGlobal('Image', LoadedImage);
+    try {
+      render(<Avatar name="Nayan Ingale" src="https://lh3.googleusercontent.com/a/photo" />);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+
+    const image = screen.getByRole('img', { name: 'Nayan Ingale' });
+    expect(image.getAttribute('referrerpolicy')).toBe('no-referrer');
+    expect(preloads.map((preload) => preload.referrerPolicy)).toEqual(['no-referrer']);
+  });
+
   it('makes initials from the first two words, or "?" for no name', () => {
     expect(initials('nayan')).toBe('N');
     expect(initials('  Ada  Lovelace  King ')).toBe('AL');

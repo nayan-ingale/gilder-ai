@@ -31,7 +31,14 @@ export function Avatar({ name, src, size = 'md', className }: AvatarProps) {
       )}
     >
       {src ? (
-        <AvatarPrimitive.Image src={src} alt={name} className="size-full object-cover" />
+        // Google refuses profile photos when the request says which site it comes from. Radix
+        // passes the policy to its preload too, so neither request sends it.
+        <AvatarPrimitive.Image
+          src={src}
+          alt={name}
+          referrerPolicy="no-referrer"
+          className="size-full object-cover"
+        />
       ) : null}
       <AvatarPrimitive.Fallback className="font-medium text-accent-text" aria-label={name}>
         {initials(name)}
