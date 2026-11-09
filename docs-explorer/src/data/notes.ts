@@ -3561,6 +3561,18 @@ export const notes: SymbolNote[] = [
     returns: 'The menu button and the panel as JSX.',
   },
   {
+    symbol: 'frontend/src/components/ui/avatar.tsx#Avatar',
+    status: 'verified',
+    summary: 'A round profile picture, with the initials while it loads or when there is none.',
+    how: [
+      'Radix loads the picture first and shows it only once it has loaded; until then, or if it fails, the initials of the first two words of the name show.',
+      'The picture is requested with referrerPolicy no-referrer, and Radix uses the same policy for its preload.',
+    ],
+    why: 'Google refuses profile photos (lh3.googleusercontent.com) when the request says which site it comes from, so with the default policy every Google user saw only initials. Not sending the site is also more private.',
+    returns: 'The avatar as JSX.',
+    tests: ['frontend/src/components/ui/controls.test.tsx'],
+  },
+  {
     symbol: 'frontend/src/components/ui/dialog.tsx#Dialog',
     status: 'verified',
     summary: 'A modal dialog with a title, an optional description and a close button.',
