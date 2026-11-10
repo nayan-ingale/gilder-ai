@@ -264,17 +264,36 @@ describe('POST /webhooks/razorpay', () => {
 });
 
 describe('payments and usage', () => {
-  it("lists the user's payments, newest first", async () => {
-    await newOrder('u1', 'starter');
-    await newOrder('u1', 'pro');
-    await newOrder('u2');
+  it("lists the user's paid payments, newest first, without abandoned checkouts", async () => {
+    const client = await as('u1');
+    for (const planId of ['starter', 'pro'] as const) {
+      const orderId = await newOrder('u1', planId);
+      const paymentId = `pay_${planId}`;
+      await client
+        .post(`/orders/${orderId}/verify`)
+        .send({ paymentId, signature: checkoutSignature(orderId, paymentId) });
+    }
+    const abandoned = await newOrder('u1', 'starter');
+    const theirs = await newOrder('u2');
+    await (
+      await as('u2')
+    )
+      .post(`/orders/${theirs}/verify`)
+      .send({ paymentId: 'pay_theirs', signature: checkoutSignature(theirs, 'pay_theirs') });
 
-    const response = await (await as('u1')).get('/payments');
+    const response = await client.get('/payments');
 
-    expect(response.body.items.map((payment: { plan: string }) => payment.plan)).toEqual([
-      'pro',
-      'starter',
+    expect(
+      response.body.items.map((payment: { plan: string; status: string }) => [
+        payment.plan,
+        payment.status,
+      ]),
+    ).toEqual([
+      ['pro', 'paid'],
+      ['starter', 'paid'],
     ]);
+    // Still stored, so a late webhook can pay it.
+    expect(await PaymentModel.countDocuments({ orderId: abandoned, status: 'created' })).toBe(1);
   });
 
   it('sums credits by agent and by day, and lists the latest answers', async () => {

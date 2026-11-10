@@ -87,8 +87,13 @@ export function paymentRouter(deps: {
     },
   );
 
+  // Only paid ones: a checkout that was opened and closed stays stored, because a late webhook
+  // (a slow UPI payment) can still pay it, but the history doesn't list it as a failure.
   router.get('/payments', requireUser(), async (_req, res) => {
-    const payments = await PaymentModel.find({ userId: res.locals.userId as string })
+    const payments = await PaymentModel.find({
+      userId: res.locals.userId as string,
+      status: 'paid',
+    })
       .sort({ createdAt: -1 })
       .limit(50);
     res.json({ items: payments.map(toPayment) });
