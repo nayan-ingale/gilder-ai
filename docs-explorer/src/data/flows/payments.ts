@@ -215,7 +215,7 @@ const buyCredits: Flow = {
       status: 'verified',
       symbol: BILLING_VIEW,
       highlight: 'if (!result) {',
-      what: "Nothing is sent and no toast shows; the Buy buttons come back. The payment stays created and shows as 'Not paid' in the history.",
+      what: 'Nothing is sent and no toast shows; the Buy buttons come back. The payment stays created and is left out of the history; a late webhook can still pay it, and then it shows.',
       why: 'Closing the payment window is a choice, not an error.',
       next: [],
     },
