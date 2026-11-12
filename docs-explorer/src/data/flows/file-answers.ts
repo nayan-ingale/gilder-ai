@@ -15,7 +15,7 @@ const ROUTE: SymbolRef = 'backend/services/agent/src/routing.ts#routeMessage';
 const PDF_QA: SymbolRef = 'backend/services/agent/src/agents/pdf-qa.ts#createPdfQaAgent';
 const IMAGE_QA: SymbolRef = 'backend/services/agent/src/agents/image-qa.ts#createImageQaAgent';
 const SAVE: SymbolRef = 'backend/services/agent/src/files/generated.ts#saveGenerated';
-const MESSAGE: SymbolRef = 'frontend/src/components/chat/message-item.tsx#MessageItem';
+const MESSAGE: SymbolRef = 'frontend/src/components/chat/message-item.tsx#MessageItemView';
 const GATEWAY_APP: SymbolRef = 'backend/gateway/src/app.ts#createApp';
 
 const APPS = ['frontend', 'gateway', 'agent', 'chat', 'billing'];

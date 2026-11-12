@@ -216,6 +216,16 @@ export const packageNotes: PackageNote[] = [
     why: 'Adds GitHub-style Markdown to react-markdown: tables, task lists, strikethrough and bare links.',
   },
   {
+    name: 'unified',
+    layer: 'frontend',
+    why: 'The text-processing pipeline under react-markdown. `splitBlocks` uses it directly to parse an answer into its top-level blocks, so a streaming answer re-renders only its last block.',
+  },
+  {
+    name: 'remark-parse',
+    layer: 'frontend',
+    why: "react-markdown's own Markdown parser. With remark-gfm it gives `splitBlocks` the same block boundaries the renderer sees, so a blank line inside a code block or a list item never splits it.",
+  },
+  {
     name: 'highlight.js',
     layer: 'frontend',
     why: 'Colours code in answers and in the files panel (`highlightCode`). Only its core and thirteen common languages are loaded, to keep the bundle small.',

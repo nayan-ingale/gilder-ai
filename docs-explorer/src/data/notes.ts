@@ -3527,6 +3527,7 @@ export const notes: SymbolNote[] = [
       'ChatCommands wraps everything, so ⌘K and ⌘⇧O work on every signed-in page and every search button opens the same dialog.',
       'The account parts of the sidebar and of the top bar (SidebarAccount) each sit in a Suspense boundary with a skeleton, because they read the session.',
       'The page goes in <main>, which scrolls on its own and is focusable (tabIndex 0, with a focus ring), so keyboard users can scroll it even on a page with nothing else to focus.',
+      "<main> is position: relative, so absolutely positioned content inside it (the screen-reader-only 'You said:' labels) stays in its own scroll area. Without that, those labels overflowed the page, the page itself became scrollable, and scrolling the conversation could slide the whole app up and leave an empty band below it.",
     ],
     why: 'Everything outside those boundaries is static, so the shell can be prerendered and the account streams in. The chat list loads later, in the browser.',
     returns: 'The layout as JSX.',
@@ -4118,6 +4119,7 @@ export const notes: SymbolNote[] = [
       'The messages of one chat, and the answer being written: send, regenerate, edit and stop.',
     how: [
       "Sending shows the user's message and an empty answer at once, then fills the answer in from the events: the IDs from meta, the agent, sources, files and each token.",
+      'Tokens are not applied one by one: the words that arrive before the next frame are added in one update (nextFrame), so a fast stream renders at most once per frame. Any other event, the end of the stream and a failure first add what is waiting, so the order never changes.',
       'A usage event writes the new balance into the cached account, and a title event the new title into the cached chat; afterwards the chat list, the chat and the usage page data (the Usage tag) are refetched.',
       'An error event marks the answer failed with its message and reference, and shows a toast.',
       "A refusal before the stream puts the thread back as it was and shows a toast ('Out of credits' for a 402); the composer gets the text back.",
@@ -4153,7 +4155,8 @@ export const notes: SymbolNote[] = [
     how: [
       'It renders each message with MessageItem, or an empty state, and the composer stuck to the bottom.',
       "A message queued by the new-chat page is cleared and sent once, as soon as the page opens; a ref keeps React's double effects in development from sending it twice.",
-      'While an answer streams it keeps the bottom in view, unless the user scrolled up to read; a new answer always brings the bottom back.',
+      'While an answer streams it keeps the bottom in view, unless the user scrolls up to read; a new answer always brings the bottom back. Only a move up away from the bottom stops following, so text growing faster than scroll events arrive never does; scrolling back within 120px of the end follows again.',
+      'It scrolls <main> itself to its very end (scrollToEnd) in a layout effect, before the frame is drawn: the newest line sits just above the composer instead of under it, new text never shows below the fold first, and the page around the app never scrolls (scrollIntoView would scroll it too).',
       'Picked files are checked (uploadProblem) and uploaded at once (uploadFile), each with a chip; a PDF is then polled every 2 seconds, for up to 3 minutes, until it has been read. A failure shows a toast. Send passes the IDs of the ready files and clears the chips once the message is taken.',
       'The scroll anchor sits after the message list, since a list may hold only list items.',
       'Regenerate is offered on the latest answer and Edit on the latest user message, only when nothing is running. Editing swaps the message for an edit box (Save and send, or Esc to cancel); ↑ in an empty composer opens it too.',
@@ -4198,6 +4201,14 @@ export const notes: SymbolNote[] = [
   {
     symbol: 'frontend/src/components/chat/message-item.tsx#MessageItem',
     status: 'verified',
+    summary: 'MessageItemView, memoised.',
+    why: "While an answer streams, only that answer's object changes (useChatThread maps the others through unchanged), so the messages above it are not rendered again on every word. Regenerate and Edit are only passed when nothing runs, so they don't break the memo while streaming.",
+    returns: 'The memoised component.',
+    tests: ['frontend/src/components/chat/chat-thread.test.tsx'],
+  },
+  {
+    symbol: 'frontend/src/components/chat/message-item.tsx#MessageItemView',
+    status: 'verified',
     summary: "One message: the user's on the right, answers on the left as Markdown.",
     how: [
       "The user's text keeps its line breaks. An answer renders as Markdown with its citations linked, three pulsing dots while it is empty, and Stopped or the failure message (with its reference) under it.",
@@ -4228,9 +4239,23 @@ export const notes: SymbolNote[] = [
       'An image the model wrote becomes a plain link, never loaded (SEC-10).',
       'Links open in a new tab with noopener, noreferrer and nofollow.',
       'Code blocks get a language label, a copy button and highlight.js colours; tables scroll sideways.',
+      'The text is split into its top-level blocks (splitBlocks) and each block renders separately and memoised, so while an answer streams only its last block is parsed, highlighted and rendered again.',
     ],
     why: 'Answers are model output, so nothing in them may run code, load content from elsewhere or reach this page.',
     returns: 'The rendered Markdown as JSX.',
+    tests: ['frontend/src/components/chat/markdown.test.tsx'],
+  },
+  {
+    symbol: 'frontend/src/components/chat/markdown.tsx#splitBlocks',
+    status: 'verified',
+    summary: 'Splits Markdown into its top-level blocks, keeping every character.',
+    how: [
+      'It parses with the same parser as the renderer (unified with remark-parse and remark-gfm) and cuts the text at the start of each top-level node, so each block keeps the blank lines after it.',
+      'A blank line inside a code block or a list item is part of that node, so it never splits it.',
+      'Text with reference links or footnotes stays whole, because their definitions can sit in another block; so does text the parser gives no positions for.',
+    ],
+    why: 'Re-rendering a whole answer on every word made long answers stutter (120–210 ms frames in development). Finished blocks never change while an answer streams, so only the last one needs work.',
+    returns: 'The blocks, which joined give back the text.',
     tests: ['frontend/src/components/chat/markdown.test.tsx'],
   },
   {

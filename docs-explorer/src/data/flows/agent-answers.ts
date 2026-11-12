@@ -127,7 +127,7 @@ const searchAnswer: Flow = {
       title: 'In the browser: linked citations and source chips',
       kind: 'response',
       status: 'verified',
-      symbol: 'frontend/src/components/chat/message-item.tsx#MessageItem',
+      symbol: 'frontend/src/components/chat/message-item.tsx#MessageItemView',
       highlight: '<Markdown>{linkCitations(message.content, message.sources)}</Markdown>',
       what: 'linkCitations turns each [n] (and the 【n】 some models write) into a link to source n, leaving code, existing links and unknown numbers alone. Under the answer, a Sources row shows each number and site; every link opens in a new tab with noopener, noreferrer and nofollow.',
       why: 'The reader can check every claim against its source.',
