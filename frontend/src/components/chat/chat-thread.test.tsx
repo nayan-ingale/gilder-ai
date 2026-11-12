@@ -328,3 +328,143 @@ describe('generated files', () => {
     expect(screen.queryByText(/Laying out the pages/)).toBeNull();
   });
 });
+
+/** A stream the test writes to event by event, then ends. */
+function liveStream() {
+  const encoder = new TextEncoder();
+  let output!: ReadableStreamDefaultController<Uint8Array>;
+  const response = new Response(
+    new ReadableStream<Uint8Array>({
+      start(controller) {
+        output = controller;
+      },
+    }),
+    { headers: { 'content-type': 'text/event-stream' } },
+  );
+  return {
+    response,
+    send: (...events: [string, unknown][]) =>
+      output.enqueue(
+        encoder.encode(
+          events
+            .map(([event, data]) => `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`)
+            .join(''),
+        ),
+      ),
+    end: () => output.close(),
+  };
+}
+
+/**
+ * The thread inside a <main> that scrolls like a browser's: 500px tall, as tall inside as
+ * `size.content`, scrollTop kept within range, and a scroll event on every change.
+ */
+function renderInScroller(size: { content: number }) {
+  render(
+    <Provider store={makeStore()}>
+      <ToastProvider>
+        <main data-testid="scroller">
+          <ChatThread chatId={CHAT} initialMessages={[]} />
+        </main>
+      </ToastProvider>
+    </Provider>,
+  );
+  const scroller = screen.getByTestId('scroller');
+  let top = 0;
+  Object.defineProperty(scroller, 'clientHeight', { configurable: true, get: () => 500 });
+  Object.defineProperty(scroller, 'scrollHeight', { configurable: true, get: () => size.content });
+  Object.defineProperty(scroller, 'scrollTop', {
+    configurable: true,
+    get: () => top,
+    set: (value: number) => {
+      const next = Math.max(0, Math.min(value, size.content - 500));
+      if (next !== top) {
+        top = next;
+        scroller.dispatchEvent(new Event('scroll'));
+      }
+    },
+  });
+  return scroller;
+}
+
+describe('following the answer', () => {
+  it('keeps the newest text in view however fast it grows, until the reader scrolls up', async () => {
+    const stream = liveStream();
+    answer = routes(() => stream.response);
+    const intoView = vi.spyOn(Element.prototype, 'scrollIntoView');
+    const size = { content: 1000 };
+    const scroller = renderInScroller(size);
+
+    await userEvent.type(screen.getByRole('textbox', { name: 'Message' }), 'Hi{Enter}');
+    stream.send(
+      ['meta', { turnId: 't1', userMessageId: 'u1', assistantMessageId: 'a1' }],
+      ['token', { text: 'First words.' }],
+    );
+    expect(await screen.findByText('First words.')).toBeTruthy();
+    expect(scroller.scrollTop).toBe(500);
+
+    // The text grew faster than scroll events arrive: the next one finds the view far from
+    // the end. That is not the reader scrolling, so the thread keeps following.
+    size.content = 3000;
+    scroller.dispatchEvent(new Event('scroll'));
+    stream.send(['token', { text: ' More.' }]);
+    expect(await screen.findByText('First words. More.')).toBeTruthy();
+    expect(scroller.scrollTop).toBe(2500);
+
+    // The reader scrolls up to read: new text no longer moves the view.
+    scroller.scrollTop = 800;
+    size.content = 3500;
+    stream.send(['token', { text: ' Even more.' }]);
+    expect(await screen.findByText('First words. More. Even more.')).toBeTruthy();
+    expect(scroller.scrollTop).toBe(800);
+
+    // Back near the end, it follows again.
+    scroller.scrollTop = 2950;
+    stream.send(['token', { text: ' Done.' }], ['done', {}]);
+    stream.end();
+    expect(await screen.findByRole('button', { name: 'Regenerate' })).toBeTruthy();
+    expect(scroller.scrollTop).toBe(3000);
+    // Only the conversation scrolls, never the page around it.
+    expect(intoView).not.toHaveBeenCalled();
+  });
+});
+
+describe('streamed words', () => {
+  it('adds the words that arrive together in one update, before the next frame', async () => {
+    const stream = liveStream();
+    answer = routes(() => stream.response);
+    const frames = vi.spyOn(window, 'requestAnimationFrame');
+    renderThread();
+
+    await userEvent.type(screen.getByRole('textbox', { name: 'Message' }), 'Hi{Enter}');
+    const before = frames.mock.calls.length;
+    stream.send(
+      ['token', { text: 'One ' }],
+      ['token', { text: 'two ' }],
+      ['token', { text: 'three ' }],
+      ['token', { text: 'four.' }],
+    );
+
+    expect(await screen.findByText('One two three four.')).toBeTruthy();
+    expect(frames.mock.calls.length - before).toBe(1);
+    stream.send(['done', {}]);
+    stream.end();
+  });
+
+  it('keeps the words that came before a failure, in order', async () => {
+    const stream = liveStream();
+    answer = routes(() => stream.response);
+    renderThread();
+
+    await userEvent.type(screen.getByRole('textbox', { name: 'Message' }), 'Hi{Enter}');
+    stream.send(
+      ['token', { text: 'Half an ' }],
+      ['token', { text: 'answer' }],
+      ['error', { code: 'provider_failed', message: 'The model stopped answering' }],
+    );
+    stream.end();
+
+    expect(await screen.findByText('Half an answer')).toBeTruthy();
+    expect(await screen.findByText('The answer failed')).toBeTruthy();
+  });
+});

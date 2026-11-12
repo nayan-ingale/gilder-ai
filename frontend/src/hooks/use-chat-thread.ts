@@ -65,6 +65,15 @@ export interface ChatThread {
   stop(): void;
 }
 
+/** Runs a callback before the next frame is drawn (soon after, where frames don't exist). */
+function nextFrame(callback: () => void) {
+  if (typeof requestAnimationFrame === 'function') {
+    requestAnimationFrame(callback);
+  } else {
+    setTimeout(callback, 16);
+  }
+}
+
 export function useChatThread(chatId: string, initial: ChatMessage[]): ChatThread {
   const dispatch = useDispatch<AppDispatch>();
   const toast = useToast();
@@ -100,6 +109,29 @@ export function useChatThread(chatId: string, initial: ChatMessage[]): ChatThrea
         setMessages((current) =>
           current.map((message) => (message.key === answerKey ? change(message) : message)),
         );
+      // Words that arrive between two frames go into one update, so a fast stream renders at
+      // most once per frame instead of once per network chunk. Any other event, and the end of
+      // the stream, first adds what is waiting, so the order never changes.
+      let waitingText = '';
+      let frameRequested = false;
+      const addWaitingText = () => {
+        if (!waitingText) {
+          return;
+        }
+        const text = waitingText;
+        waitingText = '';
+        updateAnswer((message) => ({ ...message, content: message.content + text }));
+      };
+      const addTextNextFrame = (text: string) => {
+        waitingText += text;
+        if (!frameRequested) {
+          frameRequested = true;
+          nextFrame(() => {
+            frameRequested = false;
+            addWaitingText();
+          });
+        }
+      };
 
       const current: Running = { controller: new AbortController() };
       runningRef.current = current;
@@ -114,6 +146,9 @@ export function useChatThread(chatId: string, initial: ChatMessage[]): ChatThrea
       try {
         for await (const turnEvent of streamTurn(request, current.controller.signal)) {
           accepted = true;
+          if (turnEvent.event !== 'token') {
+            addWaitingText();
+          }
           switch (turnEvent.event) {
             case 'meta': {
               current.turnId = turnEvent.data.turnId;
@@ -151,10 +186,7 @@ export function useChatThread(chatId: string, initial: ChatMessage[]): ChatThrea
               updateAnswer((message) => ({ ...message, agent: turnEvent.data.agent }));
               break;
             case 'token':
-              updateAnswer((message) => ({
-                ...message,
-                content: message.content + turnEvent.data.text,
-              }));
+              addTextNextFrame(turnEvent.data.text);
               break;
             case 'usage':
               dispatch(
@@ -191,6 +223,7 @@ export function useChatThread(chatId: string, initial: ChatMessage[]): ChatThrea
               break;
           }
         }
+        addWaitingText();
         const stopped = current.controller.signal.aborted;
         if (!failed) {
           updateAnswer((message) => {
@@ -209,6 +242,7 @@ export function useChatThread(chatId: string, initial: ChatMessage[]): ChatThrea
           // Refused before the stream: nothing was saved or charged, so undo the optimistic view.
           setMessages(before);
         } else {
+          addWaitingText();
           updateAnswer((message) => ({ ...message, status: 'failed' }));
         }
         const known = error instanceof ApiError ? error : undefined;

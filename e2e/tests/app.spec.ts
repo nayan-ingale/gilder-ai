@@ -27,6 +27,29 @@ test.describe('chatting', () => {
     await expect(page).not.toHaveTitle(/^New chat/);
   });
 
+  test('scrolls the conversation to the newest answer, never the page around it', async ({
+    page,
+  }) => {
+    // Short, so the conversation is taller than the window.
+    await page.setViewportSize({ width: 1280, height: 480 });
+    await signIn(page);
+    await page.goto('/');
+    await ask(page, 'Give me two tips for learning to cook.');
+    await ask(page, 'And two more, please.');
+
+    const scroll = await page.evaluate(() => {
+      const root = document.scrollingElement as Element;
+      const main = document.querySelector('main') as HTMLElement;
+      return {
+        pageTop: root.scrollTop,
+        pageOverflow: root.scrollHeight - root.clientHeight,
+        conversationTaller: main.scrollHeight > main.clientHeight,
+        fromEnd: Math.round(main.scrollHeight - main.scrollTop - main.clientHeight),
+      };
+    });
+    expect(scroll).toEqual({ pageTop: 0, pageOverflow: 0, conversationTaller: true, fromEnd: 0 });
+  });
+
   test('regenerates the latest answer in place', async ({ page }) => {
     await signIn(page);
     await page.goto('/');

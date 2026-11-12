@@ -1,9 +1,11 @@
 'use client';
 
 import { Check, Copy } from 'lucide-react';
-import { type ReactNode, useRef, useState } from 'react';
+import { memo, type ReactNode, useMemo, useRef, useState } from 'react';
 import ReactMarkdown, { type Components } from 'react-markdown';
 import remarkGfm from 'remark-gfm';
+import remarkParse from 'remark-parse';
+import { unified } from 'unified';
 import { highlightCode } from '@/lib/highlight';
 
 /**
@@ -78,12 +80,50 @@ const components: Components = {
   ),
 };
 
+const blockParser = unified().use(remarkParse).use(remarkGfm);
+
+/**
+ * Splits Markdown into its top-level blocks (a paragraph, a list, a table, a code block), each
+ * with the blank lines after it, using the same parser as the renderer, so a blank line inside
+ * a code block or a list item never splits it. Reference links and footnotes can point across
+ * blocks, so text that has them stays whole.
+ */
+export function splitBlocks(markdown: string): string[] {
+  const nodes = blockParser.parse(markdown).children;
+  const starts = nodes.map((node) => node.position?.start.offset);
+  if (
+    nodes.length < 2 ||
+    nodes.some((node) => node.type === 'definition' || node.type === 'footnoteDefinition') ||
+    starts.some((start) => start === undefined)
+  ) {
+    return [markdown];
+  }
+  return (starts as number[]).map((start, index) =>
+    markdown.slice(index === 0 ? 0 : start, starts[index + 1] ?? markdown.length),
+  );
+}
+
+/** One block, rendered again only when its own text changes. */
+const MarkdownBlock = memo(function MarkdownBlock({ source }: { source: string }) {
+  return (
+    <ReactMarkdown remarkPlugins={[remarkGfm]} components={components}>
+      {source}
+    </ReactMarkdown>
+  );
+});
+
+/**
+ * While an answer streams, only its last block changes, so the finished blocks above it (and
+ * their code highlighting) are not parsed and rendered again on every word.
+ */
 export function Markdown({ children }: { children: string }) {
+  const blocks = useMemo(() => splitBlocks(children), [children]);
   return (
     <div className="markdown">
-      <ReactMarkdown remarkPlugins={[remarkGfm]} components={components}>
-        {children}
-      </ReactMarkdown>
+      {blocks.map((block, index) => (
+        // Blocks only grow at the end, so a block keeps its position for the whole answer.
+        <MarkdownBlock key={index} source={block} />
+      ))}
     </div>
   );
 }

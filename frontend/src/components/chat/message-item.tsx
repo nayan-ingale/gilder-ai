@@ -1,7 +1,7 @@
 'use client';
 
 import { Check, Copy, FileText, Pencil, RotateCcw } from 'lucide-react';
-import { useState } from 'react';
+import { memo, useState } from 'react';
 import { IconButton } from '@/components/ui/button';
 import { cn } from '@/components/ui/cn';
 import type { Citation, Source, ThreadMessage } from '@/lib/turns';
@@ -111,8 +111,7 @@ export interface MessageItemProps {
   onEdit?: (() => void) | undefined;
 }
 
-/** One message: the user's on the right, answers on the left, with copy and the latest actions. */
-export function MessageItem({ message, onRegenerate, onEdit }: MessageItemProps) {
+function MessageItemView({ message, onRegenerate, onEdit }: MessageItemProps) {
   const [copied, setCopied] = useState(false);
   const isUser = message.role === 'user';
   const writing = message.status === 'streaming';
@@ -216,3 +215,10 @@ export function MessageItem({ message, onRegenerate, onEdit }: MessageItemProps)
     </li>
   );
 }
+
+/**
+ * One message: the user's on the right, answers on the left, with copy and the latest actions.
+ * Memoised: while an answer streams, only that answer's object changes, so the messages above it
+ * are not rendered again on every word.
+ */
+export const MessageItem = memo(MessageItemView);

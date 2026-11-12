@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { useDispatch, useSelector } from 'react-redux';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/input';
@@ -13,6 +13,17 @@ import { clearFirstMessage } from '@/store/pending-slice';
 import type { AppDispatch, RootState } from '@/store/store';
 import { Composer, type PendingAttachment } from './composer';
 import { MessageItem } from './message-item';
+
+/** How close to the bottom a reader must scroll back for the thread to follow new text again. */
+const FOLLOW_AGAIN_PX = 120;
+
+/** Scrolls the page's scroller (the <main> around the thread) to its very end. */
+function scrollToEnd(marker: HTMLElement | null) {
+  const scroller = marker?.closest('main');
+  if (scroller) {
+    scroller.scrollTop = scroller.scrollHeight;
+  }
+}
 
 /** A chat's conversation and its composer. A new chat's first message is sent on arrival. */
 export function ChatThread({
@@ -106,29 +117,41 @@ export function ChatThread({
     }
   }, [queued, chatId, dispatch, thread]);
 
-  // Keep the newest text in view while it streams, unless the user scrolled up to read.
+  // Keep the newest text in view while it streams, unless the reader scrolls up. Only a move
+  // up away from the bottom stops following: text growing below never moves the scroll
+  // position, however fast it arrives. Scrolling back near the bottom follows again.
   useEffect(() => {
     const scroller = bottom.current?.closest('main');
     if (!scroller) {
       return;
     }
+    let lastTop = scroller.scrollTop;
     const onScroll = () => {
-      followBottom.current =
-        scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight < 120;
+      const top = scroller.scrollTop;
+      const fromBottom = scroller.scrollHeight - top - scroller.clientHeight;
+      if (top < lastTop && fromBottom > 1) {
+        followBottom.current = false;
+      } else if (fromBottom < FOLLOW_AGAIN_PX) {
+        followBottom.current = true;
+      }
+      lastTop = top;
     };
     scroller.addEventListener('scroll', onScroll, { passive: true });
     return () => scroller.removeEventListener('scroll', onScroll);
   }, []);
-  useEffect(() => {
+  // Before the frame is drawn, so new text never shows below the fold first. Scrolling the
+  // scroller itself (not scrollIntoView) moves only this element, never the page, and goes to
+  // the real end, so the newest line sits just above the composer instead of under it.
+  useLayoutEffect(() => {
     if (followBottom.current) {
-      bottom.current?.scrollIntoView({ block: 'end' });
+      scrollToEnd(bottom.current);
     }
   }, [thread.messages]);
   // A new answer (send, regenerate or edit) always brings the bottom back into view.
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (thread.running) {
       followBottom.current = true;
-      bottom.current?.scrollIntoView({ block: 'end' });
+      scrollToEnd(bottom.current);
     }
   }, [thread.running]);
 
