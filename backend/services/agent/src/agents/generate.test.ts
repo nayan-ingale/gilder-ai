@@ -6,7 +6,8 @@ import { FileModel } from '../files/models.ts';
 import { mockImage } from '../generate/images.ts';
 import { createLlm } from '../llm/llm.ts';
 import { createMockProvider } from '../llm/mock.ts';
-import { createImageAgent, createPdfAgent, createSlidesAgent } from './generate.ts';
+import { type StreamRequest, textOf } from '../llm/types.ts';
+import { createImageAgent, createPdfAgent, createSlidesAgent, fileAnswer } from './generate.ts';
 import type { AgentContext, AgentEvent } from './types.ts';
 
 let mongo: TestMongo;
@@ -24,13 +25,21 @@ beforeEach(async () => {
   await FileModel.deleteMany({});
 });
 
-function context(reply = ''): AgentContext {
+function context(reply = '', asked: StreamRequest[] = []): AgentContext {
   return {
     text: 'A short guide to composting at home',
     memory: [],
     llm: createLlm({
       mode: 'mock',
-      providers: { mock: createMockProvider({ delayMs: 0, respond: () => reply }) },
+      providers: {
+        mock: createMockProvider({
+          delayMs: 0,
+          respond: (request) => {
+            asked.push(request);
+            return reply;
+          },
+        }),
+      },
       logger: createLogger({ service: 'agent', level: 'silent' }),
     }),
     signal: new AbortController().signal,
@@ -103,6 +112,59 @@ describe('generation agents', () => {
       'application/vnd.openxmlformats-officedocument.presentationml.presentation',
       'image/png',
     ]);
+  });
+
+  it('says what the file holds, so later turns know, and tells the writer not to invent facts', async () => {
+    const store = createMemoryFileStore();
+    const asked: StreamRequest[] = [];
+    const outline = JSON.stringify({
+      title: 'Profile template',
+      summary: 'A fill-in profile template, with placeholders for your details',
+      sections: [
+        { heading: 'About', paragraphs: ['[A line about you]'] },
+        { heading: 'Education', bullets: ['[Your degree]'] },
+        { heading: 'Experience', bullets: ['[Your last role]'] },
+      ],
+    });
+
+    const events = await collect(
+      createPdfAgent({ store, drawImage: mockImage, mode: 'live' }).run(context(outline, asked)),
+    );
+
+    const answer = events.map((event) => (event.type === 'token' ? event.text : '')).join('');
+    expect(answer).toBe(
+      'Here is your PDF, **Profile template**. A fill-in profile template, with placeholders for your details.\n\nSections: About · Education · Experience',
+    );
+    const system = textOf(asked[0]?.messages[0]?.content ?? '');
+    expect(system).toContain('never invent');
+    expect(system).toContain('placeholders in square brackets');
+  });
+
+  it('lists a deck’s slides in its answer', async () => {
+    const store = createMemoryFileStore();
+    const deck = JSON.stringify({
+      title: 'Composting',
+      subtitle: 'Start in a weekend',
+      slides: [
+        { title: 'Why compost', bullets: ['Less waste'] },
+        { title: 'What goes in', bullets: ['Greens', 'Browns'] },
+      ],
+    });
+
+    const events = await collect(
+      createSlidesAgent({ store, drawImage: mockImage, mode: 'live' }).run(context(deck)),
+    );
+
+    expect(events.map((event) => (event.type === 'token' ? event.text : '')).join('')).toBe(
+      'Here is your deck, **Composting**, with 3 slides. Start in a weekend.\n\nSlides: Why compost · What goes in',
+    );
+  });
+
+  it('writes a short answer when there is nothing more to say', () => {
+    expect(fileAnswer('Here is your image, **Fox**.', '')).toBe('Here is your image, **Fox**.');
+    expect(fileAnswer('Lead.', 'About!', { label: 'Parts', names: ['One'] })).toBe(
+      'Lead. About!\n\nParts: One',
+    );
   });
 
   it('refuses an outline that does not fit, after one repair', async () => {

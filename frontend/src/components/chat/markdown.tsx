@@ -14,7 +14,8 @@ import { highlightCode } from '@/lib/highlight';
  * - javascript: and other unsafe links are removed (its default URL check);
  * - an image the model wrote becomes a plain link, so an answer can't load a tracking pixel or
  *   an image from anywhere it likes;
- * - links open in a new tab without access to this page.
+ * - links open in a new tab without access to this page;
+ * - a PDF answer's page marks show as small tags.
  */
 
 function CodeBlock({ children }: { children?: ReactNode }) {
@@ -58,11 +59,20 @@ function CodeBlock({ children }: { children?: ReactNode }) {
 }
 
 const components: Components = {
-  a: ({ href, children }) => (
-    <a href={href} target="_blank" rel="noopener noreferrer nofollow">
-      {children}
-    </a>
-  ),
+  a: ({ href, title, children }) =>
+    // A page mark of a PDF answer (see tagPages): a small tag, with the cited passage on hover.
+    href?.startsWith('#page-') ? (
+      <span
+        title={title}
+        className="mx-0.5 inline-block rounded border border-line bg-raised px-1 align-[1px] text-[11px] leading-4 whitespace-nowrap text-fg-muted"
+      >
+        {children}
+      </span>
+    ) : (
+      <a href={href} target="_blank" rel="noopener noreferrer nofollow">
+        {children}
+      </a>
+    ),
   // A model-written image is shown as a link to it, never loaded (SEC-10).
   img: ({ src, alt }) =>
     typeof src === 'string' && /^https?:\/\//i.test(src) ? (

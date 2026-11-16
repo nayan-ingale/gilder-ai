@@ -45,4 +45,9 @@ describe('chatAgent', () => {
       { role: 'user', content: 'And in winter?' },
     ]);
   });
+
+  it('knows it makes files, so it never denies an earlier answer’s file', () => {
+    expect(CHAT_SYSTEM_PROMPT).toContain('"Here is your PDF"');
+    expect(CHAT_SYSTEM_PROMPT).toContain('a file you made');
+  });
 });

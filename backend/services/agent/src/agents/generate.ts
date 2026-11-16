@@ -27,16 +27,30 @@ export interface GenerateTools {
   mode: 'live' | 'mock';
 }
 
+/**
+ * A made file is written by the model, so it must not pass off made-up facts as real ones: about
+ * a private person (or anything it has no reliable facts on) it writes a template to fill in.
+ */
+const FACTS_RULE = [
+  'Use only facts from the conversation or well-established public knowledge; never invent any.',
+  'For a private person, or anyone or anything you have no reliable facts about, never make up a career, education, contact details, dates or figures:',
+  'write a fill-in template instead, with placeholders in square brackets such as [Your education].',
+].join(' ');
+
 const PDF_PROMPT = [
   'You write documents. Reply with only a JSON object for the requested document:',
   '{"title": string, "summary": string, "sections": [{"heading": string, "paragraphs": string[], "bullets": string[]}]}.',
   'Use 2 to 8 sections, clear plain language, and no Markdown inside the strings.',
+  'The summary is one sentence on what the document covers; for a template, it says so.',
+  FACTS_RULE,
 ].join(' ');
 
 const SLIDES_PROMPT = [
   'You write slide decks. Reply with only a JSON object for the requested presentation:',
   '{"title": string, "subtitle": string, "slides": [{"title": string, "bullets": string[], "notes": string}]}.',
   'Use 4 to 10 slides with at most 6 short bullets each, and no Markdown inside the strings.',
+  'For a template, the subtitle says so.',
+  FACTS_RULE,
 ].join(' ');
 
 const IMAGE_PROMPT = [
@@ -82,6 +96,26 @@ async function* outline<T>(
 const shortTitle = (text: string) =>
   text.replace(/\s+/g, ' ').trim().slice(0, 60) || 'Your request';
 
+/** The text with a full stop at the end, unless it already ends a sentence. */
+function sentence(text: string): string {
+  const trimmed = text.trim();
+  return !trimmed || /[.!?]$/.test(trimmed) ? trimmed : `${trimmed}.`;
+}
+
+/**
+ * The answer that comes with a made file: which file it is, what it covers and its parts (split by
+ * dots, since a heading can have "and" in it). It is saved as the answer's text, so later turns
+ * of the chat know what the file holds.
+ */
+export function fileAnswer(
+  lead: string,
+  about: string,
+  parts?: { label: string; names: readonly string[] },
+): string {
+  const opening = [lead, sentence(about)].filter(Boolean).join(' ');
+  return parts?.names.length ? `${opening}\n\n${parts.label}: ${parts.names.join(' · ')}` : opening;
+}
+
 export function cannedDocument(text: string): DocumentOutline {
   return {
     title: shortTitle(text),
@@ -122,7 +156,13 @@ export function createPdfAgent(tools: GenerateTools): AgentRunner {
         tools.mode === 'mock'
           ? cannedDocument(context.text)
           : yield* outline(context, 'pdf', PDF_PROMPT, documentOutline);
-      yield { type: 'token', text: `Here is your PDF, **${doc.title}**.` };
+      yield {
+        type: 'token',
+        text: fileAnswer(`Here is your PDF, **${doc.title}**.`, doc.summary, {
+          label: 'Sections',
+          names: doc.sections.map((section) => section.heading),
+        }),
+      };
       yield { type: 'progress', step: 'Laying out the pages', current: 2, total: 3 };
       const bytes = await renderPdf(doc);
       yield { type: 'progress', step: 'Saving the file', current: 3, total: 3 };
@@ -151,7 +191,11 @@ export function createSlidesAgent(tools: GenerateTools): AgentRunner {
           : yield* outline(context, 'slides', SLIDES_PROMPT, deckOutline);
       yield {
         type: 'token',
-        text: `Here is your deck, **${deck.title}**, with ${deck.slides.length + 1} slides.`,
+        text: fileAnswer(
+          `Here is your deck, **${deck.title}**, with ${deck.slides.length + 1} slides.`,
+          deck.subtitle,
+          { label: 'Slides', names: deck.slides.map((slide) => slide.title) },
+        ),
       };
       yield { type: 'progress', step: 'Designing the deck', current: 2, total: 3 };
       const bytes = await renderSlides(deck);
@@ -181,7 +225,10 @@ export function createImageAgent(tools: GenerateTools): AgentRunner {
           : yield* outline(context, 'image', IMAGE_PROMPT, imagePrompt);
       yield { type: 'progress', step: 'Drawing the image', current: 2, total: 3 };
       const image = await tools.drawImage(prompt.prompt, context.signal);
-      yield { type: 'token', text: `Here is your image, **${prompt.title}**.` };
+      yield {
+        type: 'token',
+        text: fileAnswer(`Here is your image, **${prompt.title}**.`, prompt.prompt),
+      };
       yield { type: 'progress', step: 'Saving the image', current: 3, total: 3 };
       const { announced } = await saveGenerated({
         store: tools.store,

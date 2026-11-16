@@ -1,6 +1,7 @@
 import { AppError } from '@gilder/shared';
 import type { Embedder } from '../rag/embeddings.ts';
 import type { VectorStore } from '../rag/vector-store.ts';
+import { plainCitationMarks } from './citation-marks.ts';
 import type { AgentContext, AgentEvent, AgentRunner, Citation } from './types.ts';
 
 /**
@@ -62,19 +63,21 @@ export function createPdfQaAgent(tools: PdfQaTools): AgentRunner {
             `[${names.get(payload.documentId) ?? 'Document'}, p. ${payload.page}]\n${payload.text}`,
         )
         .join('\n\n');
-      yield* context.llm.stream({
-        purpose: 'write',
-        messages: [
-          { role: 'system', content: PDF_QA_SYSTEM_PROMPT },
-          ...context.memory,
-          {
-            role: 'user',
-            content: `<passages>\n${passages || '(no matching passages)'}\n</passages>\n\nQuestion: ${context.text}`,
-          },
-        ],
-        signal: context.signal,
-        tags: { agent: 'pdf_qa', ...(context.messageId ? { messageId: context.messageId } : {}) },
-      });
+      yield* plainCitationMarks(
+        context.llm.stream({
+          purpose: 'write',
+          messages: [
+            { role: 'system', content: PDF_QA_SYSTEM_PROMPT },
+            ...context.memory,
+            {
+              role: 'user',
+              content: `<passages>\n${passages || '(no matching passages)'}\n</passages>\n\nQuestion: ${context.text}`,
+            },
+          ],
+          signal: context.signal,
+          tags: { agent: 'pdf_qa', ...(context.messageId ? { messageId: context.messageId } : {}) },
+        }),
+      );
     },
   };
 }

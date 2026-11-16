@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { countPdfPages } from '../files/file-routes.ts';
 import { extractPages } from '../rag/indexer.ts';
 import { solidPng } from './images.ts';
-import { renderPdf, renderSlides } from './render.ts';
+import { pdfText, renderPdf, renderSlides } from './render.ts';
 
 describe('renderers', () => {
   it('draws a readable PDF from an outline', async () => {
@@ -20,6 +20,22 @@ describe('renderers', () => {
     const text = (await extractPages(pdf)).join(' ');
     expect(text).toContain('Trip plan');
     expect(text).toContain('Anjuna');
+  });
+
+  it('draws the lookalike characters models write, which the PDF fonts would drop', async () => {
+    expect(pdfText('A fill\u2011in form \u2192 next\u202fstep, x \u2265 2')).toBe(
+      'A fill-in form -> next step, x >= 2',
+    );
+
+    const pdf = await renderPdf({
+      title: 'Profile',
+      summary: 'A fill\u2011in template.',
+      sections: [{ heading: 'About', paragraphs: [], bullets: ['Year\u2011end'] }],
+    });
+
+    const text = (await extractPages(pdf)).join(' ');
+    expect(text).toContain('A fill-in template.');
+    expect(text).toContain('Year-end');
   });
 
   it('draws a PowerPoint deck (a zip file) from an outline', async () => {

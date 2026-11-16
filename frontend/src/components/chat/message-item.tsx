@@ -11,6 +11,14 @@ import { FilesCard } from './files-card';
 import { GeneratedFiles } from './generated-files';
 import { Markdown } from './markdown';
 
+/** Runs `change` on the text outside code spans and blocks, which are left as written. */
+function outsideCode(text: string, change: (part: string) => string): string {
+  return text
+    .split(/(```[\s\S]*?```|`[^`\n]*`)/)
+    .map((part, index) => (index % 2 === 1 ? part : change(part)))
+    .join('');
+}
+
 /**
  * Turns the answer's [n] markers (or 【n】) into links to the matching source. Numbers with no
  * source are left as written; code spans and blocks are left alone.
@@ -20,20 +28,44 @@ export function linkCitations(text: string, sources: readonly Source[] | undefin
     return text;
   }
   const byNumber = new Map(sources.map((source) => [source.n, source.url]));
-  return text
-    .split(/(```[\s\S]*?```|`[^`\n]*`)/)
-    .map((part, index) =>
-      index % 2 === 1
-        ? part
-        : part
-            // Some models cite with full-width brackets, like 【1】 or 【1†source】.
-            .replace(/【(\d{1,2})(?:†[^】]*)?】/g, '[$1]')
-            .replace(/\[(\d{1,2})\](?!\()/g, (marker: string, n: string) => {
-              const url = byNumber.get(Number(n));
-              return url ? `[\\[${n}\\]](${url})` : marker;
-            }),
-    )
-    .join('');
+  return outsideCode(text, (part) =>
+    part
+      // Some models cite with full-width brackets, like 【1】 or 【1†source】.
+      .replace(/【(\d{1,2})(?:†[^】]*)?】/g, '[$1]')
+      .replace(/\[(\d{1,2})\](?!\()/g, (marker: string, n: string) => {
+        const url = byNumber.get(Number(n));
+        return url ? `[\\[${n}\\]](${url})` : marker;
+      }),
+  );
+}
+
+/** Text for a Markdown link title: one line, with its quotes and backslashes escaped. */
+function linkTitle(text: string): string {
+  return text.replace(/\s+/g, ' ').trim().replace(/["\\]/g, '\\$&');
+}
+
+/**
+ * Turns the answer's [p. N] page marks (or 【p. N】, in answers saved before the server cleaned
+ * them) into page tags: a link to #page-N, which the Markdown renderer shows as a small tag,
+ * with the passages cited from that page as its hover text. Code is left alone.
+ */
+export function tagPages(text: string, citations: readonly Citation[] | undefined): string {
+  if (!citations?.length) {
+    return text;
+  }
+  const passages = new Map<number, string[]>();
+  for (const citation of citations) {
+    const quote = `${citation.name}: ${citation.quote}`;
+    passages.set(citation.page, [...(passages.get(citation.page) ?? []), quote]);
+  }
+  return outsideCode(text, (part) =>
+    part
+      .replace(/【\s*p\.\s*(\d{1,4})\s*(?:†[^】]*)?】/g, '[p. $1]')
+      .replace(/\[p\.\s*(\d{1,4})\](?!\()/g, (_marker: string, n: string) => {
+        const hover = passages.get(Number(n));
+        return `[p. ${n}](#page-${n}${hover ? ` "${linkTitle(hover.join(' · '))}"` : ''})`;
+      }),
+  );
 }
 
 function Sources({ sources }: { sources: readonly Source[] }) {
@@ -141,7 +173,9 @@ function MessageItemView({ message, onRegenerate, onEdit }: MessageItemProps) {
       ) : (
         <div className="text-sm leading-relaxed text-fg" aria-busy={writing}>
           {message.content ? (
-            <Markdown>{linkCitations(message.content, message.sources)}</Markdown>
+            <Markdown>
+              {tagPages(linkCitations(message.content, message.sources), message.citations)}
+            </Markdown>
           ) : null}
           {writing && !message.content ? (
             <span className="inline-flex gap-1 py-2" aria-label="Writing the answer">

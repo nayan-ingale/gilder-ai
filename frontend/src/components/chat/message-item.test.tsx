@@ -1,8 +1,8 @@
 // @vitest-environment jsdom
 import { cleanup, render, screen, within } from '@testing-library/react';
 import { afterEach, describe, expect, it } from 'vitest';
-import type { Source } from '@/lib/turns';
-import { linkCitations, MessageItem } from './message-item';
+import type { Citation, Source } from '@/lib/turns';
+import { linkCitations, MessageItem, tagPages } from './message-item';
 
 afterEach(() => {
   cleanup();
@@ -28,7 +28,47 @@ describe('linkCitations', () => {
   });
 });
 
+const CITATIONS: Citation[] = [
+  { documentId: 'd1', name: 'plan.pdf', page: 1, quote: 'Codename: "Blue Falcon".' },
+  { documentId: 'd1', name: 'plan.pdf', page: 1, quote: 'Launch:\n14 March 2027' },
+];
+
+describe('tagPages', () => {
+  it('turns [p. N] and 【p. N】 into page tags with the cited passages, leaving code alone', () => {
+    expect(
+      tagPages('Blue Falcon [p. 1], wide【p. 1†L2】, unknown [p. 9], `[p. 1]`.', CITATIONS),
+    ).toBe(
+      'Blue Falcon [p. 1](#page-1 "plan.pdf: Codename: \\"Blue Falcon\\". · plan.pdf: Launch: 14 March 2027"), wide[p. 1](#page-1 "plan.pdf: Codename: \\"Blue Falcon\\". · plan.pdf: Launch: 14 March 2027"), unknown [p. 9](#page-9), `[p. 1]`.',
+    );
+    expect(tagPages('No citations [p. 1]', undefined)).toBe('No citations [p. 1]');
+  });
+});
+
 describe('MessageItem', () => {
+  it('shows the page marks of a PDF answer as small tags, with the passage on hover', () => {
+    render(
+      <ol>
+        <MessageItem
+          message={{
+            key: 'a2',
+            id: 'a2',
+            role: 'assistant',
+            content: 'The codename is Blue Falcon [p. 1].',
+            status: 'complete',
+            agent: 'pdf_qa',
+            citations: CITATIONS,
+          }}
+        />
+      </ol>,
+    );
+
+    const tag = screen.getByText('p. 1', { selector: 'span' });
+    expect(tag.getAttribute('title')).toBe(
+      'plan.pdf: Codename: "Blue Falcon". · plan.pdf: Launch: 14 March 2027',
+    );
+    expect(screen.queryByRole('link', { name: 'p. 1' })).toBeNull();
+  });
+
   it('shows a search answer with clickable citations and its sources', () => {
     render(
       <ol>

@@ -76,6 +76,21 @@ describe('PDF questions', () => {
     );
   });
 
+  it('turns the full-width page marks some models write into plain [p. N]', async () => {
+    const { llm } = llmRecording('Blue Falcon【p. 1】, launched 14 March 2027【p. 1†L2】.');
+    const agent = createPdfQaAgent({
+      embedder: mockEmbedder,
+      vectors: createMemoryVectorStore(),
+      documentsFor: async () => [{ id: 'doc-1', name: 'plan.pdf' }],
+    });
+
+    const events = await collect(agent.run(base(llm)));
+
+    expect(events.map((event) => (event.type === 'token' ? event.text : '')).join('')).toBe(
+      'Blue Falcon[p. 1], launched 14 March 2027[p. 1].',
+    );
+  });
+
   it('refuses when the chat has no readable PDF', async () => {
     const { llm } = llmRecording();
     const agent = createPdfQaAgent({

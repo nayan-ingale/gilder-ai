@@ -7,6 +7,27 @@ import type { DeckOutline, DocumentOutline } from './outlines.ts';
 const PptxGenJS = ((pptxgenModule as unknown as { default?: unknown }).default ??
   pptxgenModule) as typeof pptxgenModule.default;
 
+/**
+ * pdfkit's built-in fonts can only draw the Windows-1252 characters and silently drop the rest.
+ * Models often write a few lookalikes outside that set (gpt-oss puts a non-breaking hyphen in
+ * "fill‑in"), so those become their plain forms before they are drawn.
+ */
+const PLAIN_FORMS: readonly [RegExp, string][] = [
+  [/[\u2010-\u2012\u2212]/g, '-'],
+  [/[\u2002-\u200a\u202f\u205f]/g, ' '],
+  [/[\u200b\u2060\ufeff]/g, ''],
+  [/\u2192/g, '->'],
+  [/\u2190/g, '<-'],
+  [/\u21d2/g, '=>'],
+  [/\u2265/g, '>='],
+  [/\u2264/g, '<='],
+];
+
+/** The text with the characters the PDF fonts can't draw swapped for plain ones. */
+export function pdfText(text: string): string {
+  return PLAIN_FORMS.reduce((result, [pattern, plain]) => result.replace(pattern, plain), text);
+}
+
 /** Draws a document outline as a simple, readable A4 PDF. */
 export function renderPdf(outline: DocumentOutline): Promise<Buffer> {
   return new Promise((resolve, reject) => {
@@ -20,19 +41,24 @@ export function renderPdf(outline: DocumentOutline): Promise<Buffer> {
     doc.on('end', () => resolve(Buffer.concat(chunks)));
     doc.on('error', reject);
 
-    doc.font('Helvetica-Bold').fontSize(22).text(outline.title);
+    doc.font('Helvetica-Bold').fontSize(22).text(pdfText(outline.title));
     if (outline.summary) {
-      doc.moveDown(0.5).font('Helvetica').fontSize(11).fillColor('#555555').text(outline.summary);
+      doc
+        .moveDown(0.5)
+        .font('Helvetica')
+        .fontSize(11)
+        .fillColor('#555555')
+        .text(pdfText(outline.summary));
     }
     doc.fillColor('#111111');
     for (const section of outline.sections) {
-      doc.moveDown(1).font('Helvetica-Bold').fontSize(14).text(section.heading);
+      doc.moveDown(1).font('Helvetica-Bold').fontSize(14).text(pdfText(section.heading));
       doc.moveDown(0.3).font('Helvetica').fontSize(11);
       for (const paragraph of section.paragraphs) {
-        doc.text(paragraph, { align: 'left', lineGap: 2 }).moveDown(0.5);
+        doc.text(pdfText(paragraph), { align: 'left', lineGap: 2 }).moveDown(0.5);
       }
       for (const bullet of section.bullets) {
-        doc.text(`•  ${bullet}`, { indent: 8, lineGap: 2 });
+        doc.text(`•  ${pdfText(bullet)}`, { indent: 8, lineGap: 2 });
       }
     }
     doc.end();

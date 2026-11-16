@@ -1,5 +1,6 @@
 import { textOf } from '../llm/types.ts';
 import type { WebSearch } from '../search/web-search.ts';
+import { plainCitationMarks } from './citation-marks.ts';
 import type { AgentContext, AgentEvent, AgentRunner } from './types.ts';
 
 /**
@@ -67,19 +68,21 @@ export function createSearchAgent(search: WebSearch): AgentRunner {
       const fenced = sources
         .map((source) => `[${source.n}] ${source.title}\nURL: ${source.url}\n${source.snippet}`)
         .join('\n\n');
-      yield* context.llm.stream({
-        purpose: 'write',
-        messages: [
-          { role: 'system', content: SEARCH_SYSTEM_PROMPT },
-          ...context.memory,
-          {
-            role: 'user',
-            content: `<sources>\n${fenced || '(no results)'}\n</sources>\n\nQuestion: ${context.text}`,
-          },
-        ],
-        signal: context.signal,
-        tags: { agent: 'search', ...(context.messageId ? { messageId: context.messageId } : {}) },
-      });
+      yield* plainCitationMarks(
+        context.llm.stream({
+          purpose: 'write',
+          messages: [
+            { role: 'system', content: SEARCH_SYSTEM_PROMPT },
+            ...context.memory,
+            {
+              role: 'user',
+              content: `<sources>\n${fenced || '(no results)'}\n</sources>\n\nQuestion: ${context.text}`,
+            },
+          ],
+          signal: context.signal,
+          tags: { agent: 'search', ...(context.messageId ? { messageId: context.messageId } : {}) },
+        }),
+      );
     },
   };
 }
