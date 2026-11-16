@@ -12,6 +12,8 @@ dist/
 build/
 out/
 .next/
+# Monaco's browser files, copied from node_modules before dev and build
+frontend/public/monaco/
 .turbo/
 coverage/
 *.tsbuildinfo

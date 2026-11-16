@@ -7,6 +7,7 @@ import { Button, IconButton } from '@/components/ui/button';
 import { cn } from '@/components/ui/cn';
 import { type CodeFile, download, previewDocument, zipFiles } from '@/lib/code-files';
 import { highlightCode } from '@/lib/highlight';
+import { CodeEditor } from './code-editor';
 
 const PREVIEW = '__preview__';
 
@@ -114,7 +115,13 @@ export function ArtifactPanel({ files, open, onOpenChange }: ArtifactPanelProps)
                     />
                   </div>
                 </div>
-                <CodeView code={current.content} language={current.language} />
+                <CodeEditor
+                  key={current.name}
+                  code={current.content}
+                  language={current.language}
+                  fileName={current.name}
+                  fallback={<CodeView code={current.content} language={current.language} />}
+                />
               </div>
             ) : null}
           </div>
@@ -149,10 +156,11 @@ function TabButton({
   );
 }
 
+/** The file as highlighted text: shown while Monaco loads, or if it can't. */
 function CodeView({ code, language }: { code: string; language: string }) {
   const highlighted = useMemo(() => highlightCode(code, language), [code, language]);
   return (
-    <pre className="hljs min-h-0 flex-1 overflow-auto px-4 pb-4 text-[13px] leading-relaxed">
+    <pre className="hljs h-full w-full overflow-auto px-4 pb-4 text-[13px] leading-relaxed">
       {highlighted === null ? (
         <code>{code}</code>
       ) : (
