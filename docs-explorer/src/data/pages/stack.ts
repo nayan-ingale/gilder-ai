@@ -228,7 +228,17 @@ export const packageNotes: PackageNote[] = [
   {
     name: 'highlight.js',
     layer: 'frontend',
-    why: 'Colours code in answers and in the files panel (`highlightCode`). Only its core and thirteen common languages are loaded, to keep the bundle small.',
+    why: 'Colours code in answers, and in the files panel while Monaco loads (`highlightCode`). Only its core and thirteen common languages are loaded, to keep the bundle small.',
+  },
+  {
+    name: 'monaco-editor',
+    layer: 'frontend',
+    why: "VS Code's editor, used read-only in the files panel (`CodeEditor`) for line numbers, folding and find. Its browser files are copied into `public/monaco` before dev and build and served by the app, never from a CDN.",
+  },
+  {
+    name: '@monaco-editor/react',
+    layer: 'frontend',
+    why: 'The React wrapper that loads Monaco and renders it (`CodeEditor`); its loader is pointed at the copy the app serves.',
   },
   {
     name: 'fflate',

@@ -4282,13 +4282,45 @@ export const notes: SymbolNote[] = [
     summary:
       'The files of a code answer in a side panel: a tab per file, a preview, and downloads.',
     how: [
-      'Each file shows as read-only, highlighted code with its language, a copy button and a download button.',
+      'Each file shows in the read-only Monaco editor (CodeEditor) with its language, a copy button and a download button. While Monaco loads, the same file shows as highlighted code (CodeView), so the panel is never empty.',
       'Download all saves every file as gilderai-files.zip.',
       "When there is an HTML file, a Preview tab shows previewDocument's page in an iframe sandboxed with allow-scripts only.",
     ],
-    why: 'Scripts may run in the preview, but with no same-origin access: no cookies, no storage, no access to the app. No editor is loaded: a read-only viewer is enough to read, copy and take the code.',
+    why: 'Scripts may run in the preview, but with no same-origin access: no cookies, no storage, no access to the app. Monaco gives line numbers, folding and find; code blocks inside answers keep the lighter highlighter, since loading Monaco for every snippet would be heavy.',
     returns: 'A Radix dialog as JSX.',
-    tests: ['frontend/src/components/chat/artifact-panel.test.tsx'],
+    tests: [
+      'frontend/src/components/chat/artifact-panel.test.tsx',
+      'frontend/src/components/chat/code-editor.test.tsx',
+    ],
+  },
+  {
+    symbol: 'frontend/src/components/chat/code-editor.tsx#CodeEditor',
+    status: 'verified',
+    summary: "A file in the read-only Monaco editor, in the app's theme.",
+    how: [
+      'Monaco is served by the app from /monaco/vs: scripts/copy-monaco.mjs copies its browser files from node_modules into public/monaco before dev and build (git-ignored, skipped when the version already matches), and loader.config points the loader there, so nothing comes from a CDN and the security policy needs no change.',
+      'Read-only (also for the DOM), line numbers, folding, find and word wrap; no minimap; the file name is its label for screen readers.',
+      "The theme follows the page (<html data-theme>, else the system), and a switch while the panel is open re-applies it. defineAppTheme builds the Monaco theme from the page's own colour variables.",
+    ],
+    why: 'The editor of VS Code makes long files easy to read. Self-hosting costs about 25 MB of static files, loaded on demand only when a code panel opens.',
+    returns: 'The editor, or its fallback while Monaco loads.',
+    tests: ['frontend/src/components/chat/code-editor.test.tsx'],
+  },
+  {
+    symbol: 'frontend/src/components/chat/code-editor.tsx#monacoLanguage',
+    status: 'verified',
+    summary: "Monaco's name for a file's language.",
+    why: "The language the answer gave wins, with common short forms mapped (js, jsx, ts, tsx, py, sh, bash, yml, md, htm); a missing or plain-text one falls back to the file's extension, and to plaintext when there is none.",
+    returns: 'A Monaco language ID.',
+    tests: ['frontend/src/components/chat/code-editor.test.tsx'],
+  },
+  {
+    symbol: 'frontend/src/components/chat/code-editor.tsx#defineAppTheme',
+    status: 'verified',
+    summary: "Defines a Monaco theme in the app's colours and returns its name.",
+    why: "It reads --sunken, --text and --text-subtle from the page for the theme showing now, on top of Monaco's vs or vs-dark, so the editor matches the panel. Only hex values are passed, since Monaco accepts nothing else.",
+    returns: "'gilder-light' or 'gilder-dark'.",
+    tests: ['frontend/src/components/chat/code-editor.test.tsx'],
   },
   {
     symbol: 'frontend/src/lib/code-files.ts#previewDocument',
