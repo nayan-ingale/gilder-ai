@@ -9,6 +9,38 @@
 
 export interface CspOptions {
   dev: boolean;
+  /**
+   * The bucket's address, where presigned uploads go straight from the browser (for example
+   * https://my-bucket.s3.ap-south-1.amazonaws.com). Without it the browser can't reach S3 at all.
+   */
+  uploadsOrigin?: string | undefined;
+}
+
+/**
+ * Checks the configured bucket address (S3_BUCKET_ORIGIN) is one bare https origin, so a typo
+ * or a wildcard can't widen the policy. Empty means not set.
+ */
+export function bucketOrigin(value: string | undefined): string | undefined {
+  if (!value) {
+    return undefined;
+  }
+  let url: URL | undefined;
+  try {
+    url = new URL(value);
+  } catch {
+    url = undefined;
+  }
+  if (
+    !url ||
+    url.protocol !== 'https:' ||
+    value.includes('*') ||
+    url.origin !== value.replace(/\/$/, '')
+  ) {
+    throw new Error(
+      `S3_BUCKET_ORIGIN must be one https origin, like https://my-bucket.s3.ap-south-1.amazonaws.com (got "${value}")`,
+    );
+  }
+  return url.origin;
 }
 
 // Outside services the browser talks to directly.
@@ -21,8 +53,6 @@ const CONNECT = [
   'https://apis.google.com',
   'https://api.razorpay.com',
   'https://lumberjack.razorpay.com',
-  // Presigned uploads go straight from the browser to S3.
-  'https://*.amazonaws.com',
 ];
 const FRAMES = [
   'https://*.firebaseapp.com',
@@ -31,7 +61,7 @@ const FRAMES = [
   'https://checkout.razorpay.com',
 ];
 
-export function contentSecurityPolicy({ dev }: CspOptions): string {
+export function contentSecurityPolicy({ dev, uploadsOrigin }: CspOptions): string {
   const directives: Record<string, string[]> = {
     'default-src': ["'self'"],
     // React needs eval in development only, for its error overlay.
@@ -46,8 +76,14 @@ export function contentSecurityPolicy({ dev }: CspOptions): string {
     // Avatars, generated images and search thumbnails come from several https hosts.
     'img-src': ["'self'", 'data:', 'blob:', 'https:'],
     'font-src': ["'self'"],
-    // Hot reload uses a websocket in development.
-    'connect-src': ["'self'", ...CONNECT, ...(dev ? ['ws:'] : [])],
+    // Presigned uploads go straight from the browser to this one bucket. Hot reload uses a
+    // websocket in development.
+    'connect-src': [
+      "'self'",
+      ...CONNECT,
+      ...(uploadsOrigin ? [uploadsOrigin] : []),
+      ...(dev ? ['ws:'] : []),
+    ],
     'frame-src': ["'self'", ...FRAMES],
     'worker-src': ["'self'", 'blob:'],
     'object-src': ["'none'"],

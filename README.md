@@ -82,6 +82,7 @@ The agent service starts with `LLM_MODE=mock`: answers and search results are ca
 | Live answers (`LLM_MODE=live`) | `GROQ_API_KEY`, `OPENROUTER_API_KEY`, `GEMINI_API_KEY`                  | agent    |
 | Web search                     | `TAVILY_API_KEY`                                                        | agent    |
 | Uploads and generated files    | `AWS_REGION`, `S3_BUCKET`, `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY` | agent    |
+|                                | `S3_BUCKET_ORIGIN`                                                      | frontend |
 | Google sign-in                 | `FIREBASE_PROJECT_ID`, `FIREBASE_CLIENT_EMAIL`, `FIREBASE_PRIVATE_KEY`  | auth     |
 |                                | `NEXT_PUBLIC_FIREBASE_*`                                                | frontend |
 | Payments (test mode)           | `RAZORPAY_KEY_ID`, `RAZORPAY_KEY_SECRET`, `RAZORPAY_WEBHOOK_SECRET`     | billing  |

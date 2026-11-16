@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { contentSecurityPolicy, securityHeaders } from './security-headers';
+import { bucketOrigin, contentSecurityPolicy, securityHeaders } from './security-headers';
 
 function directives(policy: string): Map<string, string[]> {
   return new Map(
@@ -39,6 +39,45 @@ describe('contentSecurityPolicy', () => {
     expect(development.get('script-src')).toContain("'unsafe-eval'");
     expect(development.get('connect-src')).toContain('ws:');
     expect(development.has('upgrade-insecure-requests')).toBe(false);
+  });
+});
+
+describe('uploads', () => {
+  const bucket = 'https://gilder-ai-bucket.s3.ap-south-1.amazonaws.com';
+
+  it('lets the browser reach only the configured bucket, never any AWS address', () => {
+    const policy = directives(contentSecurityPolicy({ dev: false, uploadsOrigin: bucket }));
+
+    expect(policy.get('connect-src')).toContain(bucket);
+    expect(policy.get('connect-src')?.filter((source) => source.includes('amazonaws'))).toEqual([
+      bucket,
+    ]);
+  });
+
+  it('allows no S3 address at all when none is configured', () => {
+    const policy = directives(contentSecurityPolicy({ dev: false }));
+
+    expect(policy.get('connect-src')?.some((source) => source.includes('amazonaws'))).toBe(false);
+  });
+});
+
+describe('bucketOrigin', () => {
+  it('accepts one https origin, with or without a trailing slash', () => {
+    const bucket = 'https://gilder-ai-bucket.s3.ap-south-1.amazonaws.com';
+
+    expect(bucketOrigin(bucket)).toBe(bucket);
+    expect(bucketOrigin(`${bucket}/`)).toBe(bucket);
+    expect(bucketOrigin(undefined)).toBeUndefined();
+    expect(bucketOrigin('')).toBeUndefined();
+  });
+
+  it.each([
+    'http://gilder-ai-bucket.s3.ap-south-1.amazonaws.com',
+    'https://*.amazonaws.com',
+    'https://gilder-ai-bucket.s3.ap-south-1.amazonaws.com/users',
+    'gilder-ai-bucket',
+  ])('refuses %s, which would be wrong or wider than one bucket', (value) => {
+    expect(() => bucketOrigin(value)).toThrow(/S3_BUCKET_ORIGIN/);
   });
 });
 

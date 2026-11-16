@@ -1,6 +1,6 @@
 import path from 'node:path';
 import type { NextConfig } from 'next';
-import { securityHeaders } from './src/server/security-headers';
+import { bucketOrigin, securityHeaders } from './src/server/security-headers';
 
 const nextConfig: NextConfig = {
   // A self-contained server for the Docker image, traced from the repository root so the
@@ -11,7 +11,11 @@ const nextConfig: NextConfig = {
     return [
       {
         source: '/(.*)',
-        headers: securityHeaders({ dev: process.env.NODE_ENV === 'development' }),
+        headers: securityHeaders({
+          dev: process.env.NODE_ENV === 'development',
+          // Read when the app is built: the policy is fixed into the build.
+          uploadsOrigin: bucketOrigin(process.env.S3_BUCKET_ORIGIN),
+        }),
       },
     ];
   },
