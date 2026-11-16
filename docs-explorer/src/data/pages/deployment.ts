@@ -118,7 +118,7 @@ export const deploymentPage: DocPage = {
         },
         {
           kind: 'text',
-          text: "The agent's `AWS_REGION` (ap-south-1 in the example), `S3_BUCKET`, `AWS_ACCESS_KEY_ID` and `AWS_SECRET_ACCESS_KEY` turn uploads on, all four or none; otherwise it logs 'uploads are off: ...'. `QDRANT_URL` (http://localhost:6335 in the example) points PDF indexing at the local Qdrant; without it the agent keeps vectors in memory. Billing's `RAZORPAY_KEY_ID`, `RAZORPAY_KEY_SECRET` and `RAZORPAY_WEBHOOK_SECRET` are Razorpay test-mode keys and turn payments on, all three or none; locally the webhook secret can be any long random string. Without them billing logs 'payments are off: ...' and the payment routes answer 503. The frontend's example also lists `NEXT_PUBLIC_RAZORPAY_KEY_ID`, but no code reads it: the checkout gets the key ID from billing's order answer.",
+          text: "The agent's `AWS_REGION` (ap-south-1 in the example), `S3_BUCKET`, `AWS_ACCESS_KEY_ID` and `AWS_SECRET_ACCESS_KEY` turn uploads on, all four or none; otherwise it logs 'uploads are off: ...'. `QDRANT_URL` (http://localhost:6335 in the example) points PDF indexing at the local Qdrant; without it the agent keeps vectors in memory. Billing's `RAZORPAY_KEY_ID`, `RAZORPAY_KEY_SECRET` and `RAZORPAY_WEBHOOK_SECRET` are Razorpay test-mode keys and turn payments on, all three or none; locally the webhook secret can be any long random string. Without them billing logs 'payments are off: ...' and the payment routes answer 503. The frontend's example also lists `NEXT_PUBLIC_RAZORPAY_KEY_ID`, but no code reads it: the checkout gets the key ID from billing's order answer. The frontend's `S3_BUCKET_ORIGIN` (`https://<S3_BUCKET>.s3.<AWS_REGION>.amazonaws.com`) is read when the app is built: the security policy lets the browser send uploads only to that bucket, so without it uploads can't work.",
         },
         {
           kind: 'quote',
@@ -269,7 +269,7 @@ export const deploymentPage: DocPage = {
         },
         {
           kind: 'text',
-          text: "The `NEXT_PUBLIC_*` values are baked into the web image when it is built, since the browser gets them anyway; `GATEWAY_URL` is read when the server starts and never reaches the browser. `.dockerignore` is an allow-list: only the root manifests and lockfile, `backend/`, `frontend/` and the docs explorer's and e2e package's manifests go in, never `node_modules`, `.next`, coverage or any `.env` file, so secrets stay on the server.",
+          text: "The `NEXT_PUBLIC_*` values and `S3_BUCKET_ORIGIN` are baked into the web image when it is built, since the browser gets them anyway; `GATEWAY_URL` is read when the server starts and never reaches the browser. `.dockerignore` is an allow-list: only the root manifests and lockfile, `backend/`, `frontend/` and the docs explorer's and e2e package's manifests go in, never `node_modules`, `.next`, coverage or any `.env` file, so secrets stay on the server.",
         },
       ],
       refs: [
@@ -320,7 +320,7 @@ export const deploymentPage: DocPage = {
       blocks: [
         {
           kind: 'text',
-          text: "`.github/workflows/deploy.yml` runs only by hand, from the Actions tab, once a server is set up; two runs never overlap, and a running one is never cancelled. The first job builds both images with a build cache and pushes them to GitHub's container registry, each tagged with the commit SHA and `latest`; the web image is built with the `NEXT_PUBLIC_*` values from the repository's variables. The second job, in the production environment, sets up SSH with the deploy key from a secret and checks the server's host key against `DEPLOY_KNOWN_HOSTS`, copies `compose.yml`, the `Caddyfile` and `backup.sh` to `~/gilder-ai`, signs the server in to the registry with the job's own `GITHUB_TOKEN` for that pull only, runs `docker compose pull` and `up -d` with the new SHA as the tag, signs out and removes unused images.",
+          text: "`.github/workflows/deploy.yml` runs only by hand, from the Actions tab, once a server is set up; two runs never overlap, and a running one is never cancelled. The first job builds both images with a build cache and pushes them to GitHub's container registry, each tagged with the commit SHA and `latest`; the web image is built with the `NEXT_PUBLIC_*` values and `S3_BUCKET_ORIGIN` from the repository's variables. The second job, in the production environment, sets up SSH with the deploy key from a secret and checks the server's host key against `DEPLOY_KNOWN_HOSTS`, copies `compose.yml`, the `Caddyfile` and `backup.sh` to `~/gilder-ai`, signs the server in to the registry with the job's own `GITHUB_TOKEN` for that pull only, runs `docker compose pull` and `up -d` with the new SHA as the tag, signs out and removes unused images.",
         },
         {
           kind: 'quote',

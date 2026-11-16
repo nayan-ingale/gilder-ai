@@ -3480,10 +3480,19 @@ export const notes: SymbolNote[] = [
     how: [
       "Scripts: the app, 'unsafe-inline' (Next.js inlines its bootstrap scripts), Google's sign-in script and Razorpay checkout; 'unsafe-eval' in development only.",
       'object-src none, base-uri and form-action self, frame-ancestors none, and connect-src and frame-src limited to the services the app uses.',
+      'For uploads, connect-src allows exactly one bucket (uploadsOrigin, from S3_BUCKET_ORIGIN), never any AWS address; with none configured the browser cannot reach S3 at all.',
       'upgrade-insecure-requests outside development.',
     ],
-    why: "A nonce would force every page to render per request, which rules out the prerendered shells. The policy never adds a hash or nonce, which would switch 'unsafe-inline' off and break Next.js's own scripts.",
+    why: "A nonce would force every page to render per request, which rules out the prerendered shells; the trade-off was reviewed and kept, since React's escaping, Markdown that shows raw HTML as text and the sandboxed code preview are the main defences. The policy never adds a hash or nonce, which would switch 'unsafe-inline' off and break Next.js's own scripts.",
     returns: 'The policy as one header value.',
+    tests: ['frontend/src/server/security-headers.test.ts'],
+  },
+  {
+    symbol: 'frontend/src/server/security-headers.ts#bucketOrigin',
+    status: 'verified',
+    summary: 'Checks the configured bucket address before it goes into the policy.',
+    why: 'next.config.ts reads S3_BUCKET_ORIGIN when the app is built. Only one bare https origin is accepted (a trailing slash is dropped), and http, a path, a wildcard or a plain name fail the build, so a typo can never widen the policy. Empty means not set.',
+    returns: 'The origin, or undefined when unset.',
     tests: ['frontend/src/server/security-headers.test.ts'],
   },
   {
