@@ -200,7 +200,7 @@ const pdfQuestion: Flow = {
       status: 'verified',
       symbol: PDF_QA,
       highlight: "{ role: 'system', content: PDF_QA_SYSTEM_PROMPT },",
-      what: "The write route streams the answer. The system prompt says to answer only from the passages, cite each fact as [p. N] and say when the document does not cover it. The passages go inside <passages> tags, each labelled with its file and page, as untrusted text never to be obeyed, after the chat's recent messages.",
+      what: "The write route streams the answer. The system prompt says to answer only from the passages, cite each fact as [p. N] and say when the document does not cover it. The passages go inside <passages> tags, each labelled with its file and page, as untrusted text never to be obeyed, after the chat's recent messages. The stream goes through plainCitationMarks, so a 【p. 1】 the model writes arrives as [p. 1].",
       why: 'A PDF can contain instructions; fenced off as data, they cannot steer the answer.',
     },
     {
@@ -222,7 +222,7 @@ const pdfQuestion: Flow = {
       symbol: 'frontend/src/components/chat/message-item.tsx#Citations',
       highlight:
         '<h3 className="mb-1.5 text-xs font-medium text-fg-subtle">From your documents</h3>',
-      what: "useChatThread stores the citations on the answer as they arrive. Under the answer, 'From your documents' lists each file name and page, with the quoted passage on hover; the user's message shows a chip per attached file, which opens a fresh download link.",
+      what: "useChatThread stores the citations on the answer as they arrive. In the answer, each [p. N] shows as a small page tag with the cited passage on hover (tagPages). Under it, 'From your documents' lists each file name and page, with the quoted passage on hover; the user's message shows a chip per attached file, which opens a fresh download link.",
       why: 'The reader can check each page the answer cites.',
       next: [],
     },
@@ -354,7 +354,7 @@ const generateFile: Flow = {
       status: 'verified',
       symbol: 'backend/services/agent/src/agents/generate.ts#outline',
       highlight: 'const { value, result } = await completeJson(',
-      what: "In live mode, the write route is asked for a JSON outline (up to 4,000 tokens), with the chat's recent messages and the request: a document's title, summary and sections, a deck's title, subtitle and slides, or an image's prompt and short title. completeJson checks it against its schema and asks once for a repair; the model and token use are reported for the charge. In mock mode a canned outline is used instead and no model is called.",
+      what: "In live mode, the write route is asked for a JSON outline (up to 4,000 tokens), with the chat's recent messages and the request: a document's title, summary and sections, a deck's title, subtitle and slides, or an image's prompt and short title. The document and deck prompts forbid made-up facts: about a private person, or anything without reliable facts, the model writes a fill-in template with [placeholders] (FACTS_RULE). completeJson checks it against its schema and asks once for a repair; the model and token use are reported for the charge. In mock mode a canned outline is used instead and no model is called.",
       why: 'The model only ever supplies text in a known shape, which the agent then lays out itself.',
       next: [
         { to: 'checked', kind: 'next' },
@@ -383,7 +383,7 @@ const generateFile: Flow = {
       status: 'verified',
       symbol: 'backend/services/agent/src/generate/render.ts#renderPdf',
       highlight: 'const doc = new PDFDocument({',
-      what: "renderPdf draws an A4 PDF with pdfkit: the title, the summary in grey, then each section's heading, paragraphs and bullets in Helvetica. The answer's text, 'Here is your PDF', streams before it.",
+      what: "renderPdf draws an A4 PDF with pdfkit: the title, the summary in grey, then each section's heading, paragraphs and bullets in Helvetica. The answer's text streams before it (fileAnswer): 'Here is your PDF, <title>.', the summary and the section headings split by dots, which is how later turns know what the file holds. Characters the PDF fonts can't draw, like the non-breaking hyphen, are swapped for plain ones first (pdfText).",
       why: 'A plain, readable layout made from checked text.',
       next: [{ to: 'save', kind: 'next' }],
     },
