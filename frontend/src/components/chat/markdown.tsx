@@ -46,7 +46,12 @@ function CodeBlock({ children }: { children?: ReactNode }) {
           {copied ? 'Copied' : 'Copy'}
         </button>
       </div>
-      <pre ref={ref} className="hljs overflow-x-auto p-3 text-[13px] leading-relaxed">
+      {/* Focusable, so keyboard users can scroll a long line sideways. */}
+      <pre
+        ref={ref}
+        tabIndex={0}
+        className="hljs overflow-x-auto p-3 text-[13px] leading-relaxed focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-accent"
+      >
         {highlighted === null ? (
           children
         ) : (
@@ -104,7 +109,8 @@ const components: Components = {
     ),
   pre: ({ children }) => <CodeBlock>{children}</CodeBlock>,
   table: ({ children }) => (
-    <div className="my-3 overflow-x-auto">
+    // Focusable, so keyboard users can scroll a wide table sideways.
+    <div tabIndex={0} className="my-3 overflow-x-auto">
       <table>{children}</table>
     </div>
   ),

@@ -2,9 +2,27 @@ import { Code, FileText, Globe, Presentation } from 'lucide-react';
 import type { Metadata } from 'next';
 import { Logo, Wordmark } from '@/components/app-shell/brand';
 import { googleSignInConfigured } from '@/lib/firebase-client';
+import { SITE_DESCRIPTION, SITE_NAME, SITE_URL } from '@/lib/site';
 import { LoginForm } from './login-form';
 
-export const metadata: Metadata = { title: 'Sign in' };
+export const metadata: Metadata = {
+  title: 'Sign in',
+  description:
+    'Sign in to GilderAi with Google. Chat, search the web with sources, build code with a live preview, and ask questions about your own PDFs. New accounts start with 100 free credits.',
+  alternates: { canonical: '/login' },
+};
+
+/** What search engines read about the app (schema.org), alongside the visible page. */
+const STRUCTURED_DATA = {
+  '@context': 'https://schema.org',
+  '@type': 'WebApplication',
+  name: SITE_NAME,
+  url: SITE_URL,
+  description: SITE_DESCRIPTION,
+  applicationCategory: 'ProductivityApplication',
+  operatingSystem: 'Any',
+  offers: { '@type': 'Offer', price: '0', priceCurrency: 'INR' },
+};
 
 const FEATURES = [
   { label: 'Chat and web search, with sources you can check', Icon: Globe },
@@ -17,6 +35,11 @@ const FEATURES = [
 export default function LoginPage() {
   return (
     <main className="flex flex-1 flex-wrap bg-canvas text-fg">
+      <script
+        type="application/ld+json"
+        // Our own constant, serialised: nothing from a visitor goes in it.
+        dangerouslySetInnerHTML={{ __html: JSON.stringify(STRUCTURED_DATA) }}
+      />
       <section
         aria-label="About GilderAi"
         className="flex min-w-0 flex-[1_1_520px] flex-col gap-8 border-line bg-surface px-6 py-8 max-[959px]:border-b min-[960px]:border-r sm:gap-12 sm:px-14 sm:py-12"

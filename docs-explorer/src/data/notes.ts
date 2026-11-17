@@ -3468,11 +3468,44 @@ export const notes: SymbolNote[] = [
       'Next.js uses it because of its file name, src/app/layout.tsx; no project code calls it.',
       'It sets lang="en" and puts the Geist Sans and Geist Mono font variables on <html> as classes.',
       'It renders the current page inside <body>.',
-      'The same file imports globals.css and exports metadata: the title GilderAi (pages add their own, as in "Sign in · GilderAi").',
+      'The same file imports globals.css and exports the site metadata: the title (pages add their own, as in "Sign in · GilderAi"), the description, keywords, author, Open Graph and Twitter cards (the sharing image is the opengraph-image.png and twitter-image.png files next to it), with metadataBase set to SITE_URL so their links are absolute.',
+      'It exports viewport too: the browser bar takes the light or dark page colour, and both colour schemes are declared.',
+      'Next.js serves the icons from files beside it: favicon.ico (16, 32 and 48 px), icon.svg and apple-icon.png.',
       'suppressHydrationWarning on <html>, because the theme script may set data-theme before React loads.',
     ],
     why: "Next.js's App Router needs a root layout that renders <html> and <body>. This one also adds the theme script in <head> and Providers (the Redux store, tooltips and toasts) around every page.",
     returns: 'The <html> element that wraps every page.',
+  },
+  {
+    symbol: 'frontend/src/lib/site.ts#SITE_URL',
+    status: 'verified',
+    summary:
+      "The site's public address (SITE_URL, else https://gilderai.in), for metadata links, the sitemap and robots.txt.",
+    why: 'Link previews and search engines need absolute addresses; one constant keeps them the same everywhere. SITE_NAME and SITE_DESCRIPTION sit beside it.',
+    returns: 'A URL string without a trailing slash.',
+  },
+  {
+    symbol: 'frontend/src/app/robots.ts#robots',
+    status: 'verified',
+    summary:
+      'robots.txt: the sign-in, Terms and Privacy pages may be indexed; chats, settings and the API may not.',
+    why: 'Only the public pages have anything for search engines; everything else needs an account. It also points to the sitemap.',
+    returns: 'The robots rules.',
+  },
+  {
+    symbol: 'frontend/src/app/sitemap.ts#sitemap',
+    status: 'verified',
+    summary: 'sitemap.xml: the public pages, /login first.',
+    why: 'Tells search engines which pages exist, since the signed-in ones are kept out.',
+    returns: 'The sitemap entries.',
+  },
+  {
+    symbol: 'frontend/src/app/manifest.ts#manifest',
+    status: 'verified',
+    summary:
+      'The web app manifest: name, description, start page and icons (192 and 512 px, and a maskable one).',
+    why: 'Lets the site be installed to a phone or desktop home screen with its own icon and no browser bars.',
+    returns: 'The manifest.',
   },
   {
     symbol: 'frontend/src/app/(app)/page.tsx#NewChatPage',
@@ -3670,6 +3703,8 @@ export const notes: SymbolNote[] = [
     how: [
       'ChatCommands wraps everything, so ⌘K and ⌘⇧O work on every signed-in page and every search button opens the same dialog.',
       'The account parts of the sidebar and of the top bar (SidebarAccount) each sit in a Suspense boundary with a skeleton, because they read the session.',
+      'A "Skip to content" link comes first for keyboard users, shown when focused, and jumps to <main id="main">.',
+      'Its metadata asks search engines not to index or follow the signed-in pages (robots noindex, nofollow).',
       'The page goes in <main>, which scrolls on its own and is focusable (tabIndex 0, with a focus ring), so keyboard users can scroll it even on a page with nothing else to focus.',
       "<main> is position: relative, so absolutely positioned content inside it (the screen-reader-only 'You said:' labels) stays in its own scroll area. Without that, those labels overflowed the page, the page itself became scrollable, and scrolling the conversation could slide the whole app up and leave an empty band below it.",
     ],

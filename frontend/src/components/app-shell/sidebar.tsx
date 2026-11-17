@@ -1,7 +1,7 @@
 import { SquarePen } from 'lucide-react';
 import Link from 'next/link';
 import { redirect } from 'next/navigation';
-import type { ReactNode } from 'react';
+import { type ReactNode, Suspense } from 'react';
 import { CreditsCard } from '@/components/billing/credits-card';
 import { SearchButton, SearchIconButton } from '@/components/chats/chat-commands';
 import { ChatList } from '@/components/chats/chat-list';
@@ -88,8 +88,14 @@ export function SidebarFrame({
 export function MobileBar({ account }: { account: ReactNode }) {
   return (
     <header className="flex min-h-14 shrink-0 items-center gap-1 border-b border-line bg-canvas px-1.5 md:hidden">
-      <MobileNav account={account} />
-      <MobileTitle />
+      {/* Both read the current path, so each waits in its own Suspense boundary, with a same-size
+          stand-in in the prerendered shell. */}
+      <Suspense fallback={<span aria-hidden="true" className="size-11 shrink-0" />}>
+        <MobileNav account={account} />
+      </Suspense>
+      <Suspense fallback={<span aria-hidden="true" className="flex-1" />}>
+        <MobileTitle />
+      </Suspense>
       <Link
         href="/"
         aria-label="New chat"

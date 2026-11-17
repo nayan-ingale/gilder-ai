@@ -25,6 +25,14 @@ for (const tag of ['', ' @phone']) {
     await page.goto('/login');
     await expectAccessible(page, 'sign-in');
 
+    await page.goto('/terms');
+    await expect(page.getByRole('heading', { name: 'Terms of Use' })).toBeVisible();
+    await expectAccessible(page, 'terms');
+
+    await page.goto('/privacy');
+    await expect(page.getByRole('heading', { name: 'Privacy Policy' })).toBeVisible();
+    await expectAccessible(page, 'privacy');
+
     await signIn(page);
     await page.goto('/');
     await expect(page.getByRole('textbox', { name: 'Message' })).toBeVisible();

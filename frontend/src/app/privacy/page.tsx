@@ -2,7 +2,12 @@ import type { Metadata } from 'next';
 import Link from 'next/link';
 import { ContactEmail, LegalList, LegalPage, LegalSection } from '@/components/legal/legal-page';
 
-export const metadata: Metadata = { title: 'Privacy Policy' };
+export const metadata: Metadata = {
+  title: 'Privacy Policy',
+  description:
+    'What GilderAi collects, why, which services handle it, how long it is kept, and how to have it deleted.',
+  alternates: { canonical: '/privacy' },
+};
 
 /** What the app collects, why, who else handles it, and how to get it deleted. */
 export default function PrivacyPage() {

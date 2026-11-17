@@ -2,7 +2,12 @@ import type { Metadata } from 'next';
 import Link from 'next/link';
 import { ContactEmail, LegalList, LegalPage, LegalSection } from '@/components/legal/legal-page';
 
-export const metadata: Metadata = { title: 'Terms of Use' };
+export const metadata: Metadata = {
+  title: 'Terms of Use',
+  description:
+    'The rules for using GilderAi: accounts, credits and test payments, fair use, AI answers and your content.',
+  alternates: { canonical: '/terms' },
+};
 
 /** The rules for using the app, in plain words. */
 export default function TermsPage() {
