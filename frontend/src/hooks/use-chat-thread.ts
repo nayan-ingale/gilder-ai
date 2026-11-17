@@ -169,7 +169,13 @@ export function useChatThread(chatId: string, initial: ChatMessage[]): ChatThrea
               break;
             }
             case 'progress':
-              updateAnswer((message) => ({ ...message, progress: turnEvent.data }));
+              updateAnswer((message) => ({
+                ...message,
+                progress: turnEvent.data,
+                progressSteps: message.progressSteps?.includes(turnEvent.data.step)
+                  ? message.progressSteps
+                  : [...(message.progressSteps ?? []), turnEvent.data.step],
+              }));
               break;
             case 'file':
               updateAnswer((message) => ({

@@ -7,7 +7,7 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { LOW_BALANCE, PLAN_CREDITS, PLAN_NAMES } from '@/lib/billing';
 import { useGetAccountQuery } from '@/store/api';
 
-const dateFormat = new Intl.DateTimeFormat('en-IN', { day: 'numeric', month: 'short' });
+const dateFormat = new Intl.DateTimeFormat('en-US', { month: 'short', day: 'numeric' });
 
 /**
  * The balance and plan, above the account. Every answer costs credits, so it stays visible; the

@@ -72,7 +72,7 @@ const components: Components = {
     href?.startsWith('#page-') ? (
       <span
         title={title}
-        className="mx-0.5 inline-block rounded border border-line bg-raised px-1 align-[1px] text-[11px] leading-4 whitespace-nowrap text-fg-muted"
+        className="mx-0.5 inline-flex min-h-[18px] items-center rounded-full bg-accent-soft px-1.5 align-[2px] text-[11px] leading-none font-semibold whitespace-nowrap text-accent-text"
       >
         {children}
       </span>

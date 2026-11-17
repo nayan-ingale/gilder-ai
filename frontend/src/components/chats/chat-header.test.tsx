@@ -52,7 +52,7 @@ describe('dayLabel', () => {
 
     expect(dayLabel(new Date(2026, 10, 17, 9, 0).toISOString(), now)).toBe('Today');
     expect(dayLabel(new Date(2026, 10, 16, 23, 30).toISOString(), now)).toBe('Yesterday');
-    expect(dayLabel(new Date(2026, 10, 12, 10, 0).toISOString(), now)).toBe('12 Nov');
+    expect(dayLabel(new Date(2026, 10, 12, 10, 0).toISOString(), now)).toBe('Nov 12');
   });
 });
 

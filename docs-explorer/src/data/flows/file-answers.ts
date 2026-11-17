@@ -220,9 +220,8 @@ const pdfQuestion: Flow = {
       kind: 'response',
       status: 'verified',
       symbol: 'frontend/src/components/chat/message-item.tsx#Citations',
-      highlight:
-        '<h3 className="mb-1.5 text-xs font-medium text-fg-subtle">From your documents</h3>',
-      what: "useChatThread stores the citations on the answer as they arrive. In the answer, each [p. N] shows as a small page tag with the cited passage on hover (tagPages). Under it, 'From your documents' lists each file name and page, with the quoted passage on hover; the user's message shows a chip per attached file, which opens a fresh download link.",
+      highlight: '<blockquote className="m-0 text-[13.5px] leading-normal text-fg-muted">',
+      what: "useChatThread stores the citations on the answer as they arrive. In the answer, each [p. N] shows as a small accent page tag with the cited passage on hover (tagPages). Under it, 'From your document' shows a quote card per passage, with its page (and file name when there are several); the user's message shows a card per attached file, with its pages and size, which opens the file in the browser.",
       why: 'The reader can check each page the answer cites.',
       next: [],
     },

@@ -109,7 +109,7 @@ describe('Toast', () => {
     await userEvent.click(screen.getByRole('button', { name: 'Fail' }));
 
     expect(screen.getByText('Something went wrong')).toBeTruthy();
-    expect(screen.getByText('Reference: 7f3c9a10')).toBeTruthy();
+    expect(screen.getByText('7f3c9a10').closest('p')?.textContent).toBe('Reference: 7f3c9a10');
   });
 
   it('refuses to be used outside its provider', () => {

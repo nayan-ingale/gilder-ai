@@ -1,6 +1,6 @@
 'use client';
 
-import { MoreHorizontal, Pencil, Pin, PinOff, Trash2 } from 'lucide-react';
+import { FileText, ImageIcon, MoreHorizontal, Pencil, Pin, PinOff, Trash2 } from 'lucide-react';
 import { useEffect, useSyncExternalStore } from 'react';
 import { cn } from '@/components/ui/cn';
 import {
@@ -11,13 +11,14 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import type { ChatSummary } from '@/lib/chats';
-import { useGetChatQuery } from '@/store/api';
+import { openFile } from '@/lib/uploads';
+import { useGetChatQuery, useGetFileQuery } from '@/store/api';
 import { useChatActions } from './chat-actions';
 
-const dayFormat = new Intl.DateTimeFormat('en-IN', { day: 'numeric', month: 'short' });
+const dayFormat = new Intl.DateTimeFormat('en-US', { month: 'short', day: 'numeric' });
 const noSubscription = () => () => {};
 
-/** "Today", "Yesterday" or "12 Nov", by the visitor's own calendar. */
+/** "Today", "Yesterday" or "Nov 12", by the visitor's own calendar. */
 export function dayLabel(iso: string, now = new Date()): string {
   const day = new Date(iso);
   const startOf = (date: Date) =>
@@ -37,9 +38,12 @@ export function dayLabel(iso: string, now = new Date()): string {
 export function ChatHeader({
   chat: initial,
   messageCount,
+  documentId,
 }: {
   chat: ChatSummary;
   messageCount: number;
+  /** The latest file sent in this chat, shown as a pill that opens it. */
+  documentId?: string | undefined;
 }) {
   const { data } = useGetChatQuery(initial.id);
   const chat = data?.chat ?? initial;
@@ -64,6 +68,7 @@ export function ChatHeader({
         <h1 className="truncate text-[15px] font-semibold text-fg">{chat.title}</h1>
         <p className="text-xs text-fg-muted">{day ? `${day} · ${count}` : count}</p>
       </div>
+      {documentId ? <DocumentPill fileId={documentId} /> : null}
       <button
         type="button"
         onClick={() => void actions.togglePin()}
@@ -107,5 +112,33 @@ export function ChatHeader({
       </DropdownMenu>
       {actions.dialogs}
     </header>
+  );
+}
+
+/** The chat's latest file: its name and whether it can be asked about; a click opens it. */
+function DocumentPill({ fileId }: { fileId: string }) {
+  const { data } = useGetFileQuery(fileId);
+  const file = data?.file;
+  if (!file) {
+    return null;
+  }
+  const [label, tone] =
+    file.status === 'ready'
+      ? ['Ready', 'bg-success-soft text-success']
+      : file.status === 'failed'
+        ? ['Failed', 'bg-danger-soft text-danger']
+        : ['Reading…', 'bg-accent-soft text-accent-text'];
+  const Icon = file.purpose === 'image' ? ImageIcon : FileText;
+  return (
+    <button
+      type="button"
+      onClick={() => void openFile(fileId, true)}
+      title={`Open ${file.name}`}
+      className="hidden min-h-10 max-w-[280px] shrink-0 items-center gap-2 rounded-full border border-line bg-surface px-3 text-[13px] text-fg hover:bg-sunken md:inline-flex"
+    >
+      <Icon size={15} strokeWidth={1.75} aria-hidden="true" className="shrink-0 text-accent-text" />
+      <span className="truncate">{file.name}</span>
+      <span className={cn('shrink-0 rounded-full px-2 py-px text-xs', tone)}>{label}</span>
+    </button>
   );
 }

@@ -38,6 +38,7 @@ const startBody = z
   })
   .strict();
 const fileParams = z.object({ fileId: z.string().min(1).max(64) });
+const linkQuery = z.object({ inline: z.enum(['1']).optional() }).strict();
 
 const notFound = () => new AppError('not_found', 'No such file');
 
@@ -182,7 +183,7 @@ export function fileRouter(deps: FileRouteDeps): Router {
   router.get(
     '/files/:fileId/url',
     requireUser(),
-    validate({ params: fileParams }),
+    validate({ params: fileParams, query: linkQuery }),
     async (req, res) => {
       const file = await findOwnedFile(
         res.locals.userId as string,
@@ -191,7 +192,12 @@ export function fileRouter(deps: FileRouteDeps): Router {
       if (!file || file.status !== 'ready') {
         throw notFound();
       }
-      res.json({ url: await store().downloadUrl(file.s3Key, file.name), expiresInSeconds: 300 });
+      // ?inline=1 opens the file in the browser instead of downloading it.
+      const inline = (req.query as z.output<typeof linkQuery>).inline === '1';
+      res.json({
+        url: await store().downloadUrl(file.s3Key, file.name, inline),
+        expiresInSeconds: 300,
+      });
     },
   );
 

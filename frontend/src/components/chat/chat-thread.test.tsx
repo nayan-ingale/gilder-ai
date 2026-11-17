@@ -295,6 +295,7 @@ describe('generated files', () => {
         return streamed(
           [
             ['meta', { turnId: 'a1', userMessageId: 'u1', assistantMessageId: 'a1' }],
+            ['agent', { agent: 'pdf', reason: 'shortcut' }],
             ['progress', { step: 'Laying out the pages', current: 2, total: 3 }],
             ['token', { text: 'Here is your PDF.' }],
             [
@@ -321,11 +322,19 @@ describe('generated files', () => {
       '/pdf packing list{Enter}',
     );
 
-    expect(await screen.findByText('Laying out the pages… (2 of 3)')).toBeTruthy();
+    // A job card: the step, a progress bar and the steps so far.
+    expect(await screen.findByText('Creating your PDF')).toBeTruthy();
+    expect(screen.getByText('Step 2 of 3')).toBeTruthy();
+    expect(
+      screen.getByRole('progressbar', { name: 'Progress' }).getAttribute('aria-valuenow'),
+    ).toBe('67');
+    expect(screen.getByText('Laying out the pages')).toBeTruthy();
+    expect(screen.getByText('10 credits reserved')).toBeTruthy();
     act(() => release());
     expect(await screen.findByText('packing-list.pdf')).toBeTruthy();
-    expect(screen.getByRole('button', { name: 'Download' })).toBeTruthy();
-    expect(screen.queryByText(/Laying out the pages/)).toBeNull();
+    expect(screen.getByRole('button', { name: 'Download packing-list.pdf' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Open packing-list.pdf' })).toBeTruthy();
+    expect(screen.queryByText('Creating your PDF')).toBeNull();
   });
 });
 

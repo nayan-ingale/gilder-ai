@@ -13,6 +13,7 @@ export interface UploadedFile {
   purpose: 'pdf' | 'image' | 'slides';
   status: 'pending' | 'ready' | 'failed';
   pageCount: number | null;
+  sizeBytes?: number;
 }
 
 export const ACCEPTED_TYPES = ['application/pdf', 'image/png', 'image/jpeg', 'image/webp'] as const;
@@ -81,8 +82,10 @@ export async function pdfReadingState(
   return indexing;
 }
 
-/** Opens a fresh, short-lived download link for a file. */
-export async function openFile(fileId: string): Promise<void> {
-  const { url } = await apiFetch<{ url: string }>(`/files/${encodeURIComponent(fileId)}/url`);
+/** Opens a fresh, short-lived link for a file: a download, or with `inline`, a view in the browser. */
+export async function openFile(fileId: string, inline = false): Promise<void> {
+  const { url } = await apiFetch<{ url: string }>(
+    `/files/${encodeURIComponent(fileId)}/url${inline ? '?inline=1' : ''}`,
+  );
   window.open(url, '_blank', 'noopener,noreferrer');
 }

@@ -12,7 +12,8 @@ import { ApiError } from '@/lib/api';
 import { peekQueuedFiles, takeQueuedFiles } from '@/lib/pending-files';
 import type { CodeFile } from '@/lib/code-files';
 import { pdfReadingState, uploadFile, uploadProblem } from '@/lib/uploads';
-import { useGetChatQuery } from '@/store/api';
+import { skipToken } from '@reduxjs/toolkit/query';
+import { useGetChatQuery, useGetFileQuery } from '@/store/api';
 import { clearFirstMessage } from '@/store/pending-slice';
 import type { AppDispatch, RootState } from '@/store/store';
 import { ArtifactContext, useMediaQuery } from './artifact-context';
@@ -188,6 +189,15 @@ export function ChatThread({
     message.files ? [message.files] : [],
   );
   const version = shownFiles ? codeAnswers.indexOf(shownFiles) + 1 : 0;
+  // The latest file sent in the chat: the header shows it, and the composer offers to ask about it.
+  const documentId = thread.messages
+    .findLast((message) => message.attachments?.length)
+    ?.attachments?.at(-1);
+  const { data: documentData } = useGetFileQuery(documentId ?? skipToken);
+  const document =
+    documentData?.file.status === 'ready' && documentData.file.purpose === 'pdf'
+      ? documentData.file
+      : null;
 
   const lastIndex = thread.messages.length - 1;
   const lastUserIndex = thread.messages.findLastIndex((message) => message.role === 'user');
@@ -203,7 +213,9 @@ export function ChatThread({
     >
       <div className="flex flex-1">
         <div className="flex min-w-0 flex-1 flex-col">
-          {chat ? <ChatHeader chat={chat} messageCount={thread.messages.length} /> : null}
+          {chat ? (
+            <ChatHeader chat={chat} messageCount={thread.messages.length} documentId={documentId} />
+          ) : null}
           {thread.messages.length === 0 ? (
             <div className="flex flex-1 flex-col items-center justify-center gap-2 px-4 text-center">
               <p className="text-base text-fg">No messages yet</p>
@@ -266,7 +278,7 @@ export function ChatThread({
                 running={thread.running}
                 onEditLast={lastUser?.id ? () => setEditing(true) : undefined}
                 initialText={handoff?.draft ?? ''}
-                placeholder="Reply to GilderAi"
+                placeholder={document ? `Ask about ${document.name}` : 'Reply to GilderAi'}
                 autoFocus
               />
               <p className="hidden text-center text-xs text-fg-subtle sm:block">

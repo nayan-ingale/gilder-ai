@@ -1,6 +1,6 @@
 'use client';
 
-import { Check, Copy, FileText, Pencil, RefreshCw } from 'lucide-react';
+import { Check, Copy, FileText, ImageIcon, Pencil, RefreshCw } from 'lucide-react';
 import { memo, useState } from 'react';
 import { IconButton } from '@/components/ui/button';
 import { cn } from '@/components/ui/cn';
@@ -8,7 +8,7 @@ import type { Citation, Source, ThreadMessage } from '@/lib/turns';
 import { openFile } from '@/lib/uploads';
 import { useGetFileQuery } from '@/store/api';
 import { FilesCard } from './files-card';
-import { agentInfo, creditsLabel } from './composer';
+import { agentInfo, costOf, creditsLabel, fileSize } from './composer';
 import { GeneratedFiles } from './generated-files';
 import { Markdown } from './markdown';
 
@@ -103,37 +103,54 @@ function Sources({ sources }: { sources: readonly Source[] }) {
   );
 }
 
-/** A file sent with a message: its name, opening a fresh download link on click. */
+/** A file sent with a message: its name, pages and size; a click opens it in the browser. */
 function AttachmentChip({ fileId }: { fileId: string }) {
   const { data } = useGetFileQuery(fileId);
+  const file = data?.file;
+  const meta = [
+    file?.pageCount ? `${file.pageCount} ${file.pageCount === 1 ? 'page' : 'pages'}` : null,
+    file?.sizeBytes ? fileSize(file.sizeBytes) : null,
+  ]
+    .filter(Boolean)
+    .join(' · ');
+  const Icon = file?.purpose === 'image' ? ImageIcon : FileText;
   return (
     <button
       type="button"
-      onClick={() => void openFile(fileId)}
-      className="inline-flex max-w-56 items-center gap-1.5 rounded-md border border-line bg-raised px-2 py-1 text-xs text-fg-muted hover:bg-surface hover:text-fg"
+      onClick={() => void openFile(fileId, true)}
+      className="inline-flex max-w-72 items-center gap-2.5 rounded-md border border-line bg-surface px-3 py-2 text-left hover:bg-sunken"
     >
-      <FileText size={12} aria-hidden="true" />
-      <span className="truncate">{data?.file.name ?? 'File'}</span>
+      <Icon size={16} strokeWidth={1.75} aria-hidden="true" className="shrink-0 text-accent-text" />
+      <span className="truncate text-[13px] font-medium text-fg">{file?.name ?? 'File'}</span>
+      {meta ? <span className="shrink-0 text-xs text-fg-muted">{meta}</span> : null}
     </button>
   );
 }
 
-/** The PDF pages an answer is based on; the quoted passage shows on hover. */
+/** The passages of the user's documents an answer is based on, as quote cards. */
 function Citations({ citations }: { citations: readonly Citation[] }) {
+  const documents = new Set(citations.map((citation) => citation.documentId));
   return (
-    <section aria-label="Pages cited" className="mt-3">
-      <h3 className="mb-1.5 text-xs font-medium text-fg-subtle">From your documents</h3>
-      <ul className="flex flex-wrap gap-2">
+    <section aria-label="Pages cited" className="mt-3 flex flex-col gap-2">
+      <h3 className="text-[12.5px] font-medium text-fg-subtle">
+        {documents.size > 1 ? 'From your documents' : 'From your document'}
+      </h3>
+      <div className="grid grid-cols-[repeat(auto-fit,minmax(260px,1fr))] gap-2">
         {citations.map((citation) => (
-          <li
+          <figure
             key={`${citation.documentId}-${citation.page}-${citation.quote.slice(0, 20)}`}
-            title={citation.quote}
-            className="rounded-md border border-line bg-raised px-2 py-1 text-xs text-fg-muted"
+            className="m-0 flex flex-col gap-1.5 rounded-md border border-line bg-surface px-3.5 py-3"
           >
-            <span className="text-fg">{citation.name}</span> · p. {citation.page}
-          </li>
+            <figcaption className="text-xs font-semibold text-accent-text">
+              Page {citation.page}
+              {documents.size > 1 ? ` · ${citation.name}` : ''}
+            </figcaption>
+            <blockquote className="m-0 text-[13.5px] leading-normal text-fg-muted">
+              {citation.quote}
+            </blockquote>
+          </figure>
         ))}
-      </ul>
+      </div>
     </section>
   );
 }
@@ -234,17 +251,11 @@ function MessageItemView({ message, onRegenerate, onEdit }: MessageItemProps) {
         ) : null}
         {message.files?.length && !writing ? <FilesCard files={message.files} /> : null}
         {writing && message.progress ? (
-          <div className="mt-2 flex max-w-sm flex-col gap-1" role="status">
-            <span className="text-xs text-fg-muted">
-              {message.progress.step}… ({message.progress.current} of {message.progress.total})
-            </span>
-            <span className="h-1.5 overflow-hidden rounded-full bg-sunken">
-              <span
-                className="block h-full rounded-full bg-accent transition-all"
-                style={{ width: `${(message.progress.current / message.progress.total) * 100}%` }}
-              />
-            </span>
-          </div>
+          <JobCard
+            agent={message.agent}
+            progress={message.progress}
+            steps={message.progressSteps ?? [message.progress.step]}
+          />
         ) : null}
         {message.generated?.length ? <GeneratedFiles fileIds={message.generated} /> : null}
         {message.citations?.length ? <Citations citations={message.citations} /> : null}
@@ -302,12 +313,100 @@ export function duration(ms: number): string {
   return `${Math.floor(whole / 60)} min ${whole % 60} s`;
 }
 
+/** Agents that make a file, which takes a while and shows a job card. */
+const FILE_AGENTS = new Set(['pdf', 'slides', 'image']);
+
+const JOB_TITLES: Record<string, string> = {
+  pdf: 'Creating your PDF',
+  slides: 'Creating your slides',
+  image: 'Creating your image',
+};
+
+/** While a file is being made: the step, a progress bar and the steps so far. */
+function JobCard({
+  agent,
+  progress,
+  steps,
+}: {
+  agent: string | null | undefined;
+  progress: { step: string; current: number; total: number };
+  steps: readonly string[];
+}) {
+  const percent = Math.round((progress.current / progress.total) * 100);
+  return (
+    <div
+      role="status"
+      className="mt-1 flex max-w-[520px] flex-col gap-3 rounded-md border border-line bg-surface p-4"
+    >
+      <div className="flex items-center justify-between gap-3">
+        <span className="text-sm font-medium">
+          {JOB_TITLES[agent ?? ''] ?? 'Creating your file'}
+        </span>
+        <span className="text-[12.5px] text-fg-muted">
+          Step {progress.current} of {progress.total}
+        </span>
+      </div>
+      <div
+        role="progressbar"
+        aria-label="Progress"
+        aria-valuemin={0}
+        aria-valuemax={100}
+        aria-valuenow={percent}
+        className="h-1.5 overflow-hidden rounded-full bg-sunken"
+      >
+        <div
+          className="h-full rounded-full bg-accent transition-all"
+          style={{ width: `${percent}%` }}
+        />
+      </div>
+      <ol className="flex flex-col gap-2">
+        {steps.map((step, index) => {
+          const done = index < steps.length - 1;
+          return (
+            <li
+              key={step}
+              className={cn(
+                'flex items-center gap-2.5 text-[13.5px]',
+                done ? 'text-fg-muted' : 'text-fg',
+              )}
+            >
+              <span
+                aria-hidden="true"
+                className={cn(
+                  'flex size-5 shrink-0 items-center justify-center rounded-full border',
+                  done
+                    ? 'border-success bg-success-soft text-success'
+                    : 'border-accent-border bg-accent-soft text-accent-text',
+                )}
+              >
+                {done ? (
+                  <Check size={12} strokeWidth={2.5} />
+                ) : (
+                  <span className="size-1.5 animate-pulse rounded-full bg-accent" />
+                )}
+              </span>
+              <span>{step}</span>
+              <span className="ml-auto text-xs text-fg-subtle">
+                {done ? 'Done' : 'In progress'}
+              </span>
+            </li>
+          );
+        })}
+      </ol>
+      <span className="text-[12.5px] text-fg-muted">Keep this chat open until it is ready.</span>
+    </div>
+  );
+}
+
 /** Above an answer: which agent wrote it, and what it cost and how long it took. */
 function AnswerMeta({ message }: { message: ThreadMessage }) {
   const info = agentInfo(message.agent);
+  const making = FILE_AGENTS.has(message.agent ?? '');
   const details =
     message.status === 'streaming'
-      ? 'Writing…'
+      ? making && info
+        ? `${creditsLabel(costOf(message.agent))} reserved`
+        : 'Writing…'
       : message.status === 'stopped'
         ? 'Stopped'
         : message.status === 'failed'

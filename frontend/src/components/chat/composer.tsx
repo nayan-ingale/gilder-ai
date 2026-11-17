@@ -1,6 +1,7 @@
 'use client';
 
 import {
+  AlertTriangle,
   ArrowUp,
   Check,
   ChevronDown,
@@ -26,6 +27,7 @@ import {
   useRef,
   useState,
 } from 'react';
+import Link from 'next/link';
 import { cn } from '@/components/ui/cn';
 import {
   DropdownMenu,
@@ -39,6 +41,7 @@ import {
 import { Kbd } from '@/components/ui/kbd';
 import { useToast } from '@/components/ui/toast';
 import { useDictation } from '@/hooks/use-dictation';
+import { LOW_BALANCE } from '@/lib/billing';
 import { BUILT_AGENTS } from '@/lib/turns';
 import { ACCEPTED_TYPES } from '@/lib/uploads';
 import { useGetAccountQuery } from '@/store/api';
@@ -124,6 +127,11 @@ export function agentInfo(
   return agent === 'image_qa' ? { label: 'Image Q&A', icon: ImageIcon } : null;
 }
 
+/** What an answer from this agent costs, in credits (10 for the agents only picked automatically). */
+export function costOf(agent: string | null | undefined): number {
+  return AGENT_OPTIONS.find((option) => option.id === agent)?.cost ?? 10;
+}
+
 /** "1 credit" or "10 credits". */
 export function creditsLabel(cost: number): string {
   return `${cost} ${cost === 1 ? 'credit' : 'credits'}`;
@@ -205,7 +213,9 @@ export function Composer({
   const textarea = useRef<HTMLTextAreaElement>(null);
   const toast = useToast();
   const { data } = useGetAccountQuery();
-  const outOfCredits = data !== undefined && data.account.balance < 1;
+  const balance = data?.account.balance ?? 0;
+  const outOfCredits = data !== undefined && balance < 1;
+  const lowCredits = data !== undefined && balance < LOW_BALANCE;
   const dictation = useDictation(
     () => textarea.current?.value ?? '',
     (spoken) => setText(spoken.slice(0, MAX_LENGTH)),
@@ -331,10 +341,24 @@ export function Composer({
           ))}
         </ul>
       ) : null}
-      {outOfCredits ? (
-        <p role="status" className="mb-2 text-sm text-warning">
-          You are out of credits. New answers need credits.
-        </p>
+      {lowCredits ? (
+        <div
+          role="status"
+          className="mb-2.5 flex flex-wrap items-center gap-2.5 rounded-md border border-line bg-warning-soft py-2.5 pr-2.5 pl-3.5 text-fg"
+        >
+          <AlertTriangle size={16} strokeWidth={1.75} aria-hidden="true" className="text-warning" />
+          <span className="flex-[1_1_240px] text-[13.5px]">
+            {outOfCredits
+              ? 'You are out of credits. New answers need credits.'
+              : `${creditsLabel(balance)} left. PDF, Slides and Image need 10 credits each.`}
+          </span>
+          <Link
+            href="/settings/billing"
+            className="inline-flex min-h-9 items-center rounded-sm border border-line-strong bg-raised px-3.5 text-[13px] font-medium text-fg hover:bg-sunken"
+          >
+            Get credits
+          </Link>
+        </div>
       ) : null}
       <div className="flex flex-col gap-2 rounded-lg border border-line bg-raised pt-3 pr-2.5 pb-2.5 pl-3.5 transition-shadow focus-within:border-accent-border focus-within:shadow-[0_0_0_3px_var(--accent-soft)]">
         {attachments.length > 0 ? (

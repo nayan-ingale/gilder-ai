@@ -186,6 +186,18 @@ describe('reading files', () => {
     expect(details.body.file.name).toBe('photo.png');
     expect(theirs.status).toBe(404);
   });
+
+  it('opens the file in the browser with ?inline=1, and refuses other values', async () => {
+    const { body } = await start({ name: 'photo.png', mime: 'image/png', sizeBytes: PNG.length });
+    store.simulateUpload(body.upload.fields.key as string, PNG, 'image/png');
+    await (await as('u1')).post(`/files/${body.file.id}/complete`);
+
+    const shown = await (await as('u1')).get(`/files/${body.file.id}/url?inline=1`);
+    const odd = await (await as('u1')).get(`/files/${body.file.id}/url?inline=yes`);
+
+    expect(shown.body.url).toContain('inline=photo.png');
+    expect(odd.status).toBe(400);
+  });
 });
 
 describe('countPdfPages', () => {

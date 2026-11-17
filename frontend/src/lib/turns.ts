@@ -182,8 +182,9 @@ export type ThreadMessage = Pick<ChatMessage, 'role' | 'content' | 'status'> & {
   attachments?: string[];
   /** PDF pages an answer is based on. */
   citations?: Citation[];
-  /** While a file is being made: the current step. */
+  /** While a file is being made: the current step, and every step so far. */
   progress?: { step: string; current: number; total: number };
+  progressSteps?: string[];
   /** Files the answer made, by ID. */
   generated?: string[];
   /** For a finished answer: the credits it cost and how long it took. */

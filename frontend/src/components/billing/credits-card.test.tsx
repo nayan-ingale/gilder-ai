@@ -43,7 +43,7 @@ describe('CreditsCard', () => {
     renderCard();
 
     const card = await screen.findByRole('region', { name: 'Credits' });
-    expect(card.textContent).toContain('Plan active until 4 Dec');
+    expect(card.textContent).toContain('Plan active until Dec 4');
     expect(card.querySelector('a')?.getAttribute('href')).toBe('/settings/billing');
   });
 

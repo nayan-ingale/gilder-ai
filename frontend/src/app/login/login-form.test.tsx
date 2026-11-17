@@ -102,7 +102,7 @@ describe('LoginForm', () => {
     await userEvent.click(screen.getByRole('button', { name: 'Continue with Google' }));
 
     expect(await screen.findByText('The Google sign-in is not valid. Sign in again.')).toBeTruthy();
-    expect(screen.getByText('Reference: abcd1234')).toBeTruthy();
+    expect(screen.getByText('abcd1234').closest('p')?.textContent).toBe('Reference: abcd1234');
     expect(router.replace).not.toHaveBeenCalled();
   });
 

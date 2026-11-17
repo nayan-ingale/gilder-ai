@@ -31,8 +31,11 @@ export interface FileStore {
   /** The object's bytes, or only the first `firstBytes` of them. */
   read(key: string, firstBytes?: number): Promise<Buffer>;
   put(key: string, bytes: Buffer, contentType: string): Promise<void>;
-  /** A signed link to download, valid for a few minutes, saved under `fileName`. */
-  downloadUrl(key: string, fileName: string): Promise<string>;
+  /**
+   * A signed link, valid for a few minutes: a download saved under `fileName`, or with `inline`,
+   * shown in the browser.
+   */
+  downloadUrl(key: string, fileName: string, inline?: boolean): Promise<string>;
   remove(keys: string[]): Promise<void>;
 }
 
@@ -92,14 +95,14 @@ export function createS3FileStore(settings: S3Settings): FileStore {
         new PutObjectCommand({ Bucket, Key: key, Body: bytes, ContentType: contentType }),
       );
     },
-    async downloadUrl(key, fileName) {
+    async downloadUrl(key, fileName, inline = false) {
       const safeName = fileName.replace(/["\\\r\n]/g, '_');
       return getSignedUrl(
         client,
         new GetObjectCommand({
           Bucket,
           Key: key,
-          ResponseContentDisposition: `attachment; filename="${safeName}"`,
+          ResponseContentDisposition: `${inline ? 'inline' : 'attachment'}; filename="${safeName}"`,
         }),
         { expiresIn: LINK_SECONDS },
       );
@@ -149,8 +152,9 @@ export function createMemoryFileStore(): FileStore & {
     async put(key, bytes, contentType) {
       objects.set(key, { bytes, contentType });
     },
-    async downloadUrl(key, fileName) {
-      return `https://bucket.example/${key}?download=${encodeURIComponent(fileName)}&signed=1`;
+    async downloadUrl(key, fileName, inline = false) {
+      const mode = inline ? 'inline' : 'download';
+      return `https://bucket.example/${key}?${mode}=${encodeURIComponent(fileName)}&signed=1`;
     },
     async remove(keys) {
       for (const key of keys) {
