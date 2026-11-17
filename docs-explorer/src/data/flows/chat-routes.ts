@@ -11,7 +11,6 @@ const APPS = ['frontend', 'gateway', 'chat'];
 const API: SymbolRef = 'frontend/src/store/api.ts#api';
 const FORWARD: SymbolRef = 'frontend/src/server/gateway-proxy.ts#forwardToGateway';
 const CHAT_LIST: SymbolRef = 'frontend/src/components/chats/chat-list.tsx#ChatList';
-const CHAT_ROW: SymbolRef = 'frontend/src/components/chats/chat-row.tsx#ChatRow';
 const LOAD_CHAT: SymbolRef = 'frontend/src/server/chats.ts#loadChatWithHistory';
 const CHAT_VIEW: SymbolRef = 'frontend/src/app/(app)/c/[chatId]/page.tsx#ChatView';
 const CREATE_SERVICE: SymbolRef = 'backend/shared/src/service.ts#createService';
