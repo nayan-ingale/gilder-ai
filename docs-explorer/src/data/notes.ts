@@ -3712,22 +3712,29 @@ export const notes: SymbolNote[] = [
     symbol: 'frontend/src/components/app-shell/sidebar.tsx#MobileBar',
     status: 'verified',
     summary:
-      'The top bar on small screens: the chat list menu, brand, search, new chat and the account.',
-    why: 'It stands in for the sidebar below the md breakpoint: MobileNav opens the chat list, SearchIconButton opens search and the + link goes to / for a new chat. The account part comes in as children.',
+      "The top bar on small screens: the menu, the open chat's title with the credits under it (MobileTitle), and New chat.",
+    why: 'It stands in for the sidebar and the chat header below the md breakpoint, in one 56 px bar with 44 px buttons. The account part comes in as a prop and lives in the menu (MobileNav), since it needs the session.',
     returns: 'The <header> as JSX.',
   },
   {
     symbol: 'frontend/src/components/app-shell/mobile-nav.tsx#MobileNav',
     status: 'verified',
     summary:
-      'The chat list on small screens: a panel along the left edge, opened from the top bar.',
+      'The chats on small screens: a panel along the left edge with the logo, New chat, search, the chat list, the credits card and the account.',
     how: [
       'The menu button opens it. It is a Radix dialog, so focus stays inside and Escape closes it.',
-      'It holds New chat, Search chats, the same ChatList as the sidebar and the credits card.',
-      'A click on a link, or on an element marked data-closes-nav such as the search button, closes it.',
+      'A click on a link, or on an element marked data-closes-nav such as the search button, closes it; so does going to another page, because it is open only on the page it was opened on.',
     ],
-    why: 'Below the md breakpoint the sidebar is hidden, so the chats need another way in. Using the same ChatList means the same cached list.',
+    why: 'Below the md breakpoint the sidebar is hidden, so the chats and the account need another way in. Using the same ChatList means the same cached list.',
     returns: 'The menu button and the panel as JSX.',
+  },
+  {
+    symbol: 'frontend/src/components/app-shell/mobile-title.tsx#MobileTitle',
+    status: 'verified',
+    summary:
+      "The middle of the small-screen top bar: the open chat's title (or 'New chat', 'Settings') with the credits under it.",
+    why: 'On a chat page it is the h1, since the chat header is hidden on small screens; elsewhere the page has its own heading, so it is plain text. The title and the balance come from the cached getChat and getAccount.',
+    returns: 'The title block as JSX.',
   },
   {
     symbol: 'frontend/src/components/ui/avatar.tsx#Avatar',

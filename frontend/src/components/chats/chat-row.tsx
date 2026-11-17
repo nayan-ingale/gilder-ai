@@ -34,7 +34,7 @@ export function ChatRow({ chat }: { chat: ChatSummary }) {
         href={href}
         aria-current={active ? 'page' : undefined}
         className={cn(
-          'flex h-10 items-center rounded-sm pr-11 pl-2.5 text-[13.5px]',
+          'flex h-10 items-center rounded-sm pr-11 pl-2.5 text-[13.5px] pointer-coarse:h-11',
           active
             ? 'bg-accent-soft font-medium text-fg'
             : 'text-fg-muted hover:bg-sunken hover:text-fg',
@@ -47,7 +47,7 @@ export function ChatRow({ chat }: { chat: ChatSummary }) {
           aria-label={`Options for ${chat.title}`}
           data-chat-options={chat.id}
           className={cn(
-            'absolute top-0 right-0.5 inline-flex size-10 items-center justify-center rounded-sm text-fg-muted group-hover:opacity-100 hover:text-fg focus-visible:opacity-100 data-[state=open]:opacity-100 pointer-coarse:opacity-100',
+            'absolute top-0 right-0.5 inline-flex size-10 items-center justify-center rounded-sm text-fg-muted pointer-coarse:size-11 group-hover:opacity-100 hover:text-fg focus-visible:opacity-100 data-[state=open]:opacity-100 pointer-coarse:opacity-100',
             active ? 'opacity-100' : 'opacity-0',
           )}
         >

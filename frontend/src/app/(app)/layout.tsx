@@ -29,11 +29,13 @@ export default function AppLayout({ children }: LayoutProps<'/'>) {
           }
         />
         <div className="flex min-w-0 flex-1 flex-col">
-          <MobileBar>
-            <Suspense fallback={<Skeleton className="size-7 rounded-full" />}>
-              <SidebarAccount compact />
-            </Suspense>
-          </MobileBar>
+          <MobileBar
+            account={
+              <Suspense fallback={<SidebarAccountSkeleton />}>
+                <SidebarAccount />
+              </Suspense>
+            }
+          />
           {/* Focusable, so keyboard users can scroll it even on pages with no links or buttons.
               Relative, so absolutely positioned content (screen-reader-only labels) stays inside
               this scroller; otherwise it overflows the page and the whole app can scroll away. */}

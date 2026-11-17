@@ -428,7 +428,7 @@ export function Composer({
           onKeyDown={onKeyDown}
           placeholder={placeholder}
           maxLength={MAX_LENGTH}
-          className="block max-h-60 min-h-[52px] w-full resize-none bg-transparent px-0.5 py-1 text-[15px] leading-normal text-fg outline-none placeholder:text-fg-subtle"
+          className="block max-h-60 min-h-[52px] w-full resize-none bg-transparent px-0.5 py-1 text-base leading-normal text-fg outline-none placeholder:text-fg-subtle sm:text-[15px]"
         />
         <div className="flex items-center gap-1.5">
           {onAttach ? (
@@ -439,7 +439,7 @@ export function Composer({
                 title="Attach a PDF or image"
                 disabled={running}
                 onClick={() => filePicker.current?.click()}
-                className="inline-flex size-9 shrink-0 items-center justify-center rounded-md border border-line text-fg-muted hover:bg-sunken hover:text-fg disabled:opacity-50"
+                className="inline-flex size-9 shrink-0 items-center justify-center rounded-md border border-line text-fg-muted pointer-coarse:size-11 hover:bg-sunken hover:text-fg disabled:opacity-50"
               >
                 <Plus size={18} strokeWidth={1.75} aria-hidden="true" />
               </button>
@@ -468,7 +468,7 @@ export function Composer({
               <DropdownMenuTrigger
                 aria-label={`Agent: ${pillLabel}`}
                 className={cn(
-                  'inline-flex min-h-9 items-center gap-1.5 rounded-md border pr-2 pl-2.5 text-[13.5px] font-medium whitespace-nowrap',
+                  'inline-flex min-h-9 items-center gap-1.5 rounded-md border pr-2 pl-2.5 text-[13.5px] font-medium whitespace-nowrap pointer-coarse:min-h-11',
                   picked
                     ? 'border-accent-border bg-accent-soft text-accent-text'
                     : 'border-transparent text-fg hover:bg-sunken data-[state=open]:bg-sunken',
@@ -551,7 +551,7 @@ export function Composer({
                 title={dictation.listening ? 'Stop dictating' : 'Dictate a message'}
                 disabled={running}
                 className={cn(
-                  'inline-flex size-9 items-center justify-center rounded-full disabled:opacity-50',
+                  'inline-flex size-9 items-center justify-center rounded-full disabled:opacity-50 pointer-coarse:size-11',
                   dictation.listening
                     ? 'bg-danger-soft text-danger'
                     : 'text-fg-muted hover:bg-sunken hover:text-fg',
@@ -566,7 +566,7 @@ export function Composer({
                 aria-label="Stop the answer"
                 title="Stop the answer (Esc)"
                 onClick={onStop}
-                className="inline-flex size-9 items-center justify-center rounded-full border border-line-strong bg-surface text-fg hover:bg-sunken"
+                className="inline-flex size-9 items-center justify-center rounded-full border border-line-strong bg-surface text-fg hover:bg-sunken pointer-coarse:size-11"
               >
                 <Square size={11} fill="currentColor" aria-hidden="true" />
               </button>
@@ -576,7 +576,7 @@ export function Composer({
                 aria-label="Send"
                 title="Send"
                 disabled={!canSend}
-                className="inline-flex size-9 items-center justify-center rounded-full bg-accent text-accent-ink hover:opacity-90 disabled:cursor-not-allowed disabled:bg-sunken disabled:text-fg-subtle disabled:hover:opacity-100"
+                className="inline-flex size-9 items-center justify-center rounded-full bg-accent text-accent-ink pointer-coarse:size-11 hover:opacity-90 disabled:cursor-not-allowed disabled:bg-sunken disabled:text-fg-subtle disabled:hover:opacity-100"
               >
                 <ArrowUp size={17} strokeWidth={2.25} aria-hidden="true" />
               </button>

@@ -76,9 +76,10 @@ function Sources({ sources }: { sources: readonly Source[] }) {
   return (
     <section aria-label="Sources" className="flex flex-col gap-2">
       <h3 className="text-[12.5px] font-medium text-fg-subtle">Sources</h3>
-      <ol className="flex flex-wrap gap-2">
+      {/* On phones the cards scroll sideways in one row; wider screens wrap them. */}
+      <ol className="-mx-4 flex gap-2 overflow-x-auto px-4 pb-0.5 sm:mx-0 sm:flex-wrap sm:overflow-visible sm:px-0 sm:pb-0">
         {sources.map((source) => (
-          <li key={source.n} className="w-full sm:w-[236px]">
+          <li key={source.n} className="w-[236px] shrink-0">
             <a
               href={source.url}
               target="_blank"
@@ -204,7 +205,7 @@ function MessageItemView({ message, onRegenerate, onEdit }: MessageItemProps) {
                 icon={<Pencil size={16} strokeWidth={1.75} />}
                 size="sm"
                 onClick={onEdit}
-                className="size-9 text-fg-subtle"
+                className="size-9 text-fg-subtle pointer-coarse:size-11"
               />
             ) : null}
             {message.content ? (
@@ -213,7 +214,7 @@ function MessageItemView({ message, onRegenerate, onEdit }: MessageItemProps) {
                 icon={copied ? <Check size={16} /> : <Copy size={16} strokeWidth={1.75} />}
                 size="sm"
                 onClick={() => void copy()}
-                className="size-9 text-fg-subtle"
+                className="size-9 text-fg-subtle pointer-coarse:size-11"
               />
             ) : null}
           </div>
@@ -269,7 +270,7 @@ function MessageItemView({ message, onRegenerate, onEdit }: MessageItemProps) {
         ) : null}
       </div>
       {!writing && (message.content || onRegenerate) ? (
-        <div className="-ml-2 flex items-center gap-0.5">
+        <div className="-ml-2 flex items-center gap-0.5 [&>button]:pointer-coarse:min-h-11">
           {message.content ? (
             <button
               type="button"

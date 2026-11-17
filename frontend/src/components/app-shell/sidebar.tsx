@@ -1,4 +1,4 @@
-import { Plus, SquarePen } from 'lucide-react';
+import { SquarePen } from 'lucide-react';
 import Link from 'next/link';
 import { redirect } from 'next/navigation';
 import type { ReactNode } from 'react';
@@ -11,6 +11,7 @@ import { getCurrentUser } from '@/server/session';
 import { AccountMenu } from './account-menu';
 import { Logo, Wordmark } from './brand';
 import { MobileNav } from './mobile-nav';
+import { MobileTitle } from './mobile-title';
 import { SidebarToggle } from './sidebar-toggle';
 import { ThemeSync } from './theme-sync';
 
@@ -81,30 +82,22 @@ export function SidebarFrame({
 }
 
 /**
- * The top bar on small screens, where the sidebar is hidden: the chat list menu, brand, search,
- * new chat and the account.
+ * The top bar on small screens, where the sidebar is hidden: the menu with the chats and the
+ * account, the chat's title with the credits under it, and New chat.
  */
-export function MobileBar({ children }: { children: React.ReactNode }) {
+export function MobileBar({ account }: { account: ReactNode }) {
   return (
-    <header className="flex h-12 shrink-0 items-center justify-between border-b border-line bg-surface px-2 md:hidden">
-      <div className="flex items-center gap-1">
-        <MobileNav />
-        <Link href="/" className="text-base font-semibold tracking-tight text-fg">
-          GilderAi
-        </Link>
-      </div>
-      <div className="flex items-center gap-1">
-        <SearchIconButton />
-        <Link
-          href="/"
-          aria-label="New chat"
-          title="New chat"
-          className="inline-flex size-8 items-center justify-center rounded-md text-fg-muted hover:bg-surface hover:text-fg"
-        >
-          <Plus size={18} aria-hidden="true" />
-        </Link>
-        {children}
-      </div>
+    <header className="flex min-h-14 shrink-0 items-center gap-1 border-b border-line bg-canvas px-1.5 md:hidden">
+      <MobileNav account={account} />
+      <MobileTitle />
+      <Link
+        href="/"
+        aria-label="New chat"
+        title="New chat"
+        className="inline-flex size-11 shrink-0 items-center justify-center rounded-sm text-fg hover:bg-sunken"
+      >
+        <SquarePen size={20} strokeWidth={1.75} aria-hidden="true" />
+      </Link>
     </header>
   );
 }

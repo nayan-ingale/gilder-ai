@@ -63,7 +63,7 @@ export function ChatHeader({
   const count = `${messageCount} ${messageCount === 1 ? 'message' : 'messages'}`;
   const pinLabel = chat.pinned ? 'Unpin chat' : 'Pin chat';
   return (
-    <header className="sticky top-0 z-10 flex min-h-[60px] shrink-0 items-center gap-3 border-b border-line bg-canvas pr-3 pl-4 sm:pr-5 sm:pl-7">
+    <header className="sticky top-0 z-10 hidden min-h-[60px] shrink-0 items-center gap-3 border-b border-line bg-canvas pr-3 pl-4 sm:pr-5 sm:pl-7 md:flex">
       <div className="flex min-w-0 flex-1 flex-col">
         <h1 className="truncate text-[15px] font-semibold text-fg">{chat.title}</h1>
         <p className="text-xs text-fg-muted">{day ? `${day} · ${count}` : count}</p>
