@@ -5,7 +5,7 @@ test.describe('signed out', () => {
   test('sends visitors to sign-in', async ({ page }) => {
     await page.goto('/');
     await expect(page).toHaveURL(/\/login$/);
-    await expect(page.getByRole('heading', { name: 'Sign in to GilderAi' })).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'Sign in', exact: true })).toBeVisible();
   });
 });
 
