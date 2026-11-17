@@ -89,8 +89,10 @@ test.describe('credits', () => {
 
     await page.goto('/settings/billing');
     await expect(page.getByText('Test payments only.')).toBeVisible();
-    await expect(page.getByRole('button', { name: 'Buy Starter' })).toBeVisible();
-    await expect(page.getByText(/^99\s+credits$/).first()).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Upgrade to Starter' })).toBeVisible();
+    await expect(
+      page.getByRole('region', { name: 'Credits' }).getByText(/^99\s+credits$/),
+    ).toBeVisible();
   });
 });
 

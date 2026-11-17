@@ -1,16 +1,36 @@
 import { randomUUID } from 'node:crypto';
-import { AppError, type Logger, PLANS, rawBodyOf, requireUser, validate, z } from '@gilder/shared';
+import {
+  AGENTS,
+  AppError,
+  CREDIT_COSTS,
+  type Logger,
+  PLANS,
+  rawBodyOf,
+  requireUser,
+  validate,
+  z,
+} from '@gilder/shared';
 import { Router } from 'express';
 import { grantPurchase } from './credits.ts';
-import { PaymentModel, toAccount, toPayment, WebhookEventModel } from './models.ts';
+import {
+  LedgerModel,
+  PaymentModel,
+  toAccount,
+  toPayment,
+  toReceipt,
+  WebhookEventModel,
+} from './models.ts';
 import type { PaymentGateway } from './razorpay.ts';
 
 /**
- * Buying credits: the plans, an order priced by the server, the browser's payment check, the
- * payment history, and Razorpay's webhook as a backup for a browser that closed too early.
+ * Buying credits: the plans and what each answer costs, an order priced by the server, the
+ * browser's payment check, the payment history with a receipt for each payment, and Razorpay's
+ * webhook as a backup for a browser that closed too early.
  */
 
 const PAID_PLANS = ['starter', 'pro'] as const;
+/** Payments run in Razorpay's test mode: no real money moves. */
+const TEST_MODE = true;
 const orderBody = z.object({ planId: z.enum(PAID_PLANS) }).strict();
 const orderParams = z.object({ orderId: z.string().min(1).max(64) });
 const verifyBody = z
@@ -35,14 +55,18 @@ export function paymentRouter(deps: {
     return deps.payments;
   };
 
+  // The plans to buy, the Free plan's sign-up credits, and the price of an answer from each
+  // agent, all from the shared config, so the page never keeps its own copy.
   router.get('/plans', requireUser(), (_req, res) => {
     res.json({
       plans: PAID_PLANS.map((id) => {
         const { name, pricePaise, credits, validityDays } = PLANS[id];
         return { id, name, pricePaise, credits, validityDays };
       }),
+      freePlan: { name: PLANS.free.name, credits: PLANS.free.credits },
+      costs: AGENTS.map((agent) => ({ agent, credits: CREDIT_COSTS[agent] })),
       currency: 'INR',
-      testMode: true,
+      testMode: TEST_MODE,
     });
   });
 
@@ -88,16 +112,41 @@ export function paymentRouter(deps: {
   );
 
   // Only paid ones: a checkout that was opened and closed stays stored, because a late webhook
-  // (a slow UPI payment) can still pay it, but the history doesn't list it as a failure.
+  // (a slow UPI payment) can still pay it, but the history doesn't list it as a failure. The
+  // sign-up grant comes along, so the history starts where the credits did.
   router.get('/payments', requireUser(), async (_req, res) => {
-    const payments = await PaymentModel.find({
-      userId: res.locals.userId as string,
-      status: 'paid',
-    })
-      .sort({ createdAt: -1 })
-      .limit(50);
-    res.json({ items: payments.map(toPayment) });
+    const userId = res.locals.userId as string;
+    const [payments, grant] = await Promise.all([
+      PaymentModel.find({ userId, status: 'paid' }).sort({ createdAt: -1 }).limit(50),
+      LedgerModel.findOne({ userId, kind: 'signup_grant' }),
+    ]);
+    res.json({
+      items: payments.map(toPayment),
+      signupGrant: grant
+        ? { credits: grant.delta, grantedAt: grant.createdAt.toISOString() }
+        : null,
+    });
   });
+
+  // One paid payment as a receipt. Someone else's order, or one not paid, is not found, so a
+  // receipt never shows whether another user's order exists.
+  router.get(
+    '/payments/:orderId',
+    requireUser(),
+    validate({ params: orderParams }),
+    async (req, res) => {
+      const { orderId } = req.params as z.output<typeof orderParams>;
+      const payment = await PaymentModel.findOne({
+        orderId,
+        userId: res.locals.userId as string,
+        status: 'paid',
+      });
+      if (!payment) {
+        throw new AppError('not_found', 'No such payment');
+      }
+      res.json({ receipt: toReceipt(payment, TEST_MODE) });
+    },
+  );
 
   // Razorpay calls this server to server. The signature over the raw body proves it is Razorpay;
   // the event ID makes a redelivery a no-op. Handled or not, it answers 200 so Razorpay stops.

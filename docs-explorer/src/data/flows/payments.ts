@@ -42,12 +42,12 @@ const buyCredits: Flow = {
   steps: [
     {
       id: 'open',
-      title: 'The user opens Billing and credits',
+      title: 'The user opens Billing',
       kind: 'trigger',
       status: 'verified',
       symbol: BILLING_VIEW,
       highlight: 'const plans = useGetPlansQuery();',
-      what: "The account menu's 'Billing and credits', or 'Get more' on the credits card, opens /settings/billing. BillingView loads three things at once: the account (GET /api/billing/account), the plans (GET /api/billing/plans) and the payment history (GET /api/billing/payments). A note says only test payments are taken, with a Razorpay test card or the test UPI ID success@razorpay.",
+      what: "The account menu's 'Billing', or the credits card in the sidebar, opens /settings/billing, under the Settings tabs. BillingView loads three things at once: the account (GET /api/billing/account), the plans (GET /api/billing/plans) and the payment history (GET /api/billing/payments). A note says only test payments are taken, with a Razorpay test card or the test UPI ID success@razorpay.",
       why: 'The user sees their balance, what they can buy and what they bought, in one place.',
     },
     {
@@ -69,7 +69,7 @@ const buyCredits: Flow = {
       status: 'verified',
       symbol: BILLING_VIEW,
       highlight: 'const { order, keyId } = await createOrder({ planId: plan.id }).unwrap();',
-      what: "Clicking 'Buy Starter' or 'Buy Pro' turns every Buy button off and shows 'Opening payment…'. createOrder posts { planId } to /api/billing/orders: the browser names the plan, never a price.",
+      what: "Clicking a plan's button ('Upgrade to Starter', 'Buy again' and so on) turns every plan button off and shows 'Opening payment…'. createOrder posts { planId } to /api/billing/orders: the browser names the plan, never a price.",
       why: 'One purchase at a time, and the browser never chooses the amount.',
       input: 'POST /api/billing/orders, { "planId": "starter" }',
     },

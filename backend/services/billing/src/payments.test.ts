@@ -12,6 +12,7 @@ import { startTestMongo, type TestMongo } from '@gilder/shared/testing';
 import request from 'supertest';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { createApp } from './app.ts';
+import { CREDIT_COSTS } from '@gilder/shared';
 import { commitCredits, grantSignupCredits, reserveCredits } from './credits.ts';
 import {
   AccountModel,
@@ -149,6 +150,17 @@ describe('plans and orders', () => {
       credits: 1_000,
       status: 'created',
     });
+  });
+
+  it('lists the Free plan and the price of an answer from every agent, from the shared config', async () => {
+    const plans = await (await as('u1')).get('/plans');
+
+    expect(plans.body.freePlan).toEqual({ name: 'Free', credits: 100 });
+    expect(plans.body.costs).toEqual(
+      Object.entries(CREDIT_COSTS).map(([agent, credits]) => ({ agent, credits })),
+    );
+    expect(plans.body.costs[0]).toEqual({ agent: 'chat', credits: 1 });
+    expect(plans.body.testMode).toBe(true);
   });
 
   it('answers 503 when payments are not set up', async () => {
@@ -294,6 +306,103 @@ describe('payments and usage', () => {
     ]);
     // Still stored, so a late webhook can pay it.
     expect(await PaymentModel.countDocuments({ orderId: abandoned, status: 'created' })).toBe(1);
+  });
+
+  it('lists the sign-up grant with the payments, and null before it lands', async () => {
+    const before = await (await as('u1')).get('/payments');
+    await grantSignupCredits('u1');
+    const after = await (await as('u1')).get('/payments');
+
+    expect(before.body).toEqual({ items: [], signupGrant: null });
+    expect(after.body.signupGrant).toMatchObject({ credits: 100 });
+    expect(Date.parse(after.body.signupGrant.grantedAt as string)).toBeLessThanOrEqual(Date.now());
+  });
+
+  it("shows a receipt for the owner's paid payment only", async () => {
+    const orderId = await newOrder('u1', 'pro');
+    const client = await as('u1');
+    const unpaid = await client.get(`/payments/${orderId}`);
+    await client
+      .post(`/orders/${orderId}/verify`)
+      .send({ paymentId: 'pay_r1', signature: checkoutSignature(orderId, 'pay_r1') });
+
+    const receipt = await client.get(`/payments/${orderId}`);
+    const again = await client.get(`/payments/${orderId}`);
+    const theirs = await (await as('u2')).get(`/payments/${orderId}`);
+    const missing = await client.get('/payments/order_nope');
+
+    expect(unpaid.status).toBe(404);
+    expect(receipt.status).toBe(200);
+    expect(receipt.body.receipt).toMatchObject({
+      orderId,
+      paymentId: 'pay_r1',
+      plan: 'pro',
+      planName: 'Pro',
+      amountPaise: 49_900,
+      credits: 1_000,
+      status: 'paid',
+      currency: 'INR',
+      testMode: true,
+    });
+    expect(receipt.body.receipt.number).toMatch(/^GA-\d{4}-[0-9A-F]{8}$/);
+    expect(again.body.receipt.number).toBe(receipt.body.receipt.number);
+    expect(receipt.body.receipt.paidAt).not.toBeNull();
+    // Someone else's order looks exactly like one that does not exist.
+    expect(theirs.status).toBe(404);
+    expect(missing.status).toBe(404);
+    expect(theirs.body.detail).toBe(missing.body.detail);
+  });
+
+  it('gives the median time to the first word, and marks running, finished and stopped answers', async () => {
+    await grantSignupCredits('u1');
+    for (const [key, firstTokenMs] of [
+      ['turn-0000011', 900],
+      ['turn-0000012', 100],
+      ['turn-0000013', 300],
+    ] as const) {
+      const { reservation } = await reserveCredits({
+        userId: 'u1',
+        agent: 'chat',
+        idempotencyKey: key,
+      });
+      await commitCredits('u1', reservation.id, { latencyMs: 2_000, firstTokenMs, chatId: 'c1' });
+    }
+    // Stopped after it started: charged, with no timing.
+    const stopped = await reserveCredits({
+      userId: 'u1',
+      agent: 'search',
+      idempotencyKey: 'turn-0000014',
+    });
+    await commitCredits('u1', stopped.reservation.id, { chatId: 'c1' });
+    // Still running: its credits are on hold.
+    await reserveCredits({ userId: 'u1', agent: 'code', idempotencyKey: 'turn-0000015' });
+    const client = await as('u1');
+
+    const summary = await client.get('/usage/summary?days=7');
+    const events = await client.get('/usage/events');
+    const older = await client.get(
+      `/usage/events?before=${new Date(Date.now() + 1000).toISOString()}`,
+    );
+    const empty = await (await as('u2')).get('/usage/summary?days=90');
+
+    expect(summary.body).toMatchObject({
+      totalCredits: 8,
+      totalAnswers: 4,
+      medianFirstTokenMs: 300,
+    });
+    expect(
+      events.body.items.map((item: { agent: string; status: string }) => [item.agent, item.status]),
+    ).toEqual([
+      ['code', 'running'],
+      ['search', 'stopped'],
+      ['chat', 'done'],
+      ['chat', 'done'],
+      ['chat', 'done'],
+    ]);
+    expect(events.body.items[0]).toMatchObject({ credits: 10, chatId: null, latencyMs: null });
+    // Paging back lists charged answers only.
+    expect(older.body.items).toHaveLength(4);
+    expect(empty.body).toMatchObject({ days: 90, totalAnswers: 0, medianFirstTokenMs: null });
   });
 
   it('sums credits by agent and by day, and lists the latest answers', async () => {

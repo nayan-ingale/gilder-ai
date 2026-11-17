@@ -1,6 +1,13 @@
 import type { FetchBaseQueryError } from '@reduxjs/toolkit/query';
 import { createApi, fetchBaseQuery } from '@reduxjs/toolkit/query/react';
-import type { Account, Payment, Plan, UsageEvent, UsageSummary } from '@/lib/billing';
+import type {
+  Account,
+  PaymentsResponse,
+  Plan,
+  PlansResponse,
+  UsageEvent,
+  UsageSummary,
+} from '@/lib/billing';
 import type { ChatSummary, Page } from '@/lib/chats';
 import type { UploadedFile } from '@/lib/uploads';
 
@@ -50,11 +57,12 @@ export const api = createApi({
       providesTags: ['Account'],
     }),
 
-    getPlans: build.query<{ plans: Plan[]; currency: string; testMode: boolean }, void>({
+    /** The plans to buy, the Free plan and what one answer from each agent costs. */
+    getPlans: build.query<PlansResponse, void>({
       query: () => '/billing/plans',
     }),
 
-    getPayments: build.query<{ items: Payment[] }, void>({
+    getPayments: build.query<PaymentsResponse, void>({
       query: () => '/billing/payments',
       providesTags: ['Payment'],
     }),

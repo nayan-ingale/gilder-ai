@@ -33,12 +33,16 @@ for (const tag of ['', ' @phone']) {
     await ask(page, 'Say hi.');
     await expectAccessible(page, 'chat');
 
+    await page.goto('/settings/general');
+    await expect(page.getByRole('heading', { name: 'Appearance' })).toBeVisible();
+    await expectAccessible(page, 'general settings');
+
     await page.goto('/settings/billing');
-    await expect(page.getByRole('heading', { name: 'Billing and credits' })).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'Payment history' })).toBeVisible();
     await expectAccessible(page, 'billing');
 
     await page.goto('/settings/usage');
-    await expect(page.getByRole('heading', { name: 'Usage' })).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'Usage', level: 2 })).toBeVisible();
     await expectAccessible(page, 'usage');
   });
 }

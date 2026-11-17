@@ -78,6 +78,12 @@ const AGENT_GENERATE_TEST = 'backend/services/agent/src/agents/generate.test.ts'
 const AGENT_RENDER_TEST = 'backend/services/agent/src/generate/render.test.ts';
 const FRONTEND_UPLOADS_TEST = 'frontend/src/lib/uploads.test.ts';
 const FRONTEND_CHAT_THREAD_TEST = 'frontend/src/components/chat/chat-thread.test.tsx';
+const FRONTEND_BILLING_LIB_TEST = 'frontend/src/lib/billing.test.ts';
+const FRONTEND_GENERAL_SETTINGS_TEST = 'frontend/src/components/settings/general-settings.test.tsx';
+const FRONTEND_SETTINGS_TABS_TEST = 'frontend/src/components/settings/settings-tabs.test.tsx';
+const FRONTEND_RECEIPT_VIEW_TEST = 'frontend/src/components/settings/receipt-view.test.tsx';
+const FRONTEND_LOAD_RECEIPT_TEST =
+  'frontend/src/app/(app)/settings/billing/receipts/[orderId]/load-receipt.test.ts';
 
 export const notes: SymbolNote[] = [
   // -------------------------------------------------------------------------------------------
@@ -1187,11 +1193,11 @@ export const notes: SymbolNote[] = [
       "POST /api/chats/:id/messages goes to the agent's POST /chats/:id/turns (send a message); POST /api/chats/:id/messages/:messageId/regenerate and /edit go to the agent's routes of the same path; POST /api/turns/:turnId/stop goes to the agent's /turns/:turnId/stop. Each streams its answer back, and each requires a session.",
       "GET /api/billing/account goes to billing's GET /account (the plan and balance); a session is required.",
       "POST /api/files/uploads, POST /api/files/:fileId/complete, GET /api/files/:fileId and GET /api/files/:fileId/url go to the agent's /files routes of the same shape (start and complete an upload, a file's details, a download link); each requires a session.",
-      "GET /api/billing/plans, POST /api/billing/orders, POST /api/billing/orders/:orderId/verify and GET /api/billing/payments go to billing's /plans, /orders, /orders/:orderId/verify and /payments, and GET /api/usage/summary and /api/usage/events to its /usage/summary and /usage/events. Each requires a session.",
+      "GET /api/billing/plans, POST /api/billing/orders, POST /api/billing/orders/:orderId/verify, GET /api/billing/payments and GET /api/billing/payments/:orderId (a receipt) go to billing's /plans, /orders, /orders/:orderId/verify, /payments and /payments/:orderId, and GET /api/usage/summary and /api/usage/events to its /usage/summary and /usage/events. Each requires a session.",
       "POST /api/webhooks/razorpay goes to billing's POST /webhooks/razorpay with no session. It is marked webhook with the headers x-razorpay-signature and x-razorpay-event-id: the Origin check skips it, and the two headers are passed on.",
     ],
     why: "It is an allowlist: anything not listed gets the gateway's own 404 and never reaches a service, so auth's GET /internal/users/:id and the /internal routes of chat and billing cannot be called from outside (journey.test.ts checks them, SEC-01).",
-    returns: 'A read-only array of twenty-three PublicRoute entries.',
+    returns: 'A read-only array of twenty-eight PublicRoute entries.',
     tests: [GATEWAY_ROUTE_TABLE_TEST, GATEWAY_TEST, JOURNEY_TEST],
   },
   {
@@ -2149,8 +2155,20 @@ export const notes: SymbolNote[] = [
     how: [
       'It keeps the order ID, plan, amount in paise, credits and status, with createdAt and paidAt as ISO strings (paidAt is null until paid).',
     ],
-    why: "The user ID and Razorpay's payment ID stay inside billing; the payment history needs neither.",
+    why: "The user ID stays inside billing. Razorpay's payment ID is left out of the history; only a receipt (toReceipt) shows it, to the payment's owner.",
     returns: 'A PaymentView.',
+    tests: [BILLING_PAYMENTS_TEST],
+  },
+  {
+    symbol: 'backend/services/billing/src/models.ts#toReceipt',
+    status: 'verified',
+    summary: 'What a receipt shows of a paid payment.',
+    how: [
+      "Everything toPayment shows, plus a receipt number, the plan's name from PLANS, Razorpay's payment ID, the currency INR and whether it was paid in test mode.",
+      "The number is GA-, the year it was paid (in UTC) and the last eight characters of the payment's own ID in capitals, such as GA-2026-1F3A9C2B.",
+    ],
+    why: 'The number comes from the stored payment, so it is the same every time the receipt opens, with no counter to keep. The payment ID is shown only here, and GET /payments/:orderId answers only its owner.',
+    returns: 'A ReceiptView.',
     tests: [BILLING_PAYMENTS_TEST],
   },
   {
@@ -2201,16 +2219,17 @@ export const notes: SymbolNote[] = [
     symbol: 'backend/services/billing/src/payment-routes.ts#paymentRouter',
     status: 'verified',
     summary:
-      "Buying credits: the plans, orders priced by the server, the browser's payment check, the payment history and Razorpay's webhook.",
+      "Buying credits: the plans and what each answer costs, orders priced by the server, the browser's payment check, the payment history with receipts, and Razorpay's webhook.",
     how: [
-      'GET /plans lists Starter and Pro from PLANS (name, price in paise, credits and validity days), with currency INR and testMode true.',
+      "GET /plans lists Starter and Pro from PLANS (name, price in paise, credits and validity days), the Free plan's name and credits (freePlan), and costs: every agent in AGENTS with its price from CREDIT_COSTS. It adds currency INR and testMode (TEST_MODE).",
       "POST /orders takes a strict { planId: 'starter' | 'pro' }, creates a Razorpay order for the plan's price and saves a created payment. It answers 201 with the order and the key ID.",
       "POST /orders/:orderId/verify takes a strict { paymentId, signature }, checks the checkout signature (400 'The payment could not be verified' when it is wrong) and grants with the user's ID (grantPurchase). It answers the account and granted.",
-      "GET /payments lists the user's last 50 paid payments, newest first (toPayment). A checkout that was opened and closed stays stored, because a late webhook (a slow UPI payment) can still pay it, but is not listed.",
+      "GET /payments lists the user's last 50 paid payments, newest first (toPayment), and signupGrant: the credits and time of their sign-up grant from the ledger, or null before it lands. A checkout that was opened and closed stays stored, because a late webhook (a slow UPI payment) can still pay it, but is not listed.",
+      "GET /payments/:orderId answers one payment as { receipt } (toReceipt). It must be the user's and paid; anything else is a 404 'No such payment', exactly as for an order that does not exist.",
       "POST /webhooks/razorpay needs no user. It checks x-razorpay-signature over the raw body (rawBodyOf; 400 when wrong), stores x-razorpay-event-id once (a repeat answers { ok: true, duplicate: true }), and grants a payment.captured event for the order's owner. An unknown order is logged at warn; anything correctly signed gets 200.",
       "Every route but the webhook needs a user. Without a payment gateway, the routes that use it answer 503 'Payments are not set up on this server'.",
     ],
-    why: 'The price never comes from the browser, and nothing is granted without a signature only Razorpay can make. The webhook covers a browser that closed right after paying, and one shared grant makes the two reports safe together.',
+    why: 'The price never comes from the browser, and nothing is granted without a signature only Razorpay can make. The costs come from the shared config, so the billing page never keeps its own copy. The webhook covers a browser that closed right after paying, and one shared grant makes the two reports safe together.',
     returns: 'An Express Router.',
     sideEffects: [
       'Creates orders at Razorpay; creates and updates payments, webhook events, ledger entries and accounts in MongoDB.',
@@ -2218,15 +2237,25 @@ export const notes: SymbolNote[] = [
     tests: [BILLING_PAYMENTS_TEST, GATEWAY_TEST],
   },
   {
+    symbol: 'backend/services/billing/src/payment-routes.ts#TEST_MODE',
+    status: 'verified',
+    summary: "Payments run in Razorpay's test mode: no real money moves.",
+    why: 'GET /plans sends it as testMode, so the billing page shows its test-payments note, and every receipt carries it, so the receipt page marks a test payment as one that charged no money.',
+    returns: 'true.',
+    tests: [BILLING_PAYMENTS_TEST],
+  },
+  {
     symbol: 'backend/services/billing/src/usage-routes.ts#usageRouter',
     status: 'verified',
-    summary: "The usage page's data, from the ledger's usage entries.",
+    summary:
+      "The usage page's data, from the ledger's usage entries and the credits still on hold.",
     how: [
-      "GET /usage/summary takes days (1 to 90, default 30) and tz (a time zone the runtime knows, default UTC). Two aggregations at once sum the user's usage entries in the window: by the agent in their metadata (credits and answers, largest first) and by calendar day in tz.",
-      'It answers the window, the total credits, byAgent (an entry with no agent counts as chat) and byDay, which lists only the days that had usage.',
-      'GET /usage/events lists the latest usage entries, newest first: limit from 1 to 100 (default 30), and an optional before time to page back. Each has its ID, time, credits, agent, model, input and output tokens, time taken and chat, with null for what is missing.',
+      "GET /usage/summary takes days (1 to 90, default 30) and tz (a time zone the runtime knows, default UTC). Three aggregations at once read the user's usage entries in the window: by the agent in their metadata (credits and answers, largest first), by calendar day in tz, and the median of metadata.firstTokenMs over the entries that recorded it ($median, approximate method).",
+      'It answers the window, the total credits, totalAnswers, medianFirstTokenMs (whole milliseconds, or null with no timed answers), byAgent (an entry with no agent counts as chat) and byDay, which lists only the days that had usage.',
+      'GET /usage/events lists the latest requests, newest first: limit from 1 to 100 (default 30), and an optional before time to page back. The first page (no before) starts with the reservations still held, as status running, with their agent and the credits on hold.',
+      'Then the usage entries, each with its ID, time, credits, agent, model, input and output tokens, total time, time to the first token, chat and status: done when it recorded its time, stopped when it did not (a stop after the text started is charged without timing). What is missing is null.',
     ],
-    why: "commitCredits already writes each answer's agent, model, tokens and time into its ledger entry, so usage needs no store of its own and always matches the balance. Grouping the days in the viewer's zone keeps the last day on the chart their today.",
+    why: "commitCredits already writes each answer's agent, model, tokens and times into its ledger entry, so usage needs no store of its own and always matches the balance. Grouping the days in the viewer's zone keeps the last day on the chart their today. A median keeps one slow answer from moving the time to the first token.",
     returns: 'An Express Router.',
     tests: [BILLING_PAYMENTS_TEST],
   },
@@ -2939,7 +2968,7 @@ export const notes: SymbolNote[] = [
       "POST /files/uploads takes a strict { chatId, name, mime, sizeBytes }. It refuses another type (415) or a size over the type's limit (413), checks the chat with chat, records the file as pending with a cleaned name and an ID-only key, and answers 201 with the file and a signed upload form.",
       "POST /files/:fileId/complete reads the owner's upload (404 otherwise). A ready file is returned as it is; a failed one is a 409, and so is an upload that has not arrived. The stored type must be the announced one, the size within the limit and the first 16 bytes the type's signature; a PDF must open and have at most 200 pages. A file that fails is deleted and marked failed (415). One that passes is marked ready; a PDF also gets a document and is handed to onPdfReady.",
       'GET /files/:fileId answers the file and, for a PDF, its indexing status.',
-      'GET /files/:fileId/url answers a download link for a ready file, valid for 300 seconds.',
+      'GET /files/:fileId/url answers a download link for a ready file, valid for 300 seconds; with ?inline=1 the link shows the file in the browser instead (any other value is a 400).',
       "Without a file store, every route that needs one answers 503 'File uploads are not set up on this server'.",
     ],
     why: "The client's claims are only a first filter: what counts is what arrived in the bucket. Links are signed on request and expire in minutes, so no stored link ever goes stale.",
@@ -3754,7 +3783,7 @@ export const notes: SymbolNote[] = [
       'fetchBaseQuery uses the base URL /api, so every call goes to the Next.js proxy, which forwards it to the gateway with the session cookie.',
       'listChats is an infinite query for the sidebar: the first page is GET /api/chats, later pages add ?cursor=, and getNextPageParam reads nextCursor (null ends the list).',
       'searchChats is GET /api/chats?query=, getChat is GET /api/chats/:id and createChat is POST /api/chats. getAccount is GET /api/billing/account, the plan and balance, with the Account tag.',
-      'getPlans is GET /api/billing/plans and getPayments GET /api/billing/payments (the Payment tag). createOrder posts { planId } to /api/billing/orders and invalidates Payment; verifyPayment posts the checkout result to /api/billing/orders/:orderId/verify and invalidates Account and Payment.',
+      'getPlans is GET /api/billing/plans (the plans, the Free plan and the price of each agent) and getPayments GET /api/billing/payments (paid payments and the sign-up grant, the Payment tag). createOrder posts { planId } to /api/billing/orders and invalidates Payment; verifyPayment posts the checkout result to /api/billing/orders/:orderId/verify and invalidates Account and Payment.',
       'getUsageSummary is GET /api/usage/summary with the number of days and the time zone, and getUsageEvents GET /api/usage/events?limit=30. Both provide the Usage tag, which the chat thread invalidates when an answer finishes.',
       "getFile is GET /api/files/:id, a file's name and state, for attachment chips and generated files.",
       'updateChat (PATCH, to rename or pin) and deleteChat (DELETE) change the cached list straight away in onQueryStarted, and undo that change if the call fails.',
@@ -3897,7 +3926,7 @@ export const notes: SymbolNote[] = [
       "The chat page's title bar: the title, the day and message count, a pin button and the chat's options (Rename, Delete chat).",
     how: [
       'It starts from the chat the server rendered, then follows getChat, which it also fetches in the browser. ChatThread passes the live message count.',
-      "The day ('Today', 'Yesterday' or '12 Nov', dayLabel) depends on the visitor's clock, so only the browser fills it in.",
+      "The day ('Today', 'Yesterday' or 'Nov 12', dayLabel) depends on the visitor's clock, so only the browser fills it in.",
       'The pin button toggles the pin (aria-pressed); the options menu opens the shared rename and delete dialogs (useChatActions).',
       "It stays at the top while the conversation scrolls, and sets the tab title to '<title> · GilderAi' whenever the title changes.",
     ],
@@ -4041,41 +4070,87 @@ export const notes: SymbolNote[] = [
   {
     symbol: 'frontend/src/components/billing/billing-view.tsx#BillingView',
     status: 'verified',
-    summary: 'The billing page: the current plan and balance, the plans to buy, and past payments.',
+    summary:
+      'The Billing tab: the current plan and balance, what one request costs, the plans, and past payments with their receipts.',
     how: [
-      'It loads the account, the plans and the payments with RTK Query. Unless the plans say testMode is false, a note says only test payments are taken (a Razorpay test card, or the UPI ID success@razorpay).',
-      "Buy creates an order (createOrder), opens Razorpay's checkout (openCheckout) and sends the result to verifyPayment. While one purchase runs, every Buy button is off.",
-      "A grant shows '<credits> credits added', a payment already added says so, and a closed window does nothing. Any failure shows 'The payment did not go through' with the message and, for a server error, its request ID.",
-      "The history lists each payment's date, plan, credits, amount in rupees and status. Billing returns only paid payments, so an abandoned checkout never shows as a failure.",
+      "It loads the account, the plans, the payments and the last 30 days of usage (the summary query the Usage tab opens with) with RTK Query. Nothing from the store shows until the page has hydrated (useHydrated), so the first render matches the server's.",
+      "The current-plan card shows the plan, the balance in large type, the credits used in the last 30 days, until when the plan is active (or that its badge ended), that credits never expire, and a View usage link to /settings/usage. Beside it, 'What one request costs' lists every agent from the plans' costs with its price.",
+      'Unless the plans say testMode is false, a note says only test payments are taken (a Razorpay test card, or the UPI ID success@razorpay).',
+      "Three plan cards: Free with its sign-up credits and an 'Included at sign-up' button that is always off, then Starter and Pro with price, credits and a tick list. The current plan has an accent border and a 'Current plan' badge; the buy buttons follow buttonKind.",
+      "Buying creates an order (createOrder), opens Razorpay's checkout (openCheckout) and sends the result to verifyPayment. While one purchase runs, every buy button is off and the clicked one says 'Opening payment…'. A grant shows '<credits> credits added', a payment already added says so, and a closed window does nothing. Any failure shows 'The payment did not go through' with the message and, for a server error, its request ID.",
+      'The payment history (PaymentHistory) follows, with a line saying Razorpay handles card details.',
     ],
-    why: 'Everything about credits is on one page, and the browser never decides a price or whether a payment counts.',
+    why: 'Everything about credits is on one tab, the prices come from billing, and the browser never decides a price or whether a payment counts.',
     returns: 'The page as JSX.',
+    tests: [FRONTEND_BILLING_TEST],
+  },
+  {
+    symbol: 'frontend/src/components/billing/billing-view.tsx#buttonKind',
+    status: 'verified',
+    summary: 'Which button a paid plan gets.',
+    how: [
+      'It compares the plan with the current one by ID, then by price; the Free plan counts as price 0.',
+    ],
+    why: 'People see at a glance which plan they have and which is a step up.',
+    returns:
+      "'again' for the current plan ('Buy again'), 'upgrade' for a dearer one ('Upgrade to …', in the accent colour), or 'buy' for a cheaper one ('Buy …').",
+    tests: [FRONTEND_BILLING_TEST],
+  },
+  {
+    symbol: 'frontend/src/components/billing/billing-view.tsx#PaymentHistory',
+    status: 'verified',
+    summary: 'The payment history table: paid payments and the sign-up grant, newest first.',
+    how: [
+      'Each row has the date, the description (the plan, or Sign-up credits), the amount with two decimals (formatAmount), the credits added and a Paid or Granted badge.',
+      'A paid payment has a Download link to /settings/billing/receipts/<order ID>, named with the payment and its date; the grant has no receipt.',
+      'The table is at least 640px wide and scrolls sideways in a focusable region on a narrow screen.',
+    ],
+    why: "Every credit the user got is in one list, and each payment's receipt is one click away.",
+    returns: "The table as JSX, or 'Loading…' / 'No payments yet.' when there are no rows.",
     tests: [FRONTEND_BILLING_TEST],
   },
   {
     symbol: 'frontend/src/components/billing/usage-view.tsx#UsageView',
     status: 'verified',
-    summary: 'The usage page: where the credits went in the last 30 days.',
+    summary: 'The Usage tab: where credits went over the last 7, 30 or 90 days.',
     how: [
-      "It reads the browser's time zone once, and loads the summary for 30 days in that zone and the latest answers.",
-      "Two tiles show the credits used and the number of answers. A chart shows the credits per day (DailyChart, after fillDays); a bar per agent shows its credits and answers, with every row on one shared grid (each row a subgrid), so every bar's track has the same width however long its label is; a table lists the latest answers with their agent, credits, tokens in and out, and time taken.",
-      'Agents are shown by name (Chat, Search, Code and so on). Skeletons show while loading, and a short line when there is nothing yet.',
+      "It reads the browser's time zone once, and loads the summary for the chosen range (30 days to start) in that zone, the latest requests, the account and the chats the sidebar already loaded. Nothing from the store shows until the page has hydrated (useHydrated).",
+      'A 7 / 30 / 90 days toggle picks the range. While another range loads, the last one stays on screen, dimmed and marked busy.',
+      'Four tiles: credits used, requests, the median time to the first token (a dash with none) and the balance, with until when the plan is active or that credits never expire.',
+      "The daily chart sits beside 'Spend by agent' and stacks under it on a small screen. Its subtitle gives the days it covers (formatDayRange), and a Chart / Table toggle swaps DailyChart (after fillDays) for DayTable.",
+      'Spend by agent gives the credits across requests, then one bar per agent, as wide as its share of the largest, with its credits and requests.',
+      'Recent activity lists the latest requests (ActivityTable).',
     ],
-    why: 'People can see what each kind of answer costs them. The numbers come from the ledger, so they always match the balance.',
+    why: 'People see what each kind of request costs them and how fast answers start. The numbers come from the ledger, so they always match the balance.',
     returns: 'The page as JSX.',
+    tests: [FRONTEND_BILLING_TEST],
+  },
+  {
+    symbol: 'frontend/src/components/billing/usage-view.tsx#ActivityTable',
+    status: 'verified',
+    summary: 'The table of the latest requests.',
+    how: [
+      'Columns: when (formatWhen), the chat, the agent, credits, tokens in and out (formatTokens), time to the first token and in all (formatDuration), and a status badge: Done, Stopped or In progress.',
+      "The chat is named from the cached chat list and links to /c/<id>; a chat that is not loaded links as 'Chat', and a request with no chat shows a dash.",
+      'The table is at least 820px wide and scrolls sideways in a focusable region on a narrow screen.',
+    ],
+    why: 'Each request shows what it cost, how big it was and how fast it started, next to the chat it belongs to.',
+    returns: 'The table as JSX.',
     tests: [FRONTEND_BILLING_TEST],
   },
   {
     symbol: 'frontend/src/components/billing/daily-chart.tsx#DailyChart',
     status: 'verified',
-    summary: 'Credits per day as columns, with a tooltip and a table for screen readers.',
+    summary:
+      'Credits per day as columns over hairline gridlines, with a tooltip, keyboard steps and a table for screen readers.',
     how: [
-      'One column per day in the --chart-bar colour, at most 24px wide with a 2px gap and a rounded top, all from one baseline. A day with usage is at least 2% tall; a day without has no column.',
-      'The axis shows 0 and a rounded top (niceMax), and the first and last days are labelled under it.',
-      'Hovering a day dims the others and shows its date and credits in a tooltip that stays inside the chart (tooltipPosition).',
-      'The chart is an image with a label that gives the total; a visually hidden table lists every day and its credits.',
+      'One column per day in the --chart-bar colour, at most 24px wide with a 2px gap and a rounded top, all from one baseline in a 180px plot. A day without usage has no column.',
+      'Gridlines and their labels sit at the values from axisTicks, the top one being the axis top. Dates under the axis follow dateTick.',
+      'Each day is a button the full height of the plot, named with its date and credits. Hovering, focusing or tapping one dims the others and shows its date and credits in a tooltip kept inside the chart (tooltipPosition), above the column but never above the chart.',
+      'Only one day is in the tab order; the arrow keys, Home and End move between days.',
+      'The group is labelled with the number of days and the total; a visually hidden table lists every day and its credits.',
     ],
-    why: 'One series needs no legend, because the heading names it. --chart-bar is the accent in light mode and a step darker than the accent in dark mode, so the columns stay in the same lightness range as other data colours. The hidden table gives screen readers the same numbers.',
+    why: 'One series needs no legend, because the heading names it. --chart-bar is the accent in light mode and a step darker than the accent in dark mode, so the columns stay in the same lightness range as other data colours. One tab stop keeps 90 days from becoming 90 stops, and the hidden table gives screen readers the same numbers.',
     returns: 'A figure as JSX.',
     tests: [FRONTEND_BILLING_TEST],
   },
@@ -4092,24 +4167,62 @@ export const notes: SymbolNote[] = [
     tests: [FRONTEND_DAILY_CHART_TEST],
   },
   {
-    symbol: 'frontend/src/components/billing/daily-chart.tsx#niceMax',
+    symbol: 'frontend/src/components/billing/daily-chart.tsx#axisTicks',
     status: 'verified',
     summary:
-      'A clean top for the axis: 1, 2 or 5 times a power of ten, at or above the largest value.',
-    why: 'An axis that ends at 50 reads more easily than one that ends at 43.',
-    returns: 'The axis top; 1 when there is no usage.',
+      'The gridline values from 0: a clean step giving about three lines, the top one at or above the largest value.',
+    how: [
+      'The step is 1, 2 or 5 times a power of ten, at or above a third of the largest value, and never below 1, as credits are whole.',
+    ],
+    why: 'Lines at 0, 10, 20 and 30 read more easily than ones at 0, 7 and 14, and the tallest column stays close to the top.',
+    returns:
+      'A list of numbers, such as [0, 10, 20, 30] for a largest value of 22, or [0, 1] with no usage.',
     tests: [FRONTEND_DAILY_CHART_TEST],
   },
   {
     symbol: 'frontend/src/components/billing/daily-chart.tsx#tooltipPosition',
     status: 'verified',
-    summary: 'Where the tooltip sits: over its day, but kept inside the chart near either edge.',
+    summary:
+      'Where the tooltip sits across the plot: over its day, but kept inside the chart near either edge.',
     how: [
       'It is centred over the day, except in the first and last fifth of the chart, where it lines up with the day on the inside instead.',
     ],
     why: "The tooltip's text is never cut off at the chart's edges.",
-    returns: '{ left, transform } for the style.',
+    returns: '{ left, transform } for the style; the transform is a translateX.',
     tests: [FRONTEND_DAILY_CHART_TEST],
+  },
+  {
+    symbol: 'frontend/src/components/billing/daily-chart.tsx#formatDayRange',
+    status: 'verified',
+    summary: 'The days a chart covers, such as "Oct 6 – Nov 4, 2026".',
+    how: [
+      'It labels the first and last calendar day in UTC, so the day stays as billing grouped it.',
+    ],
+    why: 'The subtitle says which days the columns are, so a 90-day chart is never read as a month.',
+    returns: 'A string; the first year is added too when the window crosses a new year.',
+    tests: [FRONTEND_DAILY_CHART_TEST],
+  },
+  {
+    symbol: 'frontend/src/components/billing/daily-chart.tsx#dateTick',
+    status: 'verified',
+    summary: 'Whether a day gets its date under the axis.',
+    how: [
+      'Every day for a week; one day a week for a month; for 90 days one every two weeks, and on a phone one every four.',
+    ],
+    why: 'Weekly dates for 90 days would touch, so they thin out, and further on a phone, where the plot is narrower.',
+    returns: "'always', 'wide' (on wider screens only) or null.",
+    tests: [FRONTEND_DAILY_CHART_TEST],
+  },
+  {
+    symbol: 'frontend/src/components/billing/daily-chart.tsx#DayTable',
+    status: 'verified',
+    summary: "The days as a visible table: the chart's Table view.",
+    how: [
+      'Day and Credits columns under a sticky header, in a focusable region at most 236px tall that scrolls.',
+    ],
+    why: 'Exact numbers are easy to read and compare, without hovering each column.',
+    returns: 'The table as JSX.',
+    tests: [FRONTEND_BILLING_TEST],
   },
   {
     symbol: 'frontend/src/lib/razorpay-checkout.ts#openCheckout',
@@ -4133,18 +4246,262 @@ export const notes: SymbolNote[] = [
     tests: [FRONTEND_BILLING_TEST],
   },
   {
+    symbol: 'frontend/src/lib/billing.ts#formatAmount',
+    status: 'verified',
+    summary: 'Shows paise as rupees with two decimals: 19900 becomes ₹199.00.',
+    why: 'Payment rows and receipts show exact amounts, as a bill does.',
+    returns: "A string such as '₹199.00'.",
+    tests: [FRONTEND_BILLING_LIB_TEST],
+  },
+  {
+    symbol: 'frontend/src/lib/billing.ts#AGENT_NAMES',
+    status: 'verified',
+    summary:
+      'Each agent as people read it: Chat, Search, Code, PDF, Slides, Image, PDF Q&A and Image Q&A.',
+    why: 'The costs card, the usage bars and the activity table name agents the same way.',
+    returns: 'A record from agent to name.',
+    tests: [FRONTEND_BILLING_LIB_TEST],
+  },
+  {
+    symbol: 'frontend/src/lib/billing.ts#agentName',
+    status: 'verified',
+    summary: "An agent's name from AGENT_NAMES.",
+    why: 'An agent the page does not know yet still shows, by its own name.',
+    returns: 'The name, or the agent as it is.',
+    tests: [FRONTEND_BILLING_LIB_TEST],
+  },
+  {
+    symbol: 'frontend/src/lib/billing.ts#longDate',
+    status: 'verified',
+    summary: 'A date as "Nov 4, 2026".',
+    why: 'Billing dates read the same everywhere on the billing and usage tabs.',
+    returns: 'An Intl.DateTimeFormat.',
+    tests: [FRONTEND_BILLING_TEST],
+  },
+  {
+    symbol: 'frontend/src/lib/billing.ts#shortDate',
+    status: 'verified',
+    summary: 'A date as "Nov 4", without the year.',
+    why: 'For short notes, such as until when a plan is active, and for older activity rows.',
+    returns: 'An Intl.DateTimeFormat.',
+    tests: [FRONTEND_BILLING_LIB_TEST],
+  },
+  {
+    symbol: 'frontend/src/lib/billing.ts#formatDuration',
+    status: 'verified',
+    summary:
+      'A time in seconds with one decimal ("0.9 s"), or in milliseconds under a tenth of a second ("40 ms").',
+    why: 'Answer times are mostly a second or a few; a very fast one should not read as 0.0 s.',
+    returns: 'A string.',
+    tests: [FRONTEND_BILLING_LIB_TEST],
+  },
+  {
+    symbol: 'frontend/src/lib/billing.ts#formatTokens',
+    status: 'verified',
+    summary: 'Tokens in thousands with one decimal ("1.2k"), and counts under 100 as they are.',
+    why: 'Token counts vary widely; thousands keep the column short and easy to compare.',
+    returns: 'A string.',
+    tests: [FRONTEND_BILLING_LIB_TEST],
+  },
+  {
+    symbol: 'frontend/src/lib/billing.ts#formatWhen',
+    status: 'verified',
+    summary: 'When a request ran: "Today, 01:12", "Yesterday, 22:15" or "Nov 2, 14:05".',
+    how: [
+      "It compares calendar days on the viewer's clock, so the change of day is at their midnight.",
+    ],
+    why: "Recent activity reads naturally on the viewer's own clock, with a 24-hour time.",
+    returns: 'A string.',
+    tests: [FRONTEND_BILLING_LIB_TEST],
+  },
+  {
     symbol: 'frontend/src/app/(app)/settings/billing/page.tsx#BillingPage',
     status: 'verified',
     summary: 'The /settings/billing page, titled Billing.',
-    why: 'It renders BillingView inside the signed-in app shell. The login gate sends a visitor without a session cookie to /login first.',
+    why: 'It renders BillingView under the Settings heading and tabs (SettingsLayout) inside the signed-in app shell. The login gate sends a visitor without a session cookie to /login first.',
     returns: 'BillingView.',
   },
   {
     symbol: 'frontend/src/app/(app)/settings/usage/page.tsx#UsagePage',
     status: 'verified',
     summary: 'The /settings/usage page, titled Usage.',
-    why: 'It renders UsageView inside the signed-in app shell. The login gate sends a visitor without a session cookie to /login first.',
+    why: 'It renders UsageView under the Settings heading and tabs (SettingsLayout) inside the signed-in app shell. The login gate sends a visitor without a session cookie to /login first.',
     returns: 'UsageView.',
+  },
+  {
+    symbol: 'frontend/src/app/(app)/settings/layout.tsx#SettingsLayout',
+    status: 'verified',
+    summary:
+      'Every settings page: one Settings heading and the General, Billing and Usage tabs, then the page, at most 1040px wide.',
+    how: ['The heading and tabs are hidden when printing, so a receipt prints on its own.'],
+    why: "Each tab's page keeps one h1, from here. The tabs read the open page, which a receipt's address only gives at request time, so they wait in a Suspense boundary that first shows them with none marked; the rest of the layout stays prerendered.",
+    returns: 'The layout as JSX.',
+  },
+  {
+    symbol: 'frontend/src/app/(app)/settings/page.tsx#SettingsPage',
+    status: 'verified',
+    summary: '/settings on its own: sends the visitor to /settings/general.',
+    why: 'Links to Settings open the first tab.',
+    returns: 'Nothing; it redirects.',
+  },
+  {
+    symbol: 'frontend/src/app/(app)/settings/general/page.tsx#GeneralPage',
+    status: 'verified',
+    summary: 'The /settings/general page, titled General.',
+    why: "The profile comes from the server session (getCurrentUser), as the sidebar's does; it reads cookies, so it renders in a Suspense boundary with a skeleton. No session sends the visitor to /login.",
+    returns: 'GeneralSettings for the signed-in user.',
+  },
+  {
+    symbol: 'frontend/src/app/(app)/settings/billing/receipts/[orderId]/page.tsx#ReceiptPage',
+    status: 'verified',
+    summary: 'The /settings/billing/receipts/<order ID> page, titled Receipt.',
+    how: [
+      'In a Suspense boundary, it loads the receipt (loadReceipt) and the signed-in user (getCurrentUser) at the same time.',
+      'No user sends the visitor to /login; no receipt calls notFound().',
+    ],
+    why: "A missing, unpaid or someone else's order gets this route's not-found page, so a receipt never shows whether another user's order exists. The billed-to name and email are the signed-in user's, who must be the payment's owner.",
+    returns: 'ReceiptView, or the not-found page.',
+  },
+  {
+    symbol: 'frontend/src/app/(app)/settings/billing/receipts/[orderId]/page.tsx#Receipt',
+    status: 'verified',
+    summary: 'Loads the receipt and the user for ReceiptPage.',
+    why: 'Waiting for the params inside the boundary keeps the rest of the page prerendered.',
+    returns: 'ReceiptView, a redirect to /login, or notFound().',
+    tests: [FRONTEND_LOAD_RECEIPT_TEST],
+  },
+  {
+    symbol:
+      'frontend/src/app/(app)/settings/billing/receipts/[orderId]/not-found.tsx#ReceiptNotFound',
+    status: 'verified',
+    summary: "The page for a receipt that isn't available.",
+    why: "A receipt that doesn't exist, isn't paid or belongs to someone else all look the same.",
+    returns: "A short message and a 'Back to billing' link.",
+  },
+  {
+    symbol:
+      'frontend/src/app/(app)/settings/billing/receipts/[orderId]/load-receipt.ts#loadReceipt',
+    status: 'verified',
+    summary: 'A receipt for the server render of its page, from billing through the gateway.',
+    how: [
+      'Anything that cannot be an order ID (letters, digits, - and _, up to 64) is null without a call.',
+      "It calls GET /api/billing/payments/<order ID> with the browser's cookies (gatewayGet). No session cookie or a 401 redirects to /login, a 404 is null, and any other failure throws.",
+    ],
+    why: "Billing answers 404 for an order that is not the user's, so the page can treat both cases as not found.",
+    returns: "The Receipt, or null when there is no such paid payment of the user's.",
+    tests: [FRONTEND_LOAD_RECEIPT_TEST],
+  },
+
+  // -------------------------------------------------------------------------------------------
+  // frontend: settings
+
+  {
+    symbol: 'frontend/src/components/settings/settings-tabs.tsx#SETTINGS_TABS',
+    status: 'verified',
+    summary:
+      'The settings tabs: General, Billing and Usage, each with its route segment and address.',
+    why: 'The tab links and the open-tab check read the same list.',
+    returns: 'A read-only list of { segment, label, href }.',
+    tests: [FRONTEND_SETTINGS_TABS_TEST],
+  },
+  {
+    symbol: 'frontend/src/components/settings/settings-tabs.tsx#SettingsTabs',
+    status: 'verified',
+    summary: 'The settings tabs with the open one marked.',
+    why: 'useSelectedLayoutSegment gives the first segment under /settings, so a receipt under Billing keeps Billing marked.',
+    returns: 'SettingsTabList.',
+    tests: [FRONTEND_SETTINGS_TABS_TEST],
+  },
+  {
+    symbol: 'frontend/src/components/settings/settings-tabs.tsx#SettingsTabList',
+    status: 'verified',
+    summary: 'The tab links, with aria-current="page" on the open one.',
+    why: "The line under the tabs is an inset shadow, so the row can scroll sideways on a narrow screen without cutting off the open tab's underline. With no tab open it is the boundary's first paint.",
+    returns: 'A nav named Settings sections.',
+    tests: [FRONTEND_SETTINGS_TABS_TEST],
+  },
+  {
+    symbol: 'frontend/src/components/settings/general-settings.tsx#GeneralSettings',
+    status: 'verified',
+    summary:
+      'The General tab: who is signed in, the theme, and logging out or deleting the account.',
+    how: [
+      'Profile shows the avatar, the name (or the email) and the email, and that the user signed in with Google.',
+      'Appearance is a System / Light / Dark radio group; a choice applies at once and is saved (chooseTheme), as in the account menu.',
+      "Log out ends the session (DELETE /api/auth/session) and goes to /login; a 401 counts as already logged out, and any other failure shows 'Could not log out'.",
+      'To delete the account, it says to email CONTACT_EMAIL and links the Privacy Policy.',
+    ],
+    why: "The account menu's choices also have a page of their own, where people look for them, with the way to delete the account in writing.",
+    returns: 'The tab as JSX.',
+    tests: [FRONTEND_GENERAL_SETTINGS_TEST],
+  },
+  {
+    symbol: 'frontend/src/components/settings/receipt-view.tsx#ReceiptView',
+    status: 'verified',
+    summary: 'One paid payment as a receipt, with a button to print it or save it as a PDF.',
+    how: [
+      "The sheet has the logo and name, the receipt number, who it is billed to, the dates paid and placed, Razorpay's order and payment IDs, the Paid status, the plan with its credits and the total in rupees.",
+      "A test-mode payment says 'Test payment — no money was charged.'",
+      "'Print or save as PDF' calls window.print(). Print styles hide everything but the sheet and place it at the top of the page, outside the app's scrolling frame (usePrintInLight sets the theme).",
+    ],
+    why: "Dates are in India's time on both the server and the browser, so the page renders the same text in both. Printing shows only the sheet, in the light theme, so the PDF looks like a receipt whatever the screen uses.",
+    returns: 'The receipt as JSX.',
+    tests: [FRONTEND_RECEIPT_VIEW_TEST],
+  },
+  {
+    symbol: 'frontend/src/components/settings/receipt-view.tsx#usePrintInLight',
+    status: 'verified',
+    summary: "Prints in the light theme, then puts the screen's theme back.",
+    how: [
+      'On beforeprint it remembers <html data-theme> and sets it to light; on afterprint it restores it, or removes it when there was none.',
+    ],
+    why: 'A dark page would print light text on white paper.',
+    returns: 'Nothing.',
+    tests: [FRONTEND_RECEIPT_VIEW_TEST],
+  },
+  {
+    symbol: 'frontend/src/components/settings/use-hydrated.ts#useHydrated',
+    status: 'verified',
+    summary: 'False on the server and while the page hydrates, true after.',
+    how: ['useSyncExternalStore with a server snapshot of false and a browser snapshot of true.'],
+    why: "The data store is shared: a query another part of the page already finished (the credits card's account) would otherwise render during hydration, where the server only had a skeleton, and React would throw the server's HTML away.",
+    returns: 'true or false.',
+    tests: [FRONTEND_BILLING_TEST],
+  },
+  {
+    symbol: 'frontend/src/components/settings/icons.tsx#ChartIcon',
+    status: 'verified',
+    summary: 'A small bar chart line icon, for View usage.',
+    why: 'Decoration only: the text beside each icon says it all, so they are hidden from screen readers.',
+    returns: 'An svg as JSX.',
+  },
+  {
+    symbol: 'frontend/src/components/settings/icons.tsx#TickIcon',
+    status: 'verified',
+    summary: 'A tick, for plan features and the Paid and Done badges.',
+    why: 'Decoration only: the text beside each icon says it all, so they are hidden from screen readers.',
+    returns: 'An svg as JSX.',
+  },
+  {
+    symbol: 'frontend/src/components/settings/icons.tsx#LockIcon',
+    status: 'verified',
+    summary: 'A padlock, for the line about card details.',
+    why: 'Decoration only: the text beside each icon says it all, so they are hidden from screen readers.',
+    returns: 'An svg as JSX.',
+  },
+  {
+    symbol: 'frontend/src/components/settings/icons.tsx#StopIcon',
+    status: 'verified',
+    summary: 'A square, for the Stopped badge.',
+    why: 'Decoration only: the text beside each icon says it all, so they are hidden from screen readers.',
+    returns: 'An svg as JSX.',
+  },
+  {
+    symbol: 'frontend/src/components/settings/icons.tsx#ClockIcon',
+    status: 'verified',
+    summary: 'A clock hand, for the In progress badge.',
+    why: 'Decoration only: the text beside each icon says it all, so they are hidden from screen readers.',
+    returns: 'An svg as JSX.',
   },
 
   // -------------------------------------------------------------------------------------------
@@ -4192,18 +4549,20 @@ export const notes: SymbolNote[] = [
   {
     symbol: 'frontend/src/lib/uploads.ts#openFile',
     status: 'verified',
-    summary: 'Opens a fresh, short-lived download link for a file in a new tab.',
-    why: 'Links are made on request, so an attachment chip or a download button always works, even in an old chat.',
+    summary:
+      'Opens a fresh, short-lived link for a file in a new tab: a download, or with inline, a view in the browser.',
+    why: 'Links are made on request, so a file card or button always works, even in an old chat. inline asks for ?inline=1, which signs the link to be shown rather than saved.',
     returns: 'A promise that resolves once the tab is opened.',
   },
   {
     symbol: 'frontend/src/components/chat/generated-files.tsx#GeneratedFiles',
     status: 'verified',
-    summary: 'The files an answer made: an image shown in place, or a download card.',
+    summary:
+      'The files an answer made: an image shown in place, or a file card with Download and Open.',
     how: [
       "Each file's details come from getFile (GET /api/files/<file ID>), with a skeleton meanwhile.",
-      'A PDF or deck shows a card with its name and Download, which opens a fresh link.',
-      "An image asks for its own fresh link (GeneratedImage) and shows itself, with alt text from its name and a Download button; if the link cannot be had, it says 'The image could not be loaded.'",
+      "A PDF or deck shows a card with a small PDF or PPTX thumbnail, its name, its pages and size ('link refreshes automatically'), Download (the main button) and, for a PDF, Open, which shows it in the browser.",
+      "An image asks for its own fresh link (GeneratedImage) and shows itself, with alt text from its name and Download and Open; if the link cannot be had, it says 'The image could not be loaded.'",
     ],
     why: 'Answers keep file IDs, never links, so each link is made when it is needed and is always valid.',
     returns: 'The files as JSX.',
@@ -4212,18 +4571,37 @@ export const notes: SymbolNote[] = [
   {
     symbol: 'frontend/src/components/chat/message-item.tsx#AttachmentChip',
     status: 'verified',
-    summary: 'A file sent with a message: its name, opening a fresh download link on click.',
-    why: 'The user can see and open what they sent; the name comes from getFile.',
+    summary:
+      'A file sent with a message: its name, pages and size; a click opens it in the browser.',
+    why: 'The user can see and open what they sent; the details come from getFile.',
     returns: 'A button as JSX.',
     tests: [FRONTEND_CHAT_THREAD_TEST],
   },
   {
     symbol: 'frontend/src/components/chat/message-item.tsx#Citations',
     status: 'verified',
-    summary: "The PDF pages an answer is based on, under 'From your documents'.",
-    why: 'Each file name and page is listed, with the quoted passage on hover, so the reader can check the answer.',
+    summary:
+      "The passages of the user's documents an answer is based on, as quote cards under 'From your document'.",
+    why: 'Each card shows the page (and the file name when the answer cites several) and the full quoted passage, so the reader can check the answer at a glance.',
     returns: 'A section as JSX.',
     tests: [FRONTEND_CHAT_THREAD_TEST],
+  },
+  {
+    symbol: 'frontend/src/components/chat/message-item.tsx#JobCard',
+    status: 'verified',
+    summary:
+      "While a file is being made: 'Creating your PDF' (or slides, or image), the step, a progress bar and the steps so far.",
+    why: 'Making a file takes a while, so the card shows each step as it arrives (progressSteps): done ones with a tick, the current one in progress. The answer above it says the credits are reserved.',
+    returns: 'A status card as JSX.',
+    tests: [FRONTEND_CHAT_THREAD_TEST],
+  },
+  {
+    symbol: 'frontend/src/components/chats/chat-header.tsx#DocumentPill',
+    status: 'verified',
+    summary:
+      "The chat's latest file in the header: its name and Ready, Reading… or Failed; a click opens it.",
+    why: "The file the chat is about stays in view, and the composer's placeholder offers to ask about it.",
+    returns: 'A button as JSX, or nothing until its details load.',
   },
   {
     symbol: 'frontend/src/components/chat/composer.tsx#PendingAttachment',
@@ -4346,7 +4724,7 @@ export const notes: SymbolNote[] = [
       "The agent pill shows the chosen agent (accent-coloured when one is forced) or 'Auto', with 'PDF Q&A' or 'Image Q&A' after it when Auto and a file is attached. Its menu lists Auto and the built agents with an icon, what each does, its cost and a check on the current one, and a line on the / shortcuts. It opens above the box in a chat and below it on the new-chat page (menuSide).",
       'Typing / shows the matching shortcuts (/search, /code, /pdf, /slides, /image) with a hint each.',
       'The mic (useDictation) appears only where the browser has speech recognition; while it listens the words go into the box after what was there, and sending stops it.',
-      "With no credits it says 'You are out of credits. New answers need credits.' and cannot send.",
+      "Below 10 credits a banner above the box says how many are left (or that there are none, which blocks sending) with a 'Get credits' link to billing.",
       'While an answer runs, Send becomes Stop, and Esc stops it from anywhere on the page. ↑ in an empty box edits the latest message.',
       'A page can fill the box and pick an agent, or open the file picker, through its ref (ComposerHandle), as the suggestion cards do.',
       'The text is cleared on send and comes back if the message is refused.',
@@ -4374,6 +4752,14 @@ export const notes: SymbolNote[] = [
     why: 'The answer pill names the agent the same way the composer menu does, including the two agents only chosen automatically (PDF and image questions).',
     returns: '{ label, icon }, or null for none or an unknown agent.',
     tests: ['frontend/src/components/chat/message-item.test.tsx'],
+  },
+  {
+    symbol: 'frontend/src/components/chat/composer.tsx#costOf',
+    status: 'verified',
+    summary:
+      'What an answer from an agent costs, in credits; 10 for the agents only picked automatically (PDF and image questions).',
+    why: "The answer pill says how many credits are reserved while a file is being made, the same costs as billing's CREDIT_COSTS.",
+    returns: 'A number of credits.',
   },
   {
     symbol: 'frontend/src/components/chat/new-chat.tsx#NewChatComposer',

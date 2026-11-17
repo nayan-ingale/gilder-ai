@@ -163,6 +163,29 @@ export function toPayment(payment: PaymentDocument): PaymentView {
   };
 }
 
+/** What a receipt shows of a paid payment. */
+export interface ReceiptView extends PaymentView {
+  /** GA-<year paid>-<the end of the payment's own ID>: short, and the same every time. */
+  number: string;
+  planName: string;
+  paymentId: string;
+  currency: 'INR';
+  /** Paid in Razorpay's test mode, so no money was charged. */
+  testMode: boolean;
+}
+
+export function toReceipt(payment: PaymentDocument, testMode: boolean): ReceiptView {
+  const paidAt = payment.paidAt ?? payment.createdAt;
+  return {
+    ...toPayment(payment),
+    number: `GA-${paidAt.getUTCFullYear()}-${payment.id.slice(-8).toUpperCase()}`,
+    planName: PLANS[payment.plan as PlanId].name,
+    paymentId: payment.paymentId ?? '',
+    currency: 'INR',
+    testMode,
+  };
+}
+
 /** What the API shows of an account. */
 export interface AccountView {
   plan: PlanId;

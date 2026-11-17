@@ -174,6 +174,13 @@ export const PUBLIC_ROUTES: readonly PublicRoute[] = [
   },
   {
     method: 'GET',
+    path: '/api/billing/payments/:orderId',
+    service: 'billing',
+    target: '/payments/:orderId',
+    session: 'required',
+  },
+  {
+    method: 'GET',
     path: '/api/usage/summary',
     service: 'billing',
     target: '/usage/summary',

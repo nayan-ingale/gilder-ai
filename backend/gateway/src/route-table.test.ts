@@ -83,11 +83,17 @@ describe('matchRoute', () => {
       ['GET', '/api/billing/plans', '/plans'],
       ['POST', '/api/billing/orders', '/orders'],
       ['GET', '/api/billing/payments', '/payments'],
+      ['GET', '/api/billing/payments/order_Abc123', '/payments/order_Abc123'],
       ['GET', '/api/usage/summary', '/usage/summary'],
       ['GET', '/api/usage/events', '/usage/events'],
     ] as const) {
       expect(matchRoute(method, path)?.targetPath, path).toBe(target);
     }
+    // A receipt is behind a session; billing then checks the order is the caller's.
+    expect(matchRoute('GET', '/api/billing/payments/order_Abc123')).toMatchObject({
+      route: { service: 'billing', session: 'required' },
+    });
+    expect(matchRoute('GET', '/api/billing/payments/..%2Fplans')).toBeUndefined();
     expect(matchRoute('POST', '/api/webhooks/razorpay')).toMatchObject({
       route: {
         session: 'none',
