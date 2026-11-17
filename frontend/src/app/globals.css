@@ -168,37 +168,38 @@
   }
 }
 
-/* Code colours (highlight.js classes), from the design tokens so both themes work. */
+/* Code colours (highlight.js classes), from the design tokens so both themes work. They read the
+   base variables, so the dark code area (.code-dark) gets its own colours. */
 @layer components {
   .hljs-comment,
   .hljs-quote {
-    color: var(--color-fg-subtle);
+    color: var(--text-subtle);
     font-style: italic;
   }
   .hljs-keyword,
   .hljs-selector-tag,
   .hljs-built_in,
   .hljs-meta .hljs-keyword {
-    color: var(--color-accent-text);
+    color: var(--accent-text);
   }
   .hljs-string,
   .hljs-regexp,
   .hljs-addition,
   .hljs-attr-value {
-    color: var(--color-success);
+    color: var(--success);
   }
   .hljs-number,
   .hljs-literal,
   .hljs-symbol,
   .hljs-bullet {
-    color: var(--color-warning);
+    color: var(--warning);
   }
   .hljs-title,
   .hljs-section,
   .hljs-name,
   .hljs-selector-id,
   .hljs-selector-class {
-    color: var(--color-fg);
+    color: var(--text);
     font-weight: 600;
   }
   .hljs-attr,
@@ -207,9 +208,9 @@
   .hljs-template-variable,
   .hljs-type,
   .hljs-params {
-    color: var(--color-fg-muted);
+    color: var(--text-muted);
   }
   .hljs-deletion {
-    color: var(--color-danger);
+    color: var(--danger);
   }
 }

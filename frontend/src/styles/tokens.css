@@ -101,3 +101,23 @@
   --shadow: 0 12px 32px rgba(0, 0, 0, 0.5);
   color-scheme: dark;
 }
+
+/* The code area is dark in both themes: the dark values again, for everything inside it. */
+.code-dark {
+  --surface: #111114;
+  --raised: #18181c;
+  --sunken: #08080a;
+  --border: #24242a;
+  --text: #ededf0;
+  --text-muted: #a0a0ab;
+  --text-subtle: #8b8b96;
+  --accent: #6f8cff;
+  --accent-text: #8fa6ff;
+  --danger: #ff7a6e;
+  --success: #5fd08f;
+  --warning: #e8b44a;
+  --code-bg: #0f0f12;
+  --code-text: #e6e6ea;
+  color-scheme: dark;
+  color: var(--code-text);
+}

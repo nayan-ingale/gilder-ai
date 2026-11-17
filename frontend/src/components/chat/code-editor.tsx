@@ -1,13 +1,11 @@
 'use client';
 
 import Editor, { type EditorProps, loader, type Monaco } from '@monaco-editor/react';
-import { type ReactNode, useEffect, useState } from 'react';
+import { type ReactNode, useRef } from 'react';
 
 // Monaco is served by this app from public/monaco (copied there by scripts/copy-monaco.mjs before
 // dev and build), never from a CDN: the security policy allows scripts only from this app.
 loader.config({ paths: { vs: '/monaco/vs' } });
-
-type PageTheme = 'light' | 'dark';
 
 const LANGUAGE_ALIASES: Record<string, string> = {
   js: 'javascript',
@@ -35,51 +33,21 @@ export function monacoLanguage(language: string, fileName: string): string {
   return LANGUAGE_ALIASES[extension] ?? (extension || 'plaintext');
 }
 
-/** The theme the page shows: the user's pick on <html data-theme>, otherwise the system's. */
-function pageTheme(): PageTheme {
-  const picked = document.documentElement.dataset.theme;
-  if (picked === 'light' || picked === 'dark') {
-    return picked;
-  }
-  return typeof matchMedia === 'function' && matchMedia('(prefers-color-scheme: dark)').matches
-    ? 'dark'
-    : 'light';
-}
-
-/** The page's theme, kept up to date when the user or the system switches it. */
-function usePageTheme(): PageTheme {
-  const [theme, setTheme] = useState<PageTheme>(() =>
-    typeof document === 'undefined' ? 'light' : pageTheme(),
-  );
-  useEffect(() => {
-    const update = () => setTheme(pageTheme());
-    const observer = new MutationObserver(update);
-    observer.observe(document.documentElement, {
-      attributes: true,
-      attributeFilter: ['data-theme'],
-    });
-    const media =
-      typeof matchMedia === 'function' ? matchMedia('(prefers-color-scheme: dark)') : null;
-    media?.addEventListener('change', update);
-    return () => {
-      observer.disconnect();
-      media?.removeEventListener('change', update);
-    };
-  }, []);
-  return theme;
-}
+/** The name of the Monaco theme for the code area. */
+export const CODE_THEME = 'gilder-code';
 
 /**
- * Defines a Monaco theme in the app's colours, read from the page's CSS variables for the theme
- * showing now, and returns its name. Only hex values are passed, since Monaco accepts nothing else.
+ * Defines the Monaco theme for the code area, which is dark in both page themes. The colours are
+ * read from the CSS variables of `scope` (an element inside .code-dark); only hex values are
+ * passed, since Monaco accepts nothing else.
  */
-export function defineAppTheme(monaco: Monaco, theme: PageTheme): string {
-  const css = getComputedStyle(document.documentElement);
+export function defineCodeTheme(monaco: Monaco, scope: Element = document.documentElement): string {
+  const css = getComputedStyle(scope);
   const colors: Record<string, string> = {};
   for (const [key, variable] of [
-    ['editor.background', '--sunken'],
-    ['editorGutter.background', '--sunken'],
-    ['editor.foreground', '--text'],
+    ['editor.background', '--code-bg'],
+    ['editorGutter.background', '--code-bg'],
+    ['editor.foreground', '--code-text'],
     ['editorLineNumber.foreground', '--text-subtle'],
   ] as const) {
     const value = css.getPropertyValue(variable).trim();
@@ -87,14 +55,8 @@ export function defineAppTheme(monaco: Monaco, theme: PageTheme): string {
       colors[key] = value;
     }
   }
-  const name = `gilder-${theme}`;
-  monaco.editor.defineTheme(name, {
-    base: theme === 'dark' ? 'vs-dark' : 'vs',
-    inherit: true,
-    rules: [],
-    colors,
-  });
-  return name;
+  monaco.editor.defineTheme(CODE_THEME, { base: 'vs-dark', inherit: true, rules: [], colors });
+  return CODE_THEME;
 }
 
 const EDITOR_OPTIONS: EditorProps['options'] = {
@@ -112,7 +74,7 @@ const EDITOR_OPTIONS: EditorProps['options'] = {
 };
 
 /**
- * A file in the read-only Monaco editor (line numbers, folding, find), in the app's theme.
+ * A file in the read-only Monaco editor (line numbers, folding, find), on the dark code colours.
  * `fallback` shows while Monaco loads, so the panel is never empty.
  */
 export function CodeEditor({
@@ -126,27 +88,18 @@ export function CodeEditor({
   fileName: string;
   fallback: ReactNode;
 }) {
-  const theme = usePageTheme();
-  const [monaco, setMonaco] = useState<Monaco | null>(null);
-
-  // A theme switch while the panel is open: define the new colours, then apply them.
-  useEffect(() => {
-    if (monaco) {
-      monaco.editor.setTheme(defineAppTheme(monaco, theme));
-    }
-  }, [monaco, theme]);
+  const scope = useRef<HTMLDivElement>(null);
 
   return (
-    <div className="min-h-0 flex-1">
+    <div ref={scope} className="code-dark min-h-0 flex-1 bg-code">
       <Editor
         height="100%"
         value={code}
         language={monacoLanguage(language, fileName)}
-        theme={`gilder-${theme}`}
+        theme={CODE_THEME}
         loading={fallback}
         beforeMount={(instance) => {
-          defineAppTheme(instance, theme);
-          setMonaco(instance);
+          defineCodeTheme(instance, scope.current ?? document.documentElement);
         }}
         options={{ ...EDITOR_OPTIONS, ariaLabel: fileName }}
       />

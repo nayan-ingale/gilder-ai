@@ -4321,7 +4321,8 @@ export const notes: SymbolNote[] = [
     status: 'verified',
     summary: "A chat's conversation and its composer.",
     how: [
-      'It renders each message with MessageItem, or an empty state, and the composer stuck to the bottom.',
+      'It renders the header (when given the chat), each message with MessageItem or an empty state, and the composer stuck to the bottom with a hint line under it.',
+      "It owns the code panel (ArtifactContext): a files card opens its files there, docked beside the conversation on large screens (useMediaQuery) and numbered by the chat's code answers.",
       "A message queued by the new-chat page is cleared and sent once, as soon as the page opens; a ref keeps React's double effects in development from sending it twice.",
       'While an answer streams it keeps the bottom in view, unless the user scrolls up to read; a new answer always brings the bottom back. Only a move up away from the bottom stops following, so text growing faster than scroll events arrive never does; scrolling back within 120px of the end follows again.',
       'It scrolls <main> itself to its very end (scrollToEnd) in a layout effect, before the frame is drawn: the newest line sits just above the composer instead of under it, new text never shows below the fold first, and the page around the app never scrolls (scrollIntoView would scroll it too).',
@@ -4507,23 +4508,46 @@ export const notes: SymbolNote[] = [
     symbol: 'frontend/src/components/chat/files-card.tsx#FilesCard',
     status: 'verified',
     summary:
-      'Under a code answer: how many files it made, their names, and a button that opens them.',
-    why: 'The files are one click away without filling the chat; it opens ArtifactPanel.',
-    returns: 'The card, and the panel when open, as JSX.',
+      "Under a code answer: a card with the chat's title, how many files it made and their languages, and Open.",
+    how: [
+      "On the chat page it opens the files in the page's panel (ArtifactContext): beside the chat on large screens. It shows as pressed, with Close, while its files are open.",
+      'Shown on its own, without the context, it opens the files in a sheet of its own.',
+      "The languages come from the files ('HTML, CSS, JavaScript', languagesOf).",
+    ],
+    why: 'The files are one click away without filling the chat, and the chat stays usable beside them.',
+    returns: 'The card, and its own sheet when open without the context, as JSX.',
     tests: ['frontend/src/components/chat/artifact-panel.test.tsx'],
+  },
+  {
+    symbol: 'frontend/src/components/chat/artifact-context.tsx#ArtifactContext',
+    status: 'verified',
+    summary:
+      "Lets a files card open its files in the chat page's panel: which files are open, a toggle, and the chat's title.",
+    why: 'ChatThread owns the panel so it can sit beside the conversation; the cards deep inside the messages reach it through this context.',
+    returns: 'A React context.',
+    tests: ['frontend/src/components/chat/artifact-panel.test.tsx'],
+  },
+  {
+    symbol: 'frontend/src/components/chat/artifact-context.tsx#useMediaQuery',
+    status: 'verified',
+    summary:
+      'Whether a media query matches, following changes; false on the server and where matchMedia is missing.',
+    why: 'The chat page docks the code panel only on large screens (1024 px and up); smaller ones get a sheet.',
+    returns: 'A boolean.',
   },
   {
     symbol: 'frontend/src/components/chat/artifact-panel.tsx#ArtifactPanel',
     status: 'verified',
     summary:
-      'The files of a code answer in a side panel: a tab per file, a preview, and downloads.',
+      "The files of a code answer: the chat's title and version, a Code / Preview switch, copy, zip download and close.",
     how: [
-      'Each file shows in the read-only Monaco editor (CodeEditor) with its language, a copy button and a download button. While Monaco loads, the same file shows as highlighted code (CodeView), so the panel is never empty.',
-      'Download all saves every file as gilderai-files.zip.',
-      "When there is an HTML file, a Preview tab shows previewDocument's page in an iframe sandboxed with allow-scripts only.",
+      'Docked, it is a column beside the chat that stays in view while the chat scrolls; otherwise a sheet over it (a Radix dialog named by the title).',
+      "The header says 'Version N · K files', N counting the chat's code answers.",
+      'Code shows one tab per file in the read-only Monaco editor (CodeEditor) on the dark code colours; while Monaco loads, the same file shows as highlighted code (CodeView). Copy copies the current file; Download as zip saves every file as gilderai-files.zip.',
+      "When there is an HTML file, Preview shows previewDocument's page in an iframe sandboxed with allow-scripts only, with a note that it runs in a sandbox.",
     ],
     why: 'Scripts may run in the preview, but with no same-origin access: no cookies, no storage, no access to the app. Monaco gives line numbers, folding and find; code blocks inside answers keep the lighter highlighter, since loading Monaco for every snippet would be heavy.',
-    returns: 'A Radix dialog as JSX.',
+    returns: 'The panel as JSX, or null when closed.',
     tests: [
       'frontend/src/components/chat/artifact-panel.test.tsx',
       'frontend/src/components/chat/code-editor.test.tsx',
@@ -4532,11 +4556,11 @@ export const notes: SymbolNote[] = [
   {
     symbol: 'frontend/src/components/chat/code-editor.tsx#CodeEditor',
     status: 'verified',
-    summary: "A file in the read-only Monaco editor, in the app's theme.",
+    summary: 'A file in the read-only Monaco editor, on the dark code colours.',
     how: [
       'Monaco is served by the app from /monaco/vs: scripts/copy-monaco.mjs copies its browser files from node_modules into public/monaco before dev and build (git-ignored, skipped when the version already matches), and loader.config points the loader there, so nothing comes from a CDN and the security policy needs no change.',
       'Read-only (also for the DOM), line numbers, folding, find and word wrap; no minimap; the file name is its label for screen readers.',
-      "The theme follows the page (<html data-theme>, else the system), and a switch while the panel is open re-applies it. defineAppTheme builds the Monaco theme from the page's own colour variables.",
+      'The code area is dark in both page themes: it sits inside .code-dark, which sets the dark colour variables, and defineCodeTheme builds the Monaco theme from them.',
     ],
     why: 'The editor of VS Code makes long files easy to read. Self-hosting costs about 25 MB of static files, loaded on demand only when a code panel opens.',
     returns: 'The editor, or its fallback while Monaco loads.',
@@ -4551,11 +4575,11 @@ export const notes: SymbolNote[] = [
     tests: ['frontend/src/components/chat/code-editor.test.tsx'],
   },
   {
-    symbol: 'frontend/src/components/chat/code-editor.tsx#defineAppTheme',
+    symbol: 'frontend/src/components/chat/code-editor.tsx#defineCodeTheme',
     status: 'verified',
-    summary: "Defines a Monaco theme in the app's colours and returns its name.",
-    why: "It reads --sunken, --text and --text-subtle from the page for the theme showing now, on top of Monaco's vs or vs-dark, so the editor matches the panel. Only hex values are passed, since Monaco accepts nothing else.",
-    returns: "'gilder-light' or 'gilder-dark'.",
+    summary: 'Defines the Monaco theme for the dark code area and returns its name.',
+    why: "It reads --code-bg, --code-text and --text-subtle from an element inside .code-dark, on top of Monaco's vs-dark, so the editor matches the panel in both page themes. Only hex values are passed, since Monaco accepts nothing else.",
+    returns: "'gilder-code'.",
     tests: ['frontend/src/components/chat/code-editor.test.tsx'],
   },
   {

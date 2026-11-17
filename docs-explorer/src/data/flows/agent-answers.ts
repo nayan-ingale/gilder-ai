@@ -217,8 +217,8 @@ const codeAnswer: Flow = {
       kind: 'function',
       status: 'verified',
       symbol: 'frontend/src/components/chat/files-card.tsx#FilesCard',
-      highlight: 'onClick={() => setOpen(true)}',
-      what: 'Under a finished code answer, a card says how many files there are and lists their names; it opens the files panel.',
+      highlight: 'onClick={() => (artifact ? artifact.toggle(files) : setOpen(true))}',
+      what: "Under a finished code answer, a card with the chat's title, how many files there are and their languages opens the files panel, beside the chat on large screens.",
       why: 'The files are one click away, without filling the chat with them.',
     },
     {
@@ -226,9 +226,9 @@ const codeAnswer: Flow = {
       title: 'The files panel',
       kind: 'function',
       status: 'verified',
-      symbol: 'frontend/src/components/chat/artifact-panel.tsx#ArtifactPanel',
+      symbol: 'frontend/src/components/chat/artifact-panel.tsx#ArtifactBody',
       highlight: 'sandbox="allow-scripts"',
-      what: 'A side panel has one tab per file with read-only, highlighted code (highlightCode), copy, download of one file and Download all as a zip (zipFiles). When there is an HTML file, a Preview tab shows it in an iframe sandboxed with allow-scripts only: no same-origin access, so no cookies, storage or access to the app.',
+      what: "The panel's Code view has one tab per file in the read-only editor on the dark code colours, with copy and Download as zip (zipFiles). When there is an HTML file, Preview shows it in an iframe sandboxed with allow-scripts only: no same-origin access, so no cookies, storage or access to the app.",
       why: 'The user can read, take and try the code without leaving the chat.',
     },
     {

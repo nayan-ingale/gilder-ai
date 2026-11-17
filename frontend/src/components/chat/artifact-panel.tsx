@@ -1,32 +1,102 @@
 'use client';
 
-import { Check, Copy, Download, FileArchive, X } from 'lucide-react';
+import { Check, Code2, Copy, Eye, FileArchive, ShieldCheck, X } from 'lucide-react';
 import { Dialog as DialogPrimitive } from 'radix-ui';
-import { useMemo, useState } from 'react';
-import { Button, IconButton } from '@/components/ui/button';
+import { type ReactNode, useMemo, useState } from 'react';
 import { cn } from '@/components/ui/cn';
 import { type CodeFile, download, previewDocument, zipFiles } from '@/lib/code-files';
 import { highlightCode } from '@/lib/highlight';
 import { CodeEditor } from './code-editor';
 
-const PREVIEW = '__preview__';
-
 export interface ArtifactPanelProps {
   files: readonly CodeFile[];
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  /** What the code is called: the chat's title. */
+  title?: string;
+  /** Which code answer of the chat this is, counting from 1. */
+  version?: number;
+  /** Beside the chat (on large screens) instead of a sheet over it. */
+  docked?: boolean;
 }
 
 /**
- * The files of a code answer, side by side with the chat: one tab per file, a live preview for a
- * web page, and downloads. The preview runs in a sandboxed frame with no access to this page and
- * no network.
+ * The files of a code answer: a Code view with one tab per file in the read-only editor, a live
+ * Preview for a web page, and downloads. Docked beside the chat on large screens, a sheet over it
+ * on small ones. The preview runs in a sandboxed frame with no access to this page.
  */
-export function ArtifactPanel({ files, open, onOpenChange }: ArtifactPanelProps) {
+export function ArtifactPanel({
+  files,
+  open,
+  onOpenChange,
+  title = 'Code',
+  version,
+  docked = false,
+}: ArtifactPanelProps) {
+  if (!open) {
+    return null;
+  }
+  if (docked) {
+    return (
+      <aside
+        aria-label="Code files"
+        className="sticky top-0 flex h-dvh w-[min(600px,50%)] shrink-0 flex-col self-start border-l border-line bg-surface"
+      >
+        <ArtifactBody
+          files={files}
+          title={title}
+          version={version}
+          onClose={() => onOpenChange(false)}
+          heading={(text) => <h2 className="truncate text-sm font-semibold text-fg">{text}</h2>}
+        />
+      </aside>
+    );
+  }
+  return (
+    <DialogPrimitive.Root open={open} onOpenChange={onOpenChange}>
+      <DialogPrimitive.Portal>
+        <DialogPrimitive.Overlay className="fixed inset-0 z-40 bg-overlay" />
+        <DialogPrimitive.Content className="fixed inset-y-0 right-0 z-50 flex w-full flex-col border-l border-line bg-surface shadow-raised md:w-[min(56rem,80vw)]">
+          <DialogPrimitive.Description className="sr-only">
+            The files from this answer, with a preview and downloads.
+          </DialogPrimitive.Description>
+          <ArtifactBody
+            files={files}
+            title={title}
+            version={version}
+            onClose={() => onOpenChange(false)}
+            heading={(text) => (
+              <DialogPrimitive.Title className="truncate text-sm font-semibold text-fg">
+                {text}
+              </DialogPrimitive.Title>
+            )}
+          />
+        </DialogPrimitive.Content>
+      </DialogPrimitive.Portal>
+    </DialogPrimitive.Root>
+  );
+}
+
+function ArtifactBody({
+  files,
+  title,
+  version,
+  onClose,
+  heading,
+}: {
+  files: readonly CodeFile[];
+  title: string;
+  version: number | undefined;
+  onClose: () => void;
+  heading: (text: string) => ReactNode;
+}) {
   const preview = useMemo(() => previewDocument(files), [files]);
-  const [tab, setTab] = useState<string>(files[0]?.name ?? PREVIEW);
+  const [view, setView] = useState<'code' | 'preview'>('code');
+  const [fileName, setFileName] = useState(files[0]?.name ?? '');
   const [copied, setCopied] = useState(false);
-  const current = files.find((file) => file.name === tab);
+  const current = files.find((file) => file.name === fileName) ?? files[0];
+  const showingPreview = view === 'preview' && preview !== null;
+  const count = `${files.length} ${files.length === 1 ? 'file' : 'files'}`;
 
   async function copy() {
     if (current) {
@@ -37,121 +107,140 @@ export function ArtifactPanel({ files, open, onOpenChange }: ArtifactPanelProps)
   }
 
   return (
-    <DialogPrimitive.Root open={open} onOpenChange={onOpenChange}>
-      <DialogPrimitive.Portal>
-        <DialogPrimitive.Overlay className="fixed inset-0 z-40 bg-canvas/60" />
-        <DialogPrimitive.Content className="fixed inset-y-0 right-0 z-50 flex w-full flex-col border-l border-line bg-surface shadow-xl md:w-[min(56rem,70vw)]">
-          <header className="flex items-center justify-between gap-2 border-b border-line px-4 py-2">
-            <DialogPrimitive.Title className="text-sm font-medium text-fg">
-              {files.length} {files.length === 1 ? 'file' : 'files'}
-            </DialogPrimitive.Title>
-            <DialogPrimitive.Description className="sr-only">
-              The files from this answer, with a preview and downloads.
-            </DialogPrimitive.Description>
-            <div className="flex items-center gap-1">
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={() => download(zipFiles(files), 'gilderai-files.zip')}
-              >
-                <FileArchive size={14} aria-hidden="true" />
-                Download all
-              </Button>
-              <DialogPrimitive.Close asChild>
-                <IconButton label="Close" icon={<X size={16} />} size="sm" />
-              </DialogPrimitive.Close>
-            </div>
-          </header>
+    <>
+      <div className="flex min-h-[60px] flex-wrap items-center gap-2.5 border-b border-line py-2 pr-3 pl-5">
+        <div className="flex min-w-[160px] flex-1 flex-col">
+          {heading(title)}
+          <span className="truncate text-xs text-fg-muted">
+            {version ? `Version ${version} · ${count}` : count}
+          </span>
+        </div>
+        {preview ? (
           <div
             role="tablist"
-            aria-label="Files"
-            className="flex gap-1 overflow-x-auto border-b border-line px-2"
+            aria-label="View"
+            className="flex gap-0.5 rounded-md border border-line bg-sunken p-[3px]"
           >
-            {preview ? (
-              <TabButton active={tab === PREVIEW} onClick={() => setTab(PREVIEW)}>
-                Preview
-              </TabButton>
-            ) : null}
-            {files.map((file) => (
-              <TabButton
-                key={file.name}
-                active={tab === file.name}
-                onClick={() => setTab(file.name)}
+            {(
+              [
+                ['code', 'Code', Code2],
+                ['preview', 'Preview', Eye],
+              ] as const
+            ).map(([id, label, Icon]) => (
+              <button
+                key={id}
+                type="button"
+                role="tab"
+                aria-selected={view === id}
+                onClick={() => setView(id)}
+                className={cn(
+                  'inline-flex min-h-[34px] items-center gap-1.5 rounded-sm border px-3 text-[13px]',
+                  view === id
+                    ? 'border-line bg-raised font-medium text-fg'
+                    : 'border-transparent text-fg-muted hover:text-fg',
+                )}
               >
-                {file.name}
-              </TabButton>
+                <Icon size={14} strokeWidth={1.75} aria-hidden="true" />
+                {label}
+              </button>
             ))}
           </div>
-          <div role="tabpanel" className="min-h-0 flex-1 overflow-auto">
-            {tab === PREVIEW && preview ? (
-              <iframe
-                title="Preview"
-                srcDoc={preview}
-                // Scripts may run, but with no same-origin access: no cookies, no storage, no page.
-                sandbox="allow-scripts"
-                className="h-full w-full bg-white"
-              />
-            ) : current ? (
-              <div className="flex h-full flex-col">
-                <div className="flex items-center justify-between px-4 py-1.5 text-xs text-fg-subtle">
-                  <span>{current.language}</span>
-                  <div className="flex gap-1">
-                    <IconButton
-                      label={copied ? 'Copied' : 'Copy file'}
-                      icon={copied ? <Check size={14} /> : <Copy size={14} />}
-                      size="sm"
-                      onClick={() => void copy()}
-                    />
-                    <IconButton
-                      label="Download file"
-                      icon={<Download size={14} />}
-                      size="sm"
-                      onClick={() =>
-                        download(
-                          new Blob([current.content], { type: 'text/plain' }),
-                          current.name.split('/').pop() ?? 'file.txt',
-                        )
-                      }
-                    />
-                  </div>
-                </div>
-                <CodeEditor
-                  key={current.name}
-                  code={current.content}
-                  language={current.language}
-                  fileName={current.name}
-                  fallback={<CodeView code={current.content} language={current.language} />}
-                />
-              </div>
-            ) : null}
-          </div>
-        </DialogPrimitive.Content>
-      </DialogPrimitive.Portal>
-    </DialogPrimitive.Root>
+        ) : null}
+        {!showingPreview ? (
+          <PanelButton
+            label={copied ? 'Copied' : 'Copy file'}
+            onClick={() => void copy()}
+            icon={copied ? <Check size={17} /> : <Copy size={17} strokeWidth={1.75} />}
+          />
+        ) : null}
+        <PanelButton
+          label="Download as zip"
+          onClick={() => download(zipFiles(files), 'gilderai-files.zip')}
+          icon={<FileArchive size={17} strokeWidth={1.75} />}
+        />
+        <PanelButton
+          label="Close the files"
+          onClick={onClose}
+          icon={<X size={17} strokeWidth={1.75} />}
+        />
+      </div>
+
+      {!showingPreview ? (
+        <div
+          role="tablist"
+          aria-label="Files"
+          className="flex overflow-x-auto border-b border-line px-3"
+        >
+          {files.map((file) => (
+            <button
+              key={file.name}
+              type="button"
+              role="tab"
+              aria-selected={current?.name === file.name}
+              onClick={() => setFileName(file.name)}
+              className={cn(
+                'min-h-[42px] shrink-0 border-b-2 px-3.5 font-mono text-[12.5px] whitespace-nowrap',
+                current?.name === file.name
+                  ? 'border-accent text-fg'
+                  : 'border-transparent text-fg-muted hover:text-fg',
+              )}
+            >
+              {file.name}
+            </button>
+          ))}
+        </div>
+      ) : null}
+
+      <div role="tabpanel" className="flex min-h-0 flex-1 flex-col overflow-hidden">
+        {showingPreview ? (
+          <iframe
+            title="Preview"
+            srcDoc={preview}
+            // Scripts may run, but with no same-origin access: no cookies, no storage, no page.
+            sandbox="allow-scripts"
+            className="h-full w-full flex-1 bg-white"
+          />
+        ) : current ? (
+          <CodeEditor
+            key={current.name}
+            code={current.content}
+            language={current.language}
+            fileName={current.name}
+            fallback={<CodeView code={current.content} language={current.language} />}
+          />
+        ) : null}
+      </div>
+
+      {preview ? (
+        <p className="flex items-center gap-2 border-t border-line px-5 py-2.5 text-[12.5px] text-fg-muted">
+          <ShieldCheck size={15} strokeWidth={1.75} aria-hidden="true" />
+          Preview runs in a sandbox with no access to your account or cookies.
+        </p>
+      ) : null}
+    </>
   );
 }
 
-function TabButton({
-  active,
+function PanelButton({
+  label,
+  icon,
   onClick,
-  children,
 }: {
-  active: boolean;
+  label: string;
+  icon: ReactNode;
   onClick: () => void;
-  children: React.ReactNode;
 }) {
   return (
     <button
       type="button"
-      role="tab"
-      aria-selected={active}
+      aria-label={label}
+      title={label}
       onClick={onClick}
-      className={cn(
-        'shrink-0 border-b-2 px-3 py-2 text-xs whitespace-nowrap',
-        active ? 'border-accent text-fg' : 'border-transparent text-fg-muted hover:text-fg',
-      )}
+      className="inline-flex size-10 shrink-0 items-center justify-center rounded-sm text-fg-muted hover:bg-sunken hover:text-fg"
     >
-      {children}
+      <span aria-hidden="true" className="inline-flex">
+        {icon}
+      </span>
     </button>
   );
 }
@@ -160,7 +249,7 @@ function TabButton({
 function CodeView({ code, language }: { code: string; language: string }) {
   const highlighted = useMemo(() => highlightCode(code, language), [code, language]);
   return (
-    <pre className="hljs h-full w-full overflow-auto px-4 pb-4 text-[13px] leading-relaxed">
+    <pre className="code-dark hljs h-full w-full overflow-auto bg-code px-4 py-3 font-mono text-[13px] leading-[1.7]">
       {highlighted === null ? (
         <code>{code}</code>
       ) : (

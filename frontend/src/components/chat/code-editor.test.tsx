@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { act, cleanup, render, screen } from '@testing-library/react';
+import { cleanup, render, screen } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 // jsdom can't run Monaco, so a stand-in records what the panel asks it for.
@@ -61,24 +61,16 @@ describe('CodeEditor', () => {
     });
   });
 
-  it("uses the app's theme, and switches when the page does", () => {
-    document.documentElement.dataset.theme = 'dark';
+  it('shows the code on the dark code colours, whatever the page theme', () => {
+    document.documentElement.dataset.theme = 'light';
     render(<CodeEditor code="x" language="js" fileName="x.js" fallback={null} />);
 
-    expect(monaco.props.at(-1)?.theme).toBe('gilder-dark');
+    expect(monaco.props.at(-1)?.theme).toBe('gilder-code');
     expect(monaco.defineTheme).toHaveBeenCalledWith(
-      'gilder-dark',
+      'gilder-code',
       expect.objectContaining({ base: 'vs-dark' }),
     );
-
-    act(() => {
-      document.documentElement.dataset.theme = 'light';
-    });
-
-    return vi.waitFor(() => {
-      expect(monaco.setTheme).toHaveBeenLastCalledWith('gilder-light');
-      expect(monaco.props.at(-1)?.theme).toBe('gilder-light');
-    });
+    expect(screen.getByTestId('monaco').closest('.code-dark')).not.toBeNull();
   });
 });
 

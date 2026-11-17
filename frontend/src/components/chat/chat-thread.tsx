@@ -10,9 +10,13 @@ import { ChatHeader } from '@/components/chats/chat-header';
 import type { ChatMessage, ChatSummary } from '@/lib/chats';
 import { ApiError } from '@/lib/api';
 import { peekQueuedFiles, takeQueuedFiles } from '@/lib/pending-files';
+import type { CodeFile } from '@/lib/code-files';
 import { pdfReadingState, uploadFile, uploadProblem } from '@/lib/uploads';
+import { useGetChatQuery } from '@/store/api';
 import { clearFirstMessage } from '@/store/pending-slice';
 import type { AppDispatch, RootState } from '@/store/store';
+import { ArtifactContext, useMediaQuery } from './artifact-context';
+import { ArtifactPanel } from './artifact-panel';
 import { Composer, type PendingAttachment } from './composer';
 import { MessageItem } from './message-item';
 
@@ -175,84 +179,118 @@ export function ChatThread({
     }
   }, [thread.running]);
 
+  // The code files open in the panel, docked beside the chat on large screens.
+  const [shownFiles, setShownFiles] = useState<readonly CodeFile[] | null>(null);
+  const wide = useMediaQuery('(min-width: 1024px)');
+  const { data: chatData } = useGetChatQuery(chatId, { skip: !chat });
+  const title = chatData?.chat.title ?? chat?.title ?? 'Code';
+  const codeAnswers: (readonly CodeFile[])[] = thread.messages.flatMap((message) =>
+    message.files ? [message.files] : [],
+  );
+  const version = shownFiles ? codeAnswers.indexOf(shownFiles) + 1 : 0;
+
   const lastIndex = thread.messages.length - 1;
   const lastUserIndex = thread.messages.findLastIndex((message) => message.role === 'user');
   const lastUser = thread.messages[lastUserIndex];
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col">
-      {chat ? <ChatHeader chat={chat} messageCount={thread.messages.length} /> : null}
-      {thread.messages.length === 0 ? (
-        <div className="flex flex-1 flex-col items-center justify-center gap-2 px-4 text-center">
-          <p className="text-base text-fg">No messages yet</p>
-          <p className="max-w-sm text-sm text-fg-muted">Ask anything to start this chat.</p>
-        </div>
-      ) : (
-        <ol
-          aria-label="Messages"
-          className="mx-auto flex w-full max-w-[780px] flex-1 flex-col gap-7 px-4 pt-8 pb-4 sm:px-7"
-        >
-          {thread.messages.map((message, index) =>
-            editing && index === lastUserIndex ? (
-              <li key={message.key}>
-                <EditBox
-                  initial={message.content}
-                  onCancel={() => setEditing(false)}
-                  onSave={async (content) => {
-                    setEditing(false);
-                    const accepted = await thread.edit(content);
-                    if (!accepted) {
-                      setEditing(true);
+    <ArtifactContext
+      value={{
+        shown: shownFiles,
+        toggle: (files) => setShownFiles((open) => (open === files ? null : files)),
+        title,
+      }}
+    >
+      <div className="flex flex-1">
+        <div className="flex min-w-0 flex-1 flex-col">
+          {chat ? <ChatHeader chat={chat} messageCount={thread.messages.length} /> : null}
+          {thread.messages.length === 0 ? (
+            <div className="flex flex-1 flex-col items-center justify-center gap-2 px-4 text-center">
+              <p className="text-base text-fg">No messages yet</p>
+              <p className="max-w-sm text-sm text-fg-muted">Ask anything to start this chat.</p>
+            </div>
+          ) : (
+            <ol
+              aria-label="Messages"
+              className="mx-auto flex w-full max-w-[780px] flex-1 flex-col gap-7 px-4 pt-8 pb-4 sm:px-7"
+            >
+              {thread.messages.map((message, index) =>
+                editing && index === lastUserIndex ? (
+                  <li key={message.key}>
+                    <EditBox
+                      initial={message.content}
+                      onCancel={() => setEditing(false)}
+                      onSave={async (content) => {
+                        setEditing(false);
+                        const accepted = await thread.edit(content);
+                        if (!accepted) {
+                          setEditing(true);
+                        }
+                      }}
+                    />
+                  </li>
+                ) : (
+                  <MessageItem
+                    key={message.key}
+                    message={message}
+                    onRegenerate={
+                      index === lastIndex &&
+                      message.role === 'assistant' &&
+                      message.id &&
+                      !thread.running
+                        ? () => void thread.regenerate()
+                        : undefined
                     }
-                  }}
-                />
-              </li>
-            ) : (
-              <MessageItem
-                key={message.key}
-                message={message}
-                onRegenerate={
-                  index === lastIndex &&
-                  message.role === 'assistant' &&
-                  message.id &&
-                  !thread.running
-                    ? () => void thread.regenerate()
-                    : undefined
-                }
-                onEdit={
-                  index === lastUserIndex && message.id && !thread.running
-                    ? () => setEditing(true)
-                    : undefined
-                }
-              />
-            ),
+                    onEdit={
+                      index === lastUserIndex && message.id && !thread.running
+                        ? () => setEditing(true)
+                        : undefined
+                    }
+                  />
+                ),
+              )}
+            </ol>
           )}
-        </ol>
-      )}
-      {/* The scroll target sits after the list: a list may only contain list items. */}
-      <div ref={bottom} aria-hidden="true" />
-      <div className="sticky bottom-0 bg-gradient-to-t from-canvas from-70% to-transparent px-4 pt-4 pb-5 sm:px-7">
-        <div className="mx-auto flex w-full max-w-[780px] flex-col gap-2">
-          <Composer
-            onSend={sendWithAttachments}
-            attachments={attachments}
-            onAttach={(files) => void attach(files)}
-            onRemoveAttachment={(key) =>
-              setAttachments((current) => current.filter((item) => item.key !== key))
-            }
-            onStop={thread.stop}
-            running={thread.running}
-            onEditLast={lastUser?.id ? () => setEditing(true) : undefined}
-            initialText={handoff?.draft ?? ''}
-            placeholder="Reply to GilderAi"
-            autoFocus
-          />
-          <p className="hidden text-center text-xs text-fg-subtle sm:block">
-            Esc stops the answer · ↑ edits your last message
-          </p>
+          {/* The scroll target sits after the list: a list may only contain list items. */}
+          <div ref={bottom} aria-hidden="true" />
+          <div className="sticky bottom-0 bg-gradient-to-t from-canvas from-70% to-transparent px-4 pt-4 pb-5 sm:px-7">
+            <div className="mx-auto flex w-full max-w-[780px] flex-col gap-2">
+              <Composer
+                onSend={sendWithAttachments}
+                attachments={attachments}
+                onAttach={(files) => void attach(files)}
+                onRemoveAttachment={(key) =>
+                  setAttachments((current) => current.filter((item) => item.key !== key))
+                }
+                onStop={thread.stop}
+                running={thread.running}
+                onEditLast={lastUser?.id ? () => setEditing(true) : undefined}
+                initialText={handoff?.draft ?? ''}
+                placeholder="Reply to GilderAi"
+                autoFocus
+              />
+              <p className="hidden text-center text-xs text-fg-subtle sm:block">
+                Esc stops the answer · ↑ edits your last message
+              </p>
+            </div>
+          </div>
         </div>
+        {shownFiles ? (
+          <ArtifactPanel
+            files={shownFiles}
+            open
+            onOpenChange={(open) => {
+              if (!open) {
+                setShownFiles(null);
+              }
+            }}
+            title={title}
+            version={version > 0 ? version : undefined}
+            docked={wide}
+          />
+        ) : null}
       </div>
-    </div>
+    </ArtifactContext>
   );
 }
 

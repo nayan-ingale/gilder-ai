@@ -28,7 +28,7 @@ async function ChatView({ params }: { params: Promise<{ chatId: string }> }) {
     notFound();
   }
   return (
-    <div className="flex min-h-0 flex-1 flex-col">
+    <div className="flex flex-1 flex-col">
       <ChatThread
         chatId={loaded.chat.id}
         chat={loaded.chat}
