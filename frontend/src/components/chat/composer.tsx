@@ -1,33 +1,119 @@
 'use client';
 
-import { ArrowUp, ChevronDown, FileText, ImageIcon, Paperclip, Square, X } from 'lucide-react';
-import { type FormEvent, type KeyboardEvent, useEffect, useRef, useState } from 'react';
-import { IconButton } from '@/components/ui/button';
+import {
+  ArrowUp,
+  Check,
+  ChevronDown,
+  ChevronUp,
+  Code,
+  Compass,
+  FileText,
+  Globe,
+  ImageIcon,
+  MessageCircle,
+  Mic,
+  Plus,
+  Presentation,
+  Square,
+  X,
+} from 'lucide-react';
+import {
+  type FormEvent,
+  type KeyboardEvent,
+  type Ref,
+  useEffect,
+  useImperativeHandle,
+  useRef,
+  useState,
+} from 'react';
 import { cn } from '@/components/ui/cn';
 import {
   DropdownMenu,
   DropdownMenuContent,
-  DropdownMenuItem,
   DropdownMenuLabel,
+  DropdownMenuRadioGroup,
+  DropdownMenuRadioItem,
+  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
+import { Kbd } from '@/components/ui/kbd';
+import { useToast } from '@/components/ui/toast';
+import { useDictation } from '@/hooks/use-dictation';
 import { BUILT_AGENTS } from '@/lib/turns';
 import { ACCEPTED_TYPES } from '@/lib/uploads';
 import { useGetAccountQuery } from '@/store/api';
 
-/** The agents a user can pick, and the `/` shortcut for each. Only built ones are offered. */
+/**
+ * The agents a user can pick: what each does, its cost in credits (billing's CREDIT_COSTS) and
+ * its `/` shortcut. Only built ones are offered.
+ */
 export const AGENT_OPTIONS = [
-  { id: 'chat', label: 'Chat', shortcut: null, hint: 'Everyday questions' },
-  { id: 'search', label: 'Search', shortcut: '/search', hint: 'Answers from the web' },
-  { id: 'code', label: 'Code', shortcut: '/code', hint: 'Write code files' },
-  { id: 'pdf', label: 'PDF', shortcut: '/pdf', hint: 'Make a PDF document' },
-  { id: 'slides', label: 'Slides', shortcut: '/slides', hint: 'Make a presentation' },
-  { id: 'image', label: 'Image', shortcut: '/image', hint: 'Draw an image' },
+  {
+    id: 'chat',
+    label: 'Chat',
+    shortcut: null,
+    hint: 'Conversation, explanations and writing',
+    cost: 1,
+    icon: MessageCircle,
+  },
+  {
+    id: 'search',
+    label: 'Search',
+    shortcut: '/search',
+    hint: 'Live web answers with sources',
+    cost: 5,
+    icon: Globe,
+  },
+  {
+    id: 'code',
+    label: 'Code',
+    shortcut: '/code',
+    hint: 'Working projects with a live preview',
+    cost: 10,
+    icon: Code,
+  },
+  {
+    id: 'pdf',
+    label: 'PDF',
+    shortcut: '/pdf',
+    hint: 'A formatted PDF document to download',
+    cost: 10,
+    icon: FileText,
+  },
+  {
+    id: 'slides',
+    label: 'Slides',
+    shortcut: '/slides',
+    hint: 'A presentation deck to download',
+    cost: 10,
+    icon: Presentation,
+  },
+  {
+    id: 'image',
+    label: 'Image',
+    shortcut: '/image',
+    hint: 'An image generated from your prompt',
+    cost: 10,
+    icon: ImageIcon,
+  },
 ] as const;
+
+const AUTO = {
+  id: 'auto',
+  label: 'Auto',
+  hint: 'Picks the best agent for each message',
+  costLabel: '1–10 credits',
+  icon: Compass,
+};
 
 const built = new Set<string>(BUILT_AGENTS);
 const OFFERED = AGENT_OPTIONS.filter((option) => built.has(option.id));
 const MAX_LENGTH = 20_000;
+
+/** "1 credit" or "10 credits". */
+export function creditsLabel(cost: number): string {
+  return `${cost} ${cost === 1 ? 'credit' : 'credits'}`;
+}
 
 /** A file being attached to the next message. */
 export interface PendingAttachment {
@@ -36,14 +122,30 @@ export interface PendingAttachment {
   kind: 'pdf' | 'image';
   status: 'uploading' | 'reading' | 'ready' | 'failed';
   fileId?: string;
+  sizeBytes?: number;
 }
 
 const ATTACHMENT_STATUS: Record<PendingAttachment['status'], string> = {
   uploading: 'Uploading…',
   reading: 'Reading…',
-  ready: '',
+  ready: 'Ready',
   failed: 'Failed',
 };
+
+/** 412 KB or 1.2 MB. */
+export function fileSize(bytes: number): string {
+  return bytes < 1_000_000
+    ? `${Math.max(1, Math.round(bytes / 1_000))} KB`
+    : `${(bytes / 1_000_000).toFixed(1)} MB`;
+}
+
+/** What a page can do to the composer from outside, such as a suggestion card. */
+export interface ComposerHandle {
+  /** Puts text in the box (and picks an agent), then focuses it. */
+  fill: (text: string, agent?: string) => void;
+  /** Opens the file picker. */
+  pickFiles: () => void;
+}
 
 export interface ComposerProps {
   /** Sends the message; resolves false when it was refused, so the text comes back. */
@@ -57,10 +159,14 @@ export interface ComposerProps {
   initialText?: string;
   placeholder?: string;
   autoFocus?: boolean;
-  /** Files attached to the next message; with onAttach, the paperclip is shown. */
+  /** Files attached to the next message; with onAttach, the attach button is shown. */
   attachments?: PendingAttachment[];
-  onAttach?: (files: File[]) => void;
+  /** Gets the picked files and the text typed so far. */
+  onAttach?: (files: File[], draft: string) => void;
   onRemoveAttachment?: (key: string) => void;
+  /** Where the agent menu opens: above the box (in a chat) or below it (on the new-chat page). */
+  menuSide?: 'top' | 'bottom';
+  ref?: Ref<ComposerHandle>;
 }
 
 export function Composer({
@@ -74,21 +180,50 @@ export function Composer({
   attachments = [],
   onAttach,
   onRemoveAttachment,
+  menuSide = 'top',
+  ref,
 }: ComposerProps) {
   const filePicker = useRef<HTMLInputElement>(null);
   const attachmentsReady = attachments.every((attachment) => attachment.status === 'ready');
   const [text, setText] = useState(initialText);
   const [agent, setAgent] = useState<string | undefined>(undefined);
+  const [menuOpen, setMenuOpen] = useState(false);
   const textarea = useRef<HTMLTextAreaElement>(null);
+  const toast = useToast();
   const { data } = useGetAccountQuery();
   const outOfCredits = data !== undefined && data.account.balance < 1;
+  const dictation = useDictation(
+    () => textarea.current?.value ?? '',
+    (spoken) => setText(spoken.slice(0, MAX_LENGTH)),
+    () =>
+      toast({
+        title: 'The microphone is blocked',
+        description: 'Allow microphone access for this site to dictate.',
+        tone: 'danger',
+      }),
+  );
+
+  useImperativeHandle(ref, () => ({
+    fill(value, pick) {
+      setText(value);
+      setAgent(pick);
+      requestAnimationFrame(() => {
+        const element = textarea.current;
+        element?.focus();
+        element?.setSelectionRange(value.length, value.length);
+      });
+    },
+    pickFiles() {
+      filePicker.current?.click();
+    },
+  }));
 
   // The box grows with its text, up to a limit, then scrolls.
   useEffect(() => {
     const element = textarea.current;
     if (element) {
       element.style.height = 'auto';
-      element.style.height = `${Math.min(element.scrollHeight, 240)}px`;
+      element.style.height = `${Math.min(Math.max(element.scrollHeight, 52), 240)}px`;
     }
   }, [text]);
 
@@ -125,6 +260,9 @@ export function Composer({
     if (!canSend) {
       return;
     }
+    if (dictation.listening) {
+      dictation.toggle();
+    }
     const content = trimmed;
     setText('');
     const accepted = await onSend(content, agent);
@@ -143,27 +281,37 @@ export function Composer({
     }
   }
 
-  const agentLabel = OFFERED.find((option) => option.id === agent)?.label ?? 'Auto';
+  const picked = OFFERED.find((option) => option.id === agent);
+  const PillIcon = picked?.icon ?? AUTO.icon;
+  const pillLabel = picked?.label ?? AUTO.label;
+  // With Auto and a file attached, the file decides the agent: say which.
+  const pillSub =
+    !picked && attachments.length > 0
+      ? attachments.some((attachment) => attachment.kind === 'pdf')
+        ? 'PDF Q&A'
+        : 'Image Q&A'
+      : null;
+  const ChevronIcon = (menuSide === 'top') === menuOpen ? ChevronDown : ChevronUp;
 
   return (
     <form onSubmit={(event) => void submit(event)} className="relative">
       {shortcutHints.length > 0 ? (
         <ul
           aria-label="Shortcuts"
-          className="absolute bottom-full left-0 mb-2 w-64 rounded-lg border border-line bg-raised p-1 text-sm shadow-lg"
+          className="absolute bottom-full left-0 z-20 mb-2 w-72 rounded-lg border border-line bg-raised p-1.5 text-sm shadow-raised"
         >
           {shortcutHints.map((option) => (
             <li key={option.id}>
               <button
                 type="button"
-                className="flex w-full items-center justify-between rounded-sm px-2 py-1.5 text-left hover:bg-surface"
+                className="flex min-h-[38px] w-full items-center justify-between gap-3 rounded-sm px-2.5 text-left hover:bg-sunken"
                 onClick={() => {
                   setText(`${option.shortcut ?? ''} `);
                   textarea.current?.focus();
                 }}
               >
-                <span className="font-medium text-fg">{option.shortcut}</span>
-                <span className="text-xs text-fg-subtle">{option.hint}</span>
+                <span className="font-mono text-[13px] text-fg">{option.shortcut}</span>
+                <span className="truncate text-xs text-fg-muted">{option.hint}</span>
               </button>
             </li>
           ))}
@@ -174,36 +322,56 @@ export function Composer({
           You are out of credits. New answers need credits.
         </p>
       ) : null}
-      <div className="rounded-xl border border-line-strong bg-raised p-2 shadow-sm focus-within:border-accent">
+      <div className="flex flex-col gap-2 rounded-lg border border-line bg-raised pt-3 pr-2.5 pb-2.5 pl-3.5 transition-shadow focus-within:border-accent-border focus-within:shadow-[0_0_0_3px_var(--accent-soft)]">
         {attachments.length > 0 ? (
-          <ul aria-label="Attached files" className="mb-2 flex flex-wrap gap-2 px-1">
+          <ul aria-label="Attached files" className="flex flex-wrap gap-2">
             {attachments.map((attachment) => (
               <li
                 key={attachment.key}
                 className={cn(
-                  'flex max-w-60 items-center gap-1.5 rounded-md border px-2 py-1 text-xs',
+                  'flex max-w-72 items-center gap-2.5 rounded-md border py-1.5 pr-1 pl-2',
                   attachment.status === 'failed'
-                    ? 'border-danger text-danger'
-                    : 'border-line bg-surface text-fg-muted',
+                    ? 'border-danger bg-danger-soft'
+                    : 'border-line bg-surface',
                 )}
               >
-                {attachment.kind === 'pdf' ? (
-                  <FileText size={14} aria-hidden="true" />
-                ) : (
-                  <ImageIcon size={14} aria-hidden="true" />
-                )}
-                <span className="truncate text-fg">{attachment.name}</span>
-                {ATTACHMENT_STATUS[attachment.status] ? (
-                  <span className="shrink-0">{ATTACHMENT_STATUS[attachment.status]}</span>
-                ) : null}
+                <span
+                  aria-hidden="true"
+                  className="flex size-8 shrink-0 items-center justify-center rounded-sm bg-accent-soft text-accent-text"
+                >
+                  {attachment.kind === 'pdf' ? (
+                    <FileText size={16} strokeWidth={1.75} />
+                  ) : (
+                    <ImageIcon size={16} strokeWidth={1.75} />
+                  )}
+                </span>
+                <span className="flex min-w-0 flex-col">
+                  <span className="truncate text-[13px] font-medium text-fg">
+                    {attachment.name}
+                  </span>
+                  <span
+                    className={cn(
+                      'text-xs',
+                      attachment.status === 'failed' ? 'text-danger' : 'text-fg-muted',
+                    )}
+                  >
+                    {[
+                      attachment.kind === 'pdf' ? 'PDF' : 'Image',
+                      attachment.sizeBytes ? fileSize(attachment.sizeBytes) : null,
+                      ATTACHMENT_STATUS[attachment.status],
+                    ]
+                      .filter(Boolean)
+                      .join(' · ')}
+                  </span>
+                </span>
                 {onRemoveAttachment ? (
                   <button
                     type="button"
                     aria-label={`Remove ${attachment.name}`}
                     onClick={() => onRemoveAttachment(attachment.key)}
-                    className="shrink-0 rounded hover:text-fg"
+                    className="inline-flex size-9 shrink-0 items-center justify-center rounded-sm text-fg-muted hover:bg-sunken hover:text-fg"
                   >
-                    <X size={12} aria-hidden="true" />
+                    <X size={14} aria-hidden="true" />
                   </button>
                 ) : null}
               </li>
@@ -216,89 +384,166 @@ export function Composer({
         <textarea
           id="composer-input"
           ref={textarea}
-          rows={1}
+          rows={2}
           value={text}
           onChange={(event) => setText(event.target.value)}
           onKeyDown={onKeyDown}
           placeholder={placeholder}
           maxLength={MAX_LENGTH}
-          className="block max-h-60 w-full resize-none bg-transparent px-2 py-1.5 text-sm text-fg outline-none placeholder:text-fg-subtle"
+          className="block max-h-60 min-h-[52px] w-full resize-none bg-transparent px-0.5 py-1 text-[15px] leading-normal text-fg outline-none placeholder:text-fg-subtle"
         />
-        <div className="mt-1 flex items-center justify-between">
-          <div className="flex items-center gap-0.5">
-            {onAttach ? (
-              <>
-                <IconButton
-                  label="Attach a PDF or image"
-                  icon={<Paperclip size={16} />}
-                  size="sm"
-                  disabled={running}
-                  onClick={() => filePicker.current?.click()}
-                />
-                <input
-                  ref={filePicker}
-                  type="file"
-                  accept={ACCEPTED_TYPES.join(',')}
-                  multiple
-                  hidden
-                  onChange={(event) => {
-                    const picked = [...(event.target.files ?? [])];
-                    event.target.value = '';
-                    if (picked.length > 0) {
-                      onAttach(picked);
-                    }
-                  }}
-                />
-              </>
-            ) : null}
-            <DropdownMenu>
-              <DropdownMenuTrigger
-                className="inline-flex h-8 items-center gap-1 rounded-md px-2 text-xs text-fg-muted hover:bg-surface hover:text-fg"
-                aria-label={`Agent: ${agentLabel}`}
+        <div className="flex items-center gap-1.5">
+          {onAttach ? (
+            <>
+              <button
+                type="button"
+                aria-label="Attach a PDF or image"
+                title="Attach a PDF or image"
+                disabled={running}
+                onClick={() => filePicker.current?.click()}
+                className="inline-flex size-9 shrink-0 items-center justify-center rounded-md border border-line text-fg-muted hover:bg-sunken hover:text-fg disabled:opacity-50"
               >
-                {agentLabel}
-                <ChevronDown size={14} aria-hidden="true" />
+                <Plus size={18} strokeWidth={1.75} aria-hidden="true" />
+              </button>
+              <input
+                ref={filePicker}
+                type="file"
+                accept={ACCEPTED_TYPES.join(',')}
+                multiple
+                hidden
+                onChange={(event) => {
+                  const files = [...(event.target.files ?? [])];
+                  event.target.value = '';
+                  if (files.length > 0) {
+                    onAttach(files, text);
+                  }
+                }}
+              />
+            </>
+          ) : null}
+          <span className="ml-1 hidden min-w-0 truncate text-xs text-fg-subtle sm:inline">
+            Type <Kbd className="h-4 text-fg-subtle">/</Kbd> to switch agents
+          </span>
+
+          <div className="ml-auto flex shrink-0 items-center gap-1">
+            <DropdownMenu open={menuOpen} onOpenChange={setMenuOpen}>
+              <DropdownMenuTrigger
+                aria-label={`Agent: ${pillLabel}`}
+                className={cn(
+                  'inline-flex min-h-9 items-center gap-1.5 rounded-md border pr-2 pl-2.5 text-[13.5px] font-medium whitespace-nowrap',
+                  picked
+                    ? 'border-accent-border bg-accent-soft text-accent-text'
+                    : 'border-transparent text-fg hover:bg-sunken data-[state=open]:bg-sunken',
+                )}
+              >
+                <PillIcon size={15} strokeWidth={1.75} aria-hidden="true" />
+                {pillLabel}
+                {pillSub ? <span className="font-normal text-fg-muted">· {pillSub}</span> : null}
+                <ChevronIcon size={14} aria-hidden="true" />
               </DropdownMenuTrigger>
-              <DropdownMenuContent align="start" side="top">
-                <DropdownMenuLabel>Answer with</DropdownMenuLabel>
-                <DropdownMenuItem onSelect={() => setAgent(undefined)}>
-                  <span className="flex flex-col">
-                    <span>Auto</span>
-                    <span className="text-xs text-fg-subtle">Picks the best agent</span>
-                  </span>
-                </DropdownMenuItem>
-                {OFFERED.map((option) => (
-                  <DropdownMenuItem key={option.id} onSelect={() => setAgent(option.id)}>
-                    <span className="flex flex-col">
-                      <span>{option.label}</span>
-                      <span className="text-xs text-fg-subtle">{option.hint}</span>
-                    </span>
-                  </DropdownMenuItem>
-                ))}
+              <DropdownMenuContent
+                side={menuSide}
+                align="end"
+                collisionPadding={8}
+                className="max-h-[var(--radix-dropdown-menu-content-available-height)] w-[344px] max-w-[calc(100vw-2rem)] overflow-y-auto rounded-lg"
+              >
+                <DropdownMenuLabel className="font-medium">Agent</DropdownMenuLabel>
+                <DropdownMenuRadioGroup
+                  value={agent ?? AUTO.id}
+                  onValueChange={(value) => {
+                    setAgent(value === AUTO.id ? undefined : value);
+                    setMenuOpen(false);
+                    textarea.current?.focus();
+                  }}
+                >
+                  {[
+                    { ...AUTO, costLabel: AUTO.costLabel },
+                    ...OFFERED.map((option) => ({
+                      ...option,
+                      costLabel: creditsLabel(option.cost),
+                    })),
+                  ].map((option) => {
+                    const on = (agent ?? AUTO.id) === option.id;
+                    const Icon = option.icon;
+                    return (
+                      <DropdownMenuRadioItem
+                        key={option.id}
+                        value={option.id}
+                        className="flex min-h-[52px] items-center gap-3 rounded-md px-2.5 py-2 data-[highlighted]:bg-sunken data-[state=checked]:bg-sunken"
+                      >
+                        <span
+                          aria-hidden="true"
+                          className={cn(
+                            'flex size-8 shrink-0 items-center justify-center rounded-sm',
+                            on ? 'bg-accent-soft text-accent-text' : 'bg-sunken text-fg-muted',
+                          )}
+                        >
+                          <Icon size={16} strokeWidth={1.75} />
+                        </span>
+                        <span className="flex min-w-0 flex-1 flex-col gap-px">
+                          <span className="text-sm font-medium text-fg">{option.label}</span>
+                          <span className="text-[12.5px] text-fg-muted">{option.hint}</span>
+                        </span>
+                        <span className="text-xs whitespace-nowrap text-fg-subtle tabular-nums">
+                          {option.costLabel}
+                        </span>
+                        <span aria-hidden="true" className="flex w-4 shrink-0 justify-center">
+                          {on ? <Check size={16} className="text-accent-text" /> : null}
+                        </span>
+                      </DropdownMenuRadioItem>
+                    );
+                  })}
+                </DropdownMenuRadioGroup>
+                <DropdownMenuSeparator />
+                <p className="px-2.5 pt-1 pb-1.5 text-xs leading-normal text-fg-muted">
+                  Shortcut: start a message with{' '}
+                  <code className="rounded-sm bg-sunken px-1 font-mono text-[11.5px]">/search</code>
+                  , <code className="rounded-sm bg-sunken px-1 font-mono text-[11.5px]">/code</code>{' '}
+                  or <code className="rounded-sm bg-sunken px-1 font-mono text-[11.5px]">/pdf</code>
+                  .
+                </p>
               </DropdownMenuContent>
             </DropdownMenu>
+            {dictation.supported ? (
+              <button
+                type="button"
+                onClick={dictation.toggle}
+                aria-pressed={dictation.listening}
+                aria-label={dictation.listening ? 'Stop dictating' : 'Dictate a message'}
+                title={dictation.listening ? 'Stop dictating' : 'Dictate a message'}
+                disabled={running}
+                className={cn(
+                  'inline-flex size-9 items-center justify-center rounded-full disabled:opacity-50',
+                  dictation.listening
+                    ? 'bg-danger-soft text-danger'
+                    : 'text-fg-muted hover:bg-sunken hover:text-fg',
+                )}
+              >
+                <Mic size={18} strokeWidth={1.75} aria-hidden="true" />
+              </button>
+            ) : null}
+            {running ? (
+              <button
+                type="button"
+                aria-label="Stop the answer"
+                title="Stop the answer (Esc)"
+                onClick={onStop}
+                className="inline-flex size-9 items-center justify-center rounded-full border border-line-strong bg-surface text-fg hover:bg-sunken"
+              >
+                <Square size={11} fill="currentColor" aria-hidden="true" />
+              </button>
+            ) : (
+              <button
+                type="submit"
+                aria-label="Send"
+                title="Send"
+                disabled={!canSend}
+                className="inline-flex size-9 items-center justify-center rounded-full bg-accent text-accent-ink hover:opacity-90 disabled:cursor-not-allowed disabled:bg-sunken disabled:text-fg-subtle disabled:hover:opacity-100"
+              >
+                <ArrowUp size={17} strokeWidth={2.25} aria-hidden="true" />
+              </button>
+            )}
           </div>
-          {running ? (
-            <IconButton
-              label="Stop the answer"
-              icon={<Square size={14} fill="currentColor" />}
-              size="sm"
-              onClick={onStop}
-              className="bg-fg text-canvas hover:bg-fg hover:text-canvas hover:opacity-90"
-            />
-          ) : (
-            <IconButton
-              type="submit"
-              label="Send"
-              icon={<ArrowUp size={16} />}
-              size="sm"
-              disabled={!canSend}
-              className={cn(
-                canSend &&
-                  'bg-accent text-accent-ink hover:bg-accent hover:text-accent-ink hover:opacity-90',
-              )}
-            />
-          )}
         </div>
       </div>
     </form>

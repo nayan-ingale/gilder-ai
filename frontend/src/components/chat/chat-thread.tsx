@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { useEffect, useEffectEvent, useLayoutEffect, useRef, useState } from 'react';
 import { useDispatch, useSelector } from 'react-redux';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/input';
@@ -8,6 +8,7 @@ import { useToast } from '@/components/ui/toast';
 import { useChatThread } from '@/hooks/use-chat-thread';
 import type { ChatMessage } from '@/lib/chats';
 import { ApiError } from '@/lib/api';
+import { peekQueuedFiles, takeQueuedFiles } from '@/lib/pending-files';
 import { pdfReadingState, uploadFile, uploadProblem } from '@/lib/uploads';
 import { clearFirstMessage } from '@/store/pending-slice';
 import type { AppDispatch, RootState } from '@/store/store';
@@ -57,7 +58,7 @@ export function ChatThread({
       const kind = file.type === 'application/pdf' ? 'pdf' : 'image';
       setAttachments((current) => [
         ...current,
-        { key, name: file.name, kind, status: 'uploading' },
+        { key, name: file.name, kind, status: 'uploading', sizeBytes: file.size },
       ]);
       try {
         const uploaded = await uploadFile(file, chatId);
@@ -107,6 +108,19 @@ export function ChatThread({
   }
   const bottom = useRef<HTMLDivElement>(null);
   const followBottom = useRef(true);
+  // Files and text from the new-chat page, when the chat was started by attaching a file.
+  const [handoff] = useState(() => peekQueuedFiles(chatId));
+  const attachHandedOver = useEffectEvent((files: File[]) => void attach(files));
+  useEffect(() => {
+    // Taken in a timer, so a development double-run of this effect still takes them once.
+    const timer = setTimeout(() => {
+      const queuedFiles = takeQueuedFiles(chatId);
+      if (queuedFiles && queuedFiles.files.length > 0) {
+        attachHandedOver(queuedFiles.files);
+      }
+    });
+    return () => clearTimeout(timer);
+  }, [chatId]);
 
   // The message typed on the new-chat page, sent once this page is open.
   useEffect(() => {
@@ -222,6 +236,7 @@ export function ChatThread({
             onStop={thread.stop}
             running={thread.running}
             onEditLast={lastUser?.id ? () => setEditing(true) : undefined}
+            initialText={handoff?.draft ?? ''}
             autoFocus
           />
         </div>
