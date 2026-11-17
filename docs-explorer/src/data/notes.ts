@@ -3555,15 +3555,69 @@ export const notes: SymbolNote[] = [
   {
     symbol: 'frontend/src/app/login/login-form.tsx#LoginForm',
     status: 'verified',
-    summary: 'The sign-in buttons: Google, and dev sign-in in development builds.',
+    summary:
+      'The right side of the sign-in page: the Google button, the terms line, a note on sessions and payments, and dev sign-in in development builds.',
     how: [
-      'Google: the Firebase popup returns an ID token, which is posted to /api/auth/session. The button is disabled until the Firebase web config is set.',
+      'Google: a white button with a round "G" mark. The Firebase popup returns an ID token, which is posted to /api/auth/session. The button is disabled until the Firebase web config is set.',
+      'Below it: links to /terms and /privacy, then a short note that the session lives on the server and card details go only to Razorpay.',
       'Dev sign-in: posts { email } to /api/auth/dev-session.',
       'On success it goes to /. A failure shows a toast with the request reference; closing the Google popup shows nothing.',
     ],
     why: 'One form for both ways in, so sessions start the same way whichever is used.',
     returns: 'The form as JSX.',
     tests: ['frontend/src/app/login/login-form.test.tsx'],
+  },
+  {
+    symbol: 'frontend/src/app/login/page.tsx#LoginPage',
+    status: 'verified',
+    summary: 'The sign-in page: what the app does on the left, the sign-in form on the right.',
+    how: [
+      'Two panels that wrap: the brand panel (logo, headline, four features, footer) on a surface background, and the sign-in panel centred beside it.',
+      'Below 960 px the panels stack. On phones the feature list and footer are hidden, so the Google button shows without scrolling.',
+    ],
+    why: 'The first screen people see says what the app is before asking them to sign in.',
+    returns: 'The page as JSX.',
+  },
+  {
+    symbol: 'frontend/src/components/app-shell/brand.tsx#Logo',
+    status: 'verified',
+    summary: 'The diamond mark in the accent colour, with a lighter right half.',
+    why: 'Shared by the sign-in page, the legal pages and the sidebar, so the brand looks the same everywhere. It is aria-hidden because the name is always beside it.',
+    returns: 'An SVG.',
+  },
+  {
+    symbol: 'frontend/src/components/app-shell/brand.tsx#Wordmark',
+    status: 'verified',
+    summary: 'The name as the brand writes it: "Gilder", then "Ai" in the accent text colour.',
+    why: 'One component for the name, so its look changes in one place.',
+    returns: 'A span.',
+  },
+  {
+    symbol: 'frontend/src/components/legal/legal-page.tsx#LegalPage',
+    status: 'verified',
+    summary:
+      'The frame of the Terms and Privacy pages: a header with the brand and links to both pages, the title, the date and the sections.',
+    why: 'Both pages are public (the sign-in gate covers only /, /c and /settings) and share one readable layout.',
+    returns: 'The page frame as JSX.',
+    tests: ['frontend/src/components/legal/legal-pages.test.tsx'],
+  },
+  {
+    symbol: 'frontend/src/app/privacy/page.tsx#PrivacyPage',
+    status: 'verified',
+    summary:
+      'The privacy policy in plain words: what is collected, why, which services handle it, cookies, how long it is kept, and how to get it deleted.',
+    why: 'Linked from the sign-in page. It names every outside service the app sends data to (Firebase, the AI providers, Tavily, AWS, Razorpay), matching what the code does, and gives the contact address for data requests (ContactEmail, a mail link).',
+    returns: 'The page as JSX.',
+    tests: ['frontend/src/components/legal/legal-pages.test.tsx'],
+  },
+  {
+    symbol: 'frontend/src/app/terms/page.tsx#TermsPage',
+    status: 'verified',
+    summary:
+      'The terms of use in plain words: the service, accounts, credits and test-mode payments, fair use, AI answers, your content and limits.',
+    why: 'Linked from the sign-in page, and needed before payments can go live.',
+    returns: 'The page as JSX.',
+    tests: ['frontend/src/components/legal/legal-pages.test.tsx'],
   },
 
   // -------------------------------------------------------------------------------------------

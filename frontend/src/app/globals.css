@@ -21,6 +21,14 @@
   --color-success: var(--success);
   --color-warning: var(--warning);
   --color-code: var(--code-bg);
+  --color-code-fg: var(--code-text);
+  --color-accent-border: var(--accent-border);
+  --color-danger-soft: var(--danger-soft);
+  --color-success-soft: var(--success-soft);
+  --color-warning-soft: var(--warning-soft);
+  --color-user: var(--user-bg);
+  --color-overlay: var(--overlay);
+  --shadow-raised: var(--shadow);
 
   --font-sans: var(--font-geist-sans), ui-sans-serif, system-ui, sans-serif;
   --font-mono: var(--font-geist-mono), ui-monospace, monospace;

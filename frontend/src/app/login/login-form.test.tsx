@@ -69,6 +69,16 @@ describe('LoginForm', () => {
     );
   });
 
+  it('links the Terms and the Privacy Policy under the Google button', () => {
+    renderForm({ devLogin: false });
+
+    expect(screen.getByRole('link', { name: 'Terms' }).getAttribute('href')).toBe('/terms');
+    expect(screen.getByRole('link', { name: 'Privacy Policy' }).getAttribute('href')).toBe(
+      '/privacy',
+    );
+    expect(screen.getByText(/we never see card details/)).toBeTruthy();
+  });
+
   it('has no dev sign-in when it is off', () => {
     renderForm({ devLogin: false });
 

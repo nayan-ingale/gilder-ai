@@ -1,5 +1,7 @@
 'use client';
 
+import { Lock } from 'lucide-react';
+import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { type FormEvent, useState } from 'react';
 import { Button } from '@/components/ui/button';
@@ -58,18 +60,44 @@ export function LoginForm({ googleReady, devLogin }: LoginFormProps) {
   return (
     <div className="flex flex-col gap-6">
       <div>
-        <Button
-          className="w-full"
+        <button
+          type="button"
           onClick={signInWithGoogle}
           disabled={!googleReady || busy !== null}
+          className="flex min-h-[50px] w-full cursor-pointer items-center justify-center gap-3 rounded-md border border-line-strong bg-raised px-[18px] text-[15px] font-medium text-fg shadow-raised transition-colors hover:bg-sunken focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent disabled:cursor-not-allowed disabled:opacity-60"
         >
+          <span
+            aria-hidden="true"
+            className="flex size-[22px] items-center justify-center rounded-full bg-fg text-[13px] font-bold text-canvas"
+          >
+            G
+          </span>
           {busy === 'google' ? 'Signing in…' : 'Continue with Google'}
-        </Button>
+        </button>
         {googleReady ? null : (
           <p className="mt-2 text-xs text-fg-subtle">
             Google sign-in is not set up on this server yet.
           </p>
         )}
+      </div>
+      <p className="text-[12.5px] leading-[1.55] text-fg-subtle">
+        By continuing you agree to the{' '}
+        <Link href="/terms" className="text-accent-text underline underline-offset-2">
+          Terms
+        </Link>{' '}
+        and{' '}
+        <Link href="/privacy" className="text-accent-text underline underline-offset-2">
+          Privacy Policy
+        </Link>
+        .
+      </p>
+      <div aria-hidden="true" className="h-px bg-line" />
+      <div className="flex items-start gap-2.5 text-[13px] leading-normal text-fg-muted">
+        <Lock size={16} strokeWidth={1.75} aria-hidden="true" className="mt-0.5 shrink-0" />
+        <span>
+          Your session lives on our servers and ends the moment you log out. Payments go through
+          Razorpay; we never see card details.
+        </span>
       </div>
 
       {devLogin ? (

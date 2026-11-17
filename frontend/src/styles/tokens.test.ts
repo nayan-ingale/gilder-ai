@@ -47,6 +47,8 @@ const TEXT_PAIRINGS: [text: string, background: string][] = [
   ['danger', 'bg'],
   ['success', 'bg'],
   ['warning', 'bg'],
+  ['text', 'user-bg'],
+  ['code-text', 'code-bg'],
 ];
 
 describe('design tokens', () => {
