@@ -1,6 +1,6 @@
 'use client';
 
-import { Check, Copy, FileText, Pencil, RotateCcw } from 'lucide-react';
+import { Check, Copy, FileText, Pencil, RefreshCw } from 'lucide-react';
 import { memo, useState } from 'react';
 import { IconButton } from '@/components/ui/button';
 import { cn } from '@/components/ui/cn';
@@ -8,6 +8,7 @@ import type { Citation, Source, ThreadMessage } from '@/lib/turns';
 import { openFile } from '@/lib/uploads';
 import { useGetFileQuery } from '@/store/api';
 import { FilesCard } from './files-card';
+import { agentInfo, creditsLabel } from './composer';
 import { GeneratedFiles } from './generated-files';
 import { Markdown } from './markdown';
 
@@ -27,14 +28,17 @@ export function linkCitations(text: string, sources: readonly Source[] | undefin
   if (!sources?.length) {
     return text;
   }
-  const byNumber = new Map(sources.map((source) => [source.n, source.url]));
+  const byNumber = new Map(sources.map((source) => [source.n, source]));
   return outsideCode(text, (part) =>
     part
       // Some models cite with full-width brackets, like 【1】 or 【1†source】.
       .replace(/【(\d{1,2})(?:†[^】]*)?】/g, '[$1]')
       .replace(/\[(\d{1,2})\](?!\()/g, (marker: string, n: string) => {
-        const url = byNumber.get(Number(n));
-        return url ? `[\\[${n}\\]](${url})` : marker;
+        const source = byNumber.get(Number(n));
+        // The title marks the link as a citation, which the Markdown renderer draws as a pill.
+        return source
+          ? `[${n}](${source.url} "${linkTitle(`Source ${n}: ${source.title || hostOf(source.url)}`)}")`
+          : marker;
       }),
   );
 }
@@ -70,20 +74,27 @@ export function tagPages(text: string, citations: readonly Citation[] | undefine
 
 function Sources({ sources }: { sources: readonly Source[] }) {
   return (
-    <section aria-label="Sources" className="mt-3">
-      <h3 className="mb-1.5 text-xs font-medium text-fg-subtle">Sources</h3>
+    <section aria-label="Sources" className="flex flex-col gap-2">
+      <h3 className="text-[12.5px] font-medium text-fg-subtle">Sources</h3>
       <ol className="flex flex-wrap gap-2">
         {sources.map((source) => (
-          <li key={source.n}>
+          <li key={source.n} className="w-full sm:w-[236px]">
             <a
               href={source.url}
               target="_blank"
               rel="noopener noreferrer nofollow"
               title={source.title}
-              className="inline-flex max-w-64 items-center gap-1.5 rounded-md border border-line bg-raised px-2 py-1 text-xs text-fg-muted hover:bg-surface hover:text-fg"
+              className="flex items-start gap-2.5 rounded-md border border-line bg-surface px-3 py-2.5 text-fg hover:border-line-strong hover:bg-sunken"
             >
-              <span className="font-medium text-fg">{source.n}</span>
-              <span className="truncate">{hostOf(source.url)}</span>
+              <span className="flex size-[22px] shrink-0 items-center justify-center rounded-full border border-line bg-sunken text-[11.5px] font-semibold text-accent-text">
+                {source.n}
+              </span>
+              <span className="flex min-w-0 flex-col gap-0.5">
+                <span className="truncate text-[13px] leading-[1.35] font-medium">
+                  {source.title || hostOf(source.url)}
+                </span>
+                <span className="truncate text-xs text-fg-muted">{hostOf(source.url)}</span>
+              </span>
             </a>
           </li>
         ))}
@@ -154,99 +165,175 @@ function MessageItemView({ message, onRegenerate, onEdit }: MessageItemProps) {
     setTimeout(() => setCopied(false), 1_500);
   }
 
-  return (
-    <li className={cn('group flex flex-col gap-1', isUser ? 'items-end' : 'items-stretch')}>
-      <span className="sr-only">{isUser ? 'You said:' : 'GilderAi said:'}</span>
-      {isUser ? (
-        <>
-          {message.attachments?.length ? (
-            <div className="flex max-w-[85%] flex-wrap justify-end gap-1.5">
-              {message.attachments.map((fileId) => (
-                <AttachmentChip key={fileId} fileId={fileId} />
-              ))}
-            </div>
-          ) : null}
-          <div className="max-w-[85%] rounded-lg bg-sunken px-4 py-2.5 text-sm leading-relaxed whitespace-pre-wrap text-fg">
-            {message.content}
+  if (isUser) {
+    return (
+      <li className="flex flex-col items-end gap-1.5">
+        <span className="sr-only">You said:</span>
+        {message.attachments?.length ? (
+          <div className="flex max-w-[80%] flex-wrap justify-end gap-1.5">
+            {message.attachments.map((fileId) => (
+              <AttachmentChip key={fileId} fileId={fileId} />
+            ))}
           </div>
-        </>
-      ) : (
-        <div className="text-sm leading-relaxed text-fg" aria-busy={writing}>
-          {message.content ? (
-            <Markdown>
-              {tagPages(linkCitations(message.content, message.sources), message.citations)}
-            </Markdown>
-          ) : null}
-          {writing && !message.content ? (
-            <span className="inline-flex gap-1 py-2" aria-label="Writing the answer">
-              {[0, 1, 2].map((dot) => (
-                <span
-                  key={dot}
-                  className="size-1.5 animate-pulse rounded-full bg-fg-subtle"
-                  style={{ animationDelay: `${dot * 150}ms` }}
-                />
-              ))}
-            </span>
-          ) : null}
-          {message.files?.length && !writing ? <FilesCard files={message.files} /> : null}
-          {writing && message.progress ? (
-            <div className="mt-2 flex max-w-sm flex-col gap-1" role="status">
-              <span className="text-xs text-fg-muted">
-                {message.progress.step}… ({message.progress.current} of {message.progress.total})
-              </span>
-              <span className="h-1.5 overflow-hidden rounded-full bg-sunken">
-                <span
-                  className="block h-full rounded-full bg-accent transition-all"
-                  style={{ width: `${(message.progress.current / message.progress.total) * 100}%` }}
-                />
-              </span>
-            </div>
-          ) : null}
-          {message.generated?.length ? <GeneratedFiles fileIds={message.generated} /> : null}
-          {message.sources?.length ? <Sources sources={message.sources} /> : null}
-          {message.citations?.length ? <Citations citations={message.citations} /> : null}
-          {message.status === 'stopped' ? (
-            <p className="mt-1 text-xs text-fg-subtle">Stopped</p>
-          ) : null}
-          {message.status === 'failed' ? (
-            <p className="mt-1 text-xs text-danger">
-              {message.error?.message ?? 'This answer failed. Your credits were not charged.'}
-              {message.error?.requestId ? (
-                <span className="text-fg-subtle"> Reference: {message.error.requestId}</span>
-              ) : null}
-            </p>
-          ) : null}
+        ) : null}
+        <div className="max-w-[80%] rounded-lg bg-user px-4 py-3 text-[15px] leading-[1.55] whitespace-pre-wrap text-fg">
+          {message.content}
         </div>
-      )}
-      {!writing ? (
-        <div
-          className={cn(
-            'flex gap-0.5 opacity-0 transition-opacity group-hover:opacity-100 focus-within:opacity-100 pointer-coarse:opacity-100',
-            isUser ? 'justify-end' : 'justify-start',
-          )}
-        >
+        {!writing ? (
+          <div className="flex gap-0.5">
+            {onEdit ? (
+              <IconButton
+                label="Edit"
+                icon={<Pencil size={16} strokeWidth={1.75} />}
+                size="sm"
+                onClick={onEdit}
+                className="size-9 text-fg-subtle"
+              />
+            ) : null}
+            {message.content ? (
+              <IconButton
+                label={copied ? 'Copied' : 'Copy message'}
+                icon={copied ? <Check size={16} /> : <Copy size={16} strokeWidth={1.75} />}
+                size="sm"
+                onClick={() => void copy()}
+                className="size-9 text-fg-subtle"
+              />
+            ) : null}
+          </div>
+        ) : null}
+      </li>
+    );
+  }
+
+  return (
+    <li className="flex flex-col gap-3.5" aria-busy={writing}>
+      <span className="sr-only">GilderAi said:</span>
+      <AnswerMeta message={message} />
+      {message.sources?.length ? <Sources sources={message.sources} /> : null}
+      <div
+        className={cn(
+          'text-[15.5px] leading-[1.65] text-fg',
+          writing && message.content && 'answer-writing',
+        )}
+      >
+        {message.content ? (
+          <Markdown>
+            {tagPages(linkCitations(message.content, message.sources), message.citations)}
+          </Markdown>
+        ) : null}
+        {writing && !message.content ? (
+          <span className="inline-flex gap-1 py-2" aria-label="Writing the answer">
+            {[0, 1, 2].map((dot) => (
+              <span
+                key={dot}
+                className="size-1.5 animate-pulse rounded-full bg-fg-subtle"
+                style={{ animationDelay: `${dot * 150}ms` }}
+              />
+            ))}
+          </span>
+        ) : null}
+        {message.files?.length && !writing ? <FilesCard files={message.files} /> : null}
+        {writing && message.progress ? (
+          <div className="mt-2 flex max-w-sm flex-col gap-1" role="status">
+            <span className="text-xs text-fg-muted">
+              {message.progress.step}… ({message.progress.current} of {message.progress.total})
+            </span>
+            <span className="h-1.5 overflow-hidden rounded-full bg-sunken">
+              <span
+                className="block h-full rounded-full bg-accent transition-all"
+                style={{ width: `${(message.progress.current / message.progress.total) * 100}%` }}
+              />
+            </span>
+          </div>
+        ) : null}
+        {message.generated?.length ? <GeneratedFiles fileIds={message.generated} /> : null}
+        {message.citations?.length ? <Citations citations={message.citations} /> : null}
+        {message.status === 'failed' ? (
+          <p className="mt-1 text-xs text-danger">
+            {message.error?.message ?? 'This answer failed. Your credits were not charged.'}
+            {message.error?.requestId ? (
+              <span className="text-fg-subtle"> Reference: {message.error.requestId}</span>
+            ) : null}
+          </p>
+        ) : null}
+      </div>
+      {!writing && (message.content || onRegenerate) ? (
+        <div className="-ml-2 flex items-center gap-0.5">
           {message.content ? (
-            <IconButton
-              label={copied ? 'Copied' : 'Copy'}
-              icon={copied ? <Check size={14} /> : <Copy size={14} />}
-              size="sm"
+            <button
+              type="button"
               onClick={() => void copy()}
-            />
-          ) : null}
-          {onEdit ? (
-            <IconButton label="Edit" icon={<Pencil size={14} />} size="sm" onClick={onEdit} />
+              className="inline-flex min-h-9 items-center gap-1.5 rounded-sm px-2.5 text-[13px] text-fg-muted hover:bg-sunken hover:text-fg"
+            >
+              {copied ? (
+                <Check size={15} aria-hidden="true" />
+              ) : (
+                <Copy size={15} strokeWidth={1.75} aria-hidden="true" />
+              )}
+              {copied ? 'Copied' : 'Copy'}
+            </button>
           ) : null}
           {onRegenerate ? (
-            <IconButton
-              label="Regenerate"
-              icon={<RotateCcw size={14} />}
-              size="sm"
+            <button
+              type="button"
               onClick={onRegenerate}
-            />
+              className="inline-flex min-h-9 items-center gap-1.5 rounded-sm px-2.5 text-[13px] text-fg-muted hover:bg-sunken hover:text-fg"
+            >
+              <RefreshCw size={15} strokeWidth={1.75} aria-hidden="true" />
+              Regenerate
+            </button>
           ) : null}
         </div>
       ) : null}
     </li>
+  );
+}
+
+/** "3.2 s", "12 s" or "1 min 5 s". */
+export function duration(ms: number): string {
+  const seconds = ms / 1_000;
+  if (seconds < 10) {
+    return `${seconds.toFixed(1)} s`;
+  }
+  if (seconds < 60) {
+    return `${Math.round(seconds)} s`;
+  }
+  const whole = Math.round(seconds);
+  return `${Math.floor(whole / 60)} min ${whole % 60} s`;
+}
+
+/** Above an answer: which agent wrote it, and what it cost and how long it took. */
+function AnswerMeta({ message }: { message: ThreadMessage }) {
+  const info = agentInfo(message.agent);
+  const details =
+    message.status === 'streaming'
+      ? 'Writing…'
+      : message.status === 'stopped'
+        ? 'Stopped'
+        : message.status === 'failed'
+          ? null
+          : [
+              typeof message.credits === 'number' ? creditsLabel(message.credits) : null,
+              typeof message.latencyMs === 'number'
+                ? `answered in ${duration(message.latencyMs)}`
+                : null,
+            ]
+              .filter(Boolean)
+              .join(' · ') || null;
+  if (!info && !details) {
+    return null;
+  }
+  const Icon = info?.icon;
+  return (
+    <div className="flex flex-wrap items-center gap-2 text-[12.5px] text-fg-muted">
+      {info && Icon ? (
+        <span className="inline-flex items-center gap-1.5 rounded-full border border-accent-border bg-accent-soft py-0.5 pr-2.5 pl-2 font-medium text-accent-text">
+          <Icon size={13} strokeWidth={1.75} aria-hidden="true" />
+          {info.label}
+        </span>
+      ) : null}
+      {details ? <span>{details}</span> : null}
+    </div>
   );
 }
 

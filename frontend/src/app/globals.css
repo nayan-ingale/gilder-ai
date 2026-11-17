@@ -73,6 +73,23 @@
 
 /* Answers rendered from Markdown: calm spacing, built only from the design tokens. */
 @layer components {
+  /* The caret at the end of an answer while it is being written. */
+  .answer-writing .markdown > :last-child::after {
+    content: '';
+    display: inline-block;
+    width: 8px;
+    height: 18px;
+    margin-left: 3px;
+    vertical-align: -3px;
+    border-radius: 2px;
+    background: var(--accent);
+    animation: caret-blink 1s steps(2, start) infinite;
+  }
+  @keyframes caret-blink {
+    50% {
+      opacity: 0;
+    }
+  }
   .markdown > :first-child {
     margin-top: 0;
   }

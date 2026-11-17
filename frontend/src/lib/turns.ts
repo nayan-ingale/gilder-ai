@@ -186,4 +186,7 @@ export type ThreadMessage = Pick<ChatMessage, 'role' | 'content' | 'status'> & {
   progress?: { step: string; current: number; total: number };
   /** Files the answer made, by ID. */
   generated?: string[];
+  /** For a finished answer: the credits it cost and how long it took. */
+  credits?: number;
+  latencyMs?: number;
 };

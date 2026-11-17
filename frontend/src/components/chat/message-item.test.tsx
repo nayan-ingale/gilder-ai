@@ -18,13 +18,13 @@ describe('linkCitations', () => {
     const text =
       'Fact [1], more [2][1], none [7], a [link](https://x.dev) and `arr[1]`.\n```\nlist[2]\n```';
 
+    const one = '[1](https://devblogs.microsoft.com/typescript "Source 1: TypeScript blog")';
+    const two = '[2](https://en.wikipedia.org/wiki/TypeScript "Source 2: Wikipedia")';
     expect(linkCitations(text, SOURCES)).toBe(
-      'Fact [\\[1\\]](https://devblogs.microsoft.com/typescript), more [\\[2\\]](https://en.wikipedia.org/wiki/TypeScript)[\\[1\\]](https://devblogs.microsoft.com/typescript), none [7], a [link](https://x.dev) and `arr[1]`.\n```\nlist[2]\n```',
+      `Fact ${one}, more ${two}${one}, none [7], a [link](https://x.dev) and \`arr[1]\`.\n\`\`\`\nlist[2]\n\`\`\``,
     );
     expect(linkCitations('No sources [1]', undefined)).toBe('No sources [1]');
-    expect(linkCitations('Wide 【2】 and 【1†source】', SOURCES)).toBe(
-      'Wide [\\[2\\]](https://en.wikipedia.org/wiki/TypeScript) and [\\[1\\]](https://devblogs.microsoft.com/typescript)',
-    );
+    expect(linkCitations('Wide 【2】 and 【1†source】', SOURCES)).toBe(`Wide ${two} and ${one}`);
   });
 });
 
@@ -86,13 +86,39 @@ describe('MessageItem', () => {
       </ol>,
     );
 
-    const citation = screen.getByRole('link', { name: '[1]' });
+    // The citation is a small pill named after its source.
+    const citation = screen.getByRole('link', { name: 'Source 1: TypeScript blog' });
     expect(citation.getAttribute('href')).toBe('https://devblogs.microsoft.com/typescript');
+    expect(citation.textContent).toBe('1');
     const sources = screen.getByRole('region', { name: 'Sources' });
     expect(
       within(sources)
         .getAllByRole('link')
         .map((link) => link.textContent),
-    ).toEqual(['1devblogs.microsoft.com', '2en.wikipedia.org']);
+    ).toEqual(['1TypeScript blogdevblogs.microsoft.com', '2Wikipediaen.wikipedia.org']);
+    // Above the answer: the agent that wrote it.
+    expect(screen.getByText('Search')).toBeTruthy();
+  });
+
+  it('says what a finished answer cost and how long it took', () => {
+    render(
+      <ol>
+        <MessageItem
+          message={{
+            key: 'a2',
+            id: 'a2',
+            role: 'assistant',
+            content: 'Hello.',
+            status: 'complete',
+            agent: 'chat',
+            credits: 1,
+            latencyMs: 3_240,
+          }}
+        />
+      </ol>,
+    );
+
+    expect(screen.getByText('1 credit · answered in 3.2 s')).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Copy' })).toBeTruthy();
   });
 });

@@ -3893,13 +3893,31 @@ export const notes: SymbolNote[] = [
   {
     symbol: 'frontend/src/components/chats/chat-header.tsx#ChatHeader',
     status: 'verified',
-    summary: "The chat page's title bar, with a pin icon when the chat is pinned.",
+    summary:
+      "The chat page's title bar: the title, the day and message count, a pin button and the chat's options (Rename, Delete chat).",
     how: [
-      'It starts from the chat the server rendered, then follows getChat, which it also fetches in the browser.',
-      "It sets the tab title to '<title> · GilderAi' whenever the title changes.",
+      'It starts from the chat the server rendered, then follows getChat, which it also fetches in the browser. ChatThread passes the live message count.',
+      "The day ('Today', 'Yesterday' or '12 Nov', dayLabel) depends on the visitor's clock, so only the browser fills it in.",
+      'The pin button toggles the pin (aria-pressed); the options menu opens the shared rename and delete dialogs (useChatActions).',
+      "It stays at the top while the conversation scrolls, and sets the tab title to '<title> · GilderAi' whenever the title changes.",
     ],
-    why: 'A rename or pin from the sidebar marks this chat stale in the cache, so the header and the tab title follow without a reload. generateMetadata sets the first title; this keeps it current.',
+    why: 'A rename or pin from the sidebar marks this chat stale in the cache, so the header and the tab title follow without a reload, and the same actions are one click away here.',
     returns: 'The header as JSX.',
+    tests: ['frontend/src/components/chats/chat-header.test.tsx'],
+  },
+  {
+    symbol: 'frontend/src/components/chats/chat-actions.tsx#useChatActions',
+    status: 'verified',
+    summary: 'Rename, pin and delete for one chat, shared by its sidebar row and its header.',
+    how: [
+      "togglePin flips the pin with updateChat; ChatRow passes a callback that puts focus back on the moved row's menu button.",
+      'chooseDialog marks the rename or delete dialog, which opens only after the menu has closed (onMenuCloseAutoFocus), so the dialog can return focus to the menu button.',
+      "Rename sends the trimmed title (an empty or unchanged one just closes); Delete asks first ('Delete chat?') and goes to / if the deleted chat was open.",
+      "A failed call shows a toast, such as 'Could not rename the chat', with the service's message and request ID (errorMessage).",
+    ],
+    why: 'One place for the chat actions, so the row and the header behave the same; the list changes at once because updateChat and deleteChat change the cache and undo it on failure.',
+    returns: '{ togglePin, chooseDialog, onMenuCloseAutoFocus, dialogs }',
+    tests: [FRONTEND_CHATS_TEST, 'frontend/src/components/chats/chat-header.test.tsx'],
   },
   {
     symbol: 'frontend/src/server/gateway-fetch.ts#gatewayGet',
@@ -3939,7 +3957,7 @@ export const notes: SymbolNote[] = [
     symbol: 'frontend/src/app/(app)/c/[chatId]/page.tsx#ChatPage',
     status: 'verified',
     summary: 'One chat at /c/<id>, with its history rendered on the server.',
-    why: 'It shows a skeleton in a Suspense boundary while ChatView loads the chat with getChatWithHistory. ChatView then renders ChatHeader and ChatThread with the latest messages, or calls notFound() when the chat is not available. ChatThread is a client component, but the server renders it to HTML too, so the history shows on first paint.',
+    why: 'It shows a skeleton in a Suspense boundary while ChatView loads the chat with getChatWithHistory. ChatView then renders ChatThread (with its ChatHeader) and the latest messages, or calls notFound() when the chat is not available. ChatThread is a client component, but the server renders it to HTML too, so the history shows on first paint.',
     returns: 'The page as JSX.',
   },
   {
@@ -4349,6 +4367,14 @@ export const notes: SymbolNote[] = [
     tests: ['frontend/src/components/chat/new-chat.test.tsx'],
   },
   {
+    symbol: 'frontend/src/components/chat/composer.tsx#agentInfo',
+    status: 'verified',
+    summary: "The label and icon of the agent that wrote an answer, such as 'Search' or 'PDF Q&A'.",
+    why: 'The answer pill names the agent the same way the composer menu does, including the two agents only chosen automatically (PDF and image questions).',
+    returns: '{ label, icon }, or null for none or an unknown agent.',
+    tests: ['frontend/src/components/chat/message-item.test.tsx'],
+  },
+  {
     symbol: 'frontend/src/components/chat/new-chat.tsx#NewChatComposer',
     status: 'verified',
     summary: "The new-chat page's composer and its four suggestion cards.",
@@ -4407,13 +4433,16 @@ export const notes: SymbolNote[] = [
   {
     symbol: 'frontend/src/components/chat/message-item.tsx#MessageItemView',
     status: 'verified',
-    summary: "One message: the user's on the right, answers on the left as Markdown.",
+    summary:
+      "One message: the user's in a bubble on the right, answers on the left with their agent, sources and actions.",
     how: [
-      "The user's text keeps its line breaks. An answer renders as Markdown with its citations linked, three pulsing dots while it is empty, and Stopped or the failure message (with its reference) under it.",
-      "A finished code answer shows its files card, and a search answer its sources. A user's message shows a chip per attached file (AttachmentChip). While a file is being made, a progress bar shows the step and how far it has got; the files an answer made show under it (GeneratedFiles), and a PDF answer shows its page marks as tags (tagPages) and lists its pages (Citations).",
-      'Copy is on every finished message; Regenerate and Edit only where the thread offers them.',
+      "The user's text keeps its line breaks, in a bubble with Edit (on the latest message) and Copy under it, and a chip per attached file (AttachmentChip).",
+      "Above an answer: a pill with the agent that wrote it (agentInfo) and 'Writing…', 'Stopped', or what it cost and how long it took ('5 credits · answered in 3.2 s', duration).",
+      'A search answer shows its sources as cards above the text, and its [n] citations as small numbered pills (linkCitations). The text is Markdown at a reading size, with a blinking caret at its end while it streams and three pulsing dots while it is empty.',
+      'A finished code answer shows its files card. While a file is being made, a progress bar shows the step; the files an answer made show under it (GeneratedFiles), and a PDF answer shows its page marks as tags (tagPages) and lists its pages (Citations). A failure shows its message and reference.',
+      'Copy and Regenerate show as text buttons under a finished answer; Regenerate only where the thread offers it.',
     ],
-    why: 'Each message carries just the actions that make sense for it.',
+    why: 'Each message carries just the actions that make sense for it, and an answer says up front who wrote it and what it cost.',
     returns: 'A list item as JSX.',
     tests: [
       'frontend/src/components/chat/message-item.test.tsx',
@@ -4423,8 +4452,13 @@ export const notes: SymbolNote[] = [
   {
     symbol: 'frontend/src/components/chat/message-item.tsx#linkCitations',
     status: 'verified',
-    summary: "Turns an answer's [n] markers into links to source n.",
-    why: 'Some models cite with full-width brackets, like 【1】 or 【1†source】, so those become [1] first. Numbers with no source, markers already followed by a link, and anything inside code spans or blocks are left as written.',
+    summary: "Turns an answer's [n] markers into citation links to source n.",
+    how: [
+      "Each [n] with a source becomes a Markdown link to the source, titled 'Source n: <title>'; the Markdown renderer draws such links as small numbered pills, named by that title for screen readers.",
+      'Some models cite with full-width brackets, like 【1】 or 【1†source】, so those become [1] first.',
+      'Numbers with no source, markers already followed by a link, and anything inside code spans or blocks are left as written.',
+    ],
+    why: 'Citations read as quiet numbers next to the facts, and each one opens its source.',
     returns: 'The Markdown text with the citations linked.',
     tests: ['frontend/src/components/chat/message-item.test.tsx'],
   },
@@ -4448,7 +4482,7 @@ export const notes: SymbolNote[] = [
     how: [
       'react-markdown with remark-gfm (tables, lists, strikethrough). Raw HTML in the text is shown as text, never run, and javascript: links are removed (its defaults).',
       'An image the model wrote becomes a plain link, never loaded (SEC-10).',
-      'Links open in a new tab with noopener, noreferrer and nofollow. A #page- link (from tagPages) is shown as a small page tag instead.',
+      "Links open in a new tab with noopener, noreferrer and nofollow. A #page- link (from tagPages) is shown as a small page tag instead, and a citation link (from linkCitations: a number titled 'Source n: …') as a small accent pill.",
       'Code blocks get a language label, a copy button and highlight.js colours; tables scroll sideways.',
       'The text is split into its top-level blocks (splitBlocks) and each block renders separately and memoised, so while an answer streams only its last block is parsed, highlighted and rendered again.',
     ],

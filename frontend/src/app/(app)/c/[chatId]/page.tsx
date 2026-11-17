@@ -1,7 +1,6 @@
 import type { Metadata } from 'next';
 import { notFound } from 'next/navigation';
 import { Suspense } from 'react';
-import { ChatHeader } from '@/components/chats/chat-header';
 import { ChatThread } from '@/components/chat/chat-thread';
 import { Skeleton } from '@/components/ui/skeleton';
 import { getChatWithHistory } from '@/server/chats';
@@ -30,8 +29,11 @@ async function ChatView({ params }: { params: Promise<{ chatId: string }> }) {
   }
   return (
     <div className="flex min-h-0 flex-1 flex-col">
-      <ChatHeader chat={loaded.chat} />
-      <ChatThread chatId={loaded.chat.id} initialMessages={loaded.messages.items} />
+      <ChatThread
+        chatId={loaded.chat.id}
+        chat={loaded.chat}
+        initialMessages={loaded.messages.items}
+      />
     </div>
   );
 }
@@ -39,10 +41,11 @@ async function ChatView({ params }: { params: Promise<{ chatId: string }> }) {
 function ChatSkeleton() {
   return (
     <div className="flex flex-1 flex-col" aria-label="Loading the chat">
-      <div className="flex h-14 items-center border-b border-line px-4">
-        <Skeleton className="h-5 w-48" />
+      <div className="flex min-h-[60px] flex-col justify-center gap-1.5 border-b border-line px-4 sm:px-7">
+        <Skeleton className="h-4 w-48" />
+        <Skeleton className="h-3 w-28" />
       </div>
-      <div className="mx-auto flex w-full max-w-3xl flex-col gap-6 px-4 py-8">
+      <div className="mx-auto flex w-full max-w-[780px] flex-col gap-7 px-4 py-8 sm:px-7">
         <Skeleton className="h-10 w-2/3 self-end" />
         <Skeleton className="h-24 w-full" />
         <Skeleton className="h-10 w-1/2 self-end" />

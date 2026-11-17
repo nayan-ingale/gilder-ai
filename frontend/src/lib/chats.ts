@@ -20,6 +20,10 @@ export interface ChatMessage {
   artifacts: unknown[];
   sources: unknown[];
   citations: unknown[];
+  /** For a finished answer: what it cost, and how long it took in all and to its first word. */
+  credits?: number | null;
+  latencyMs?: number | null;
+  firstTokenMs?: number | null;
   createdAt: string;
 }
 

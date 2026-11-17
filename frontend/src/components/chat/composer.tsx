@@ -110,6 +110,20 @@ const built = new Set<string>(BUILT_AGENTS);
 const OFFERED = AGENT_OPTIONS.filter((option) => built.has(option.id));
 const MAX_LENGTH = 20_000;
 
+/** The label and icon of the agent that wrote an answer, or null for none or an unknown one. */
+export function agentInfo(
+  agent: string | null | undefined,
+): { label: string; icon: (typeof AGENT_OPTIONS)[number]['icon'] } | null {
+  const option = AGENT_OPTIONS.find((candidate) => candidate.id === agent);
+  if (option) {
+    return { label: option.label, icon: option.icon };
+  }
+  if (agent === 'pdf_qa') {
+    return { label: 'PDF Q&A', icon: FileText };
+  }
+  return agent === 'image_qa' ? { label: 'Image Q&A', icon: ImageIcon } : null;
+}
+
 /** "1 credit" or "10 credits". */
 export function creditsLabel(cost: number): string {
   return `${cost} ${cost === 1 ? 'credit' : 'credits'}`;

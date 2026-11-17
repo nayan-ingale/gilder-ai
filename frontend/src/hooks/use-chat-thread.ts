@@ -37,6 +37,8 @@ export function toThreadMessage(message: ChatMessage): ThreadMessage {
     ...(message.attachments.length > 0 ? { attachments: message.attachments } : {}),
     ...(message.citations.length > 0 ? { citations: message.citations as Citation[] } : {}),
     ...(message.fileRefs?.length ? { generated: message.fileRefs } : {}),
+    ...(typeof message.credits === 'number' ? { credits: message.credits } : {}),
+    ...(typeof message.latencyMs === 'number' ? { latencyMs: message.latencyMs } : {}),
   };
 }
 
@@ -104,6 +106,8 @@ export function useChatThread(chatId: string, initial: ChatMessage[]): ChatThrea
       }
       const before = messages;
       const answerKey = `answer-${request.clientMessageId}`;
+      // When the request left, so a finished answer can say how long it took.
+      const startedAt = Date.now();
       const userKey = `user-${request.clientMessageId}`;
       const updateAnswer = (change: (message: ThreadMessage) => ThreadMessage) =>
         setMessages((current) =>
@@ -189,6 +193,7 @@ export function useChatThread(chatId: string, initial: ChatMessage[]): ChatThrea
               addTextNextFrame(turnEvent.data.text);
               break;
             case 'usage':
+              updateAnswer((message) => ({ ...message, credits: turnEvent.data.creditsCharged }));
               dispatch(
                 api.util.updateQueryData('getAccount', undefined, (draft) => {
                   draft.account.balance = turnEvent.data.balance;
@@ -231,6 +236,7 @@ export function useChatThread(chatId: string, initial: ChatMessage[]): ChatThrea
             const finished = {
               ...message,
               status: stopped ? ('stopped' as const) : ('complete' as const),
+              ...(stopped ? {} : { latencyMs: Date.now() - startedAt }),
             };
             delete finished.progress;
             return finished;

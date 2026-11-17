@@ -58,6 +58,14 @@ function CodeBlock({ children }: { children?: ReactNode }) {
   );
 }
 
+/** A citation link: its text is a number and its title starts with "Source". */
+function isCitation(title: string | undefined, children: React.ReactNode): boolean {
+  const text = Array.isArray(children) ? children.join('') : children;
+  return (
+    Boolean(title?.startsWith('Source ')) && typeof text === 'string' && /^\d{1,2}$/.test(text)
+  );
+}
+
 const components: Components = {
   a: ({ href, title, children }) =>
     // A page mark of a PDF answer (see tagPages): a small tag, with the cited passage on hover.
@@ -68,6 +76,18 @@ const components: Components = {
       >
         {children}
       </span>
+    ) : isCitation(title, children) ? (
+      // A numbered citation of a search answer (see linkCitations): a small pill to the source.
+      <a
+        href={href}
+        target="_blank"
+        rel="noopener noreferrer nofollow"
+        title={title}
+        aria-label={title}
+        className="mx-0.5 inline-flex h-[18px] min-w-[18px] items-center justify-center rounded-full bg-accent-soft px-1 align-[2px] text-[11px] leading-none font-semibold text-accent-text no-underline hover:bg-accent hover:text-accent-ink"
+      >
+        {children}
+      </a>
     ) : (
       <a href={href} target="_blank" rel="noopener noreferrer nofollow">
         {children}

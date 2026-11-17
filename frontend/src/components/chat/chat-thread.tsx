@@ -6,7 +6,8 @@ import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/input';
 import { useToast } from '@/components/ui/toast';
 import { useChatThread } from '@/hooks/use-chat-thread';
-import type { ChatMessage } from '@/lib/chats';
+import { ChatHeader } from '@/components/chats/chat-header';
+import type { ChatMessage, ChatSummary } from '@/lib/chats';
 import { ApiError } from '@/lib/api';
 import { peekQueuedFiles, takeQueuedFiles } from '@/lib/pending-files';
 import { pdfReadingState, uploadFile, uploadProblem } from '@/lib/uploads';
@@ -26,12 +27,17 @@ function scrollToEnd(marker: HTMLElement | null) {
   }
 }
 
-/** A chat's conversation and its composer. A new chat's first message is sent on arrival. */
+/**
+ * A chat's header, conversation and composer. A new chat's first message is sent on arrival.
+ * The header is left out when no chat summary is given.
+ */
 export function ChatThread({
   chatId,
+  chat,
   initialMessages,
 }: {
   chatId: string;
+  chat?: ChatSummary;
   initialMessages: ChatMessage[];
 }) {
   const thread = useChatThread(chatId, initialMessages);
@@ -175,6 +181,7 @@ export function ChatThread({
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
+      {chat ? <ChatHeader chat={chat} messageCount={thread.messages.length} /> : null}
       {thread.messages.length === 0 ? (
         <div className="flex flex-1 flex-col items-center justify-center gap-2 px-4 text-center">
           <p className="text-base text-fg">No messages yet</p>
@@ -183,7 +190,7 @@ export function ChatThread({
       ) : (
         <ol
           aria-label="Messages"
-          className="mx-auto flex w-full max-w-3xl flex-1 flex-col gap-6 px-4 py-8"
+          className="mx-auto flex w-full max-w-[780px] flex-1 flex-col gap-7 px-4 pt-8 pb-4 sm:px-7"
         >
           {thread.messages.map((message, index) =>
             editing && index === lastUserIndex ? (
@@ -224,8 +231,8 @@ export function ChatThread({
       )}
       {/* The scroll target sits after the list: a list may only contain list items. */}
       <div ref={bottom} aria-hidden="true" />
-      <div className="sticky bottom-0 bg-gradient-to-t from-canvas from-70% to-transparent px-4 pt-6 pb-4">
-        <div className="mx-auto w-full max-w-3xl">
+      <div className="sticky bottom-0 bg-gradient-to-t from-canvas from-70% to-transparent px-4 pt-4 pb-5 sm:px-7">
+        <div className="mx-auto flex w-full max-w-[780px] flex-col gap-2">
           <Composer
             onSend={sendWithAttachments}
             attachments={attachments}
@@ -237,8 +244,12 @@ export function ChatThread({
             running={thread.running}
             onEditLast={lastUser?.id ? () => setEditing(true) : undefined}
             initialText={handoff?.draft ?? ''}
+            placeholder="Reply to GilderAi"
             autoFocus
           />
+          <p className="hidden text-center text-xs text-fg-subtle sm:block">
+            Esc stops the answer · ↑ edits your last message
+          </p>
         </div>
       </div>
     </div>
