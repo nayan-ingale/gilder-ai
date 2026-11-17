@@ -46,6 +46,10 @@ export interface MessageUpdate {
   citations?: Record<string, unknown>[];
   /** Files the answer made, by ID. */
   fileRefs?: string[];
+  /** A finished answer's cost and timing. */
+  credits?: number;
+  latencyMs?: number;
+  firstTokenMs?: number;
 }
 
 /** A finished message from history, with its ID. */
@@ -155,6 +159,7 @@ export interface UsageMetadata {
   inputTokens?: number;
   outputTokens?: number;
   latencyMs?: number;
+  firstTokenMs?: number;
   chatId?: string;
   messageId?: string;
 }

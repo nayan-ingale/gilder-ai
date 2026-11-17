@@ -1724,13 +1724,14 @@ export const notes: SymbolNote[] = [
     status: 'verified',
     summary: 'Turns a message document into what the API shows of a message.',
     how: [
-      'It returns id, role, content, agent, status, clientMessageId, attachments, fileRefs, artifacts, sources, citations and createdAt.',
-      'An agent or clientMessageId that is not set becomes null, so the shape is always the same.',
+      'It returns id, role, content, agent, status, clientMessageId, attachments, fileRefs, artifacts, sources, citations, credits, latencyMs, firstTokenMs and createdAt.',
+      'credits, latencyMs and firstTokenMs are set on a finished answer (what it cost, its total time and the time to its first word).',
+      'An agent, clientMessageId or timing that is not set becomes null, so the shape is always the same.',
       'userId, conversationId and supersededBy stay inside the service.',
     ],
     why: "As with toChat, what leaves the service is chosen in one place. The frontend's ChatMessage type has the same shape.",
     returns:
-      '{ id, role, content, agent, status, clientMessageId, attachments, fileRefs, artifacts, sources, citations, createdAt }',
+      '{ id, role, content, agent, status, clientMessageId, attachments, fileRefs, artifacts, sources, citations, credits, latencyMs, firstTokenMs, createdAt }',
     tests: [CHAT_MODELS_TEST, CHAT_ROUTES_TEST],
   },
   {
@@ -2357,7 +2358,7 @@ export const notes: SymbolNote[] = [
       'It opens the event stream, registers the answer with the stop signals under its answer ID, and aborts the answer if the client goes away before the end.',
       "It sends meta (the turn and message IDs) and agent (the agent and why it was chosen), and starts titling a new chat (title 'New chat') at the same time.",
       'It runs the agent with the user, the chat, the attachments and the answer ID, and sends each piece of text as a token event, sources as a sources event, code files as an artifact event, PDF passages as a citations event, each part of making a file as a progress event, and each file made as a file event.',
-      'Once the answer is done: it fills in the answer as complete with its sources, code files, citations and the IDs of the files it made (fileRefs), commits the credits with the model, tokens, latency, chat and message, sends usage (credits charged and the new balance), appends the turn to the memory cache (or drops the cache when regenerate or edit changed the history), sends the title if one was made, and sends done.',
+      'Once the answer is done: it fills in the answer as complete with its sources, code files, citations, the IDs of the files it made (fileRefs), its credits and its timing (latencyMs in all, firstTokenMs to the first word), commits the credits with the model, tokens, the same timing, chat and message, sends usage (credits charged and the new balance), appends the turn to the memory cache (or drops the cache when regenerate or edit changed the history), sends the title if one was made, and sends done.',
       'It always unregisters the answer from the stop signals.',
       'Anything that goes wrong, a stop included, goes to settleUnfinished.',
     ],

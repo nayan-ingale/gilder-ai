@@ -60,6 +60,9 @@ const updateMessageBody = z
     artifacts: records.optional(),
     sources: records.optional(),
     citations: records.optional(),
+    credits: z.number().int().min(0).max(1_000_000).optional(),
+    latencyMs: z.number().int().min(0).max(86_400_000).optional(),
+    firstTokenMs: z.number().int().min(0).max(86_400_000).optional(),
   })
   .strict()
   .refine((body) => Object.keys(body).length > 0, 'Give at least one field');

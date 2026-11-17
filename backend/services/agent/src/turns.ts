@@ -478,9 +478,14 @@ async function streamAnswer(deps: TurnDeps, res: Response, turn: Turn): Promise<
       }
     }
 
+    const latencyMs = Date.now() - started;
+    const firstTokenMs = firstTokenAt === undefined ? undefined : firstTokenAt - started;
+    const timing = { latencyMs, ...(firstTokenMs === undefined ? {} : { firstTokenMs }) };
     await deps.chat.updateMessage(userId, turn.messageIds.answer, {
       content: text,
       status: 'complete',
+      credits: reservation.amount,
+      ...timing,
       ...(sources ? { sources } : {}),
       ...(artifacts ? { artifacts } : {}),
       ...(citations ? { citations } : {}),
@@ -489,7 +494,7 @@ async function streamAnswer(deps: TurnDeps, res: Response, turn: Turn): Promise<
     const committed = await deps.billing.commit(userId, reservation.id, {
       ...(model ? { model } : {}),
       ...usage,
-      latencyMs: Date.now() - started,
+      ...timing,
       chatId,
       messageId: turn.messageIds.answer,
     });

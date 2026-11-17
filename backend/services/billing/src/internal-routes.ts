@@ -31,6 +31,7 @@ const commitBody = z
         inputTokens: count.optional(),
         outputTokens: count.optional(),
         latencyMs: count.optional(),
+        firstTokenMs: count.optional(),
         chatId: z.string().max(64).optional(),
         messageId: z.string().max(64).optional(),
       })

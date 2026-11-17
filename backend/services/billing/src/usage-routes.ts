@@ -36,6 +36,7 @@ interface UsageMetadata {
   inputTokens?: number;
   outputTokens?: number;
   latencyMs?: number;
+  firstTokenMs?: number;
   chatId?: string;
 }
 
@@ -111,6 +112,7 @@ export function usageRouter(): Router {
           inputTokens: metadata.inputTokens ?? null,
           outputTokens: metadata.outputTokens ?? null,
           latencyMs: metadata.latencyMs ?? null,
+          firstTokenMs: metadata.firstTokenMs ?? null,
           chatId: metadata.chatId ?? null,
         };
       }),

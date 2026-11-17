@@ -304,7 +304,12 @@ describe('payments and usage', () => {
       ['chat', 'turn-0000003'],
     ] as const) {
       const { reservation } = await reserveCredits({ userId: 'u1', agent, idempotencyKey: key });
-      await commitCredits('u1', reservation.id, { model: 'm', outputTokens: 10, latencyMs: 500 });
+      await commitCredits('u1', reservation.id, {
+        model: 'm',
+        outputTokens: 10,
+        latencyMs: 500,
+        firstTokenMs: 120,
+      });
     }
     const client = await as('u1');
 
@@ -334,6 +339,7 @@ describe('payments and usage', () => {
       model: 'm',
       outputTokens: 10,
       latencyMs: 500,
+      firstTokenMs: 120,
     });
   });
 });

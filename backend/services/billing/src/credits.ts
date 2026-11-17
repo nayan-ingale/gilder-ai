@@ -162,6 +162,7 @@ export interface UsageMetadata {
   inputTokens?: number;
   outputTokens?: number;
   latencyMs?: number;
+  firstTokenMs?: number;
   chatId?: string;
   messageId?: string;
 }

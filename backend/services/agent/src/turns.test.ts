@@ -274,6 +274,12 @@ describe('POST /chats/:chatId/turns', () => {
       { role: 'user', content: 'Plan a 2-day Goa trip', status: 'complete' },
       { role: 'assistant', content: answer, status: 'complete', agent: 'chat' },
     ]);
+    // The saved answer keeps what it cost and how long it took, in all and to its first word.
+    const saved = history[1] as unknown as Record<string, number>;
+    expect(saved.credits).toBe(1);
+    expect(saved.latencyMs).toBeGreaterThanOrEqual(0);
+    expect(saved.firstTokenMs).toBeGreaterThanOrEqual(0);
+    expect(saved.firstTokenMs).toBeLessThanOrEqual(saved.latencyMs!);
     expect(await balanceOf(me)).toBe(99);
     expect(await store.redis.exists(`turn-lock:${chatId}:client-0001`)).toBe(0);
   });

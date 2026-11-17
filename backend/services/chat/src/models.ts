@@ -55,6 +55,10 @@ const messageSchema = new Schema(
     artifacts: { type: [Schema.Types.Mixed], default: [] },
     sources: { type: [Schema.Types.Mixed], default: [] },
     citations: { type: [Schema.Types.Mixed], default: [] },
+    /** For a finished answer: the credits it cost, and how long it took in all and to its first word. */
+    credits: { type: Number, min: 0 },
+    latencyMs: { type: Number, min: 0 },
+    firstTokenMs: { type: Number, min: 0 },
   },
   { timestamps: true },
 );
@@ -120,6 +124,9 @@ export interface MessageView {
   artifacts: unknown[];
   sources: unknown[];
   citations: unknown[];
+  credits: number | null;
+  latencyMs: number | null;
+  firstTokenMs: number | null;
   createdAt: string;
 }
 
@@ -136,6 +143,9 @@ export function toMessage(message: MessageDocument): MessageView {
     artifacts: message.artifacts,
     sources: message.sources,
     citations: message.citations,
+    credits: message.credits ?? null,
+    latencyMs: message.latencyMs ?? null,
+    firstTokenMs: message.firstTokenMs ?? null,
     createdAt: message.createdAt.toISOString(),
   };
 }
