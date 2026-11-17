@@ -328,8 +328,16 @@ export const deploymentPage: DocPage = {
           text: 'on:\n  workflow_dispatch:',
           caption: 'Deploys start only by hand',
         },
+        {
+          kind: 'text',
+          text: "`deploy/README.md` gives the setup in order: a server with a fixed IP and ports 80 and 443 open, the domain's `A` record, the settings files next to `compose.yml` (production values, fresh signing keys), a deploy-only SSH key with the server's host key pinned, the repository's secrets and variables, the first run, then the outside services (Firebase authorized domain, consent screen, S3 CORS origin, Razorpay webhook), the health check and the safety nets. It also lists the everyday server commands; any that create containers need `TAG` set to a deployed commit, because the images are private and the server holds only the versions it was deployed with.",
+        },
       ],
-      refs: [{ file: '.github/workflows/deploy.yml' }, { file: 'deploy/compose.yml' }],
+      refs: [
+        { file: '.github/workflows/deploy.yml' },
+        { file: 'deploy/compose.yml' },
+        { file: 'deploy/README.md' },
+      ],
     },
     {
       id: 'backups',

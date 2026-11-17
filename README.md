@@ -121,7 +121,7 @@ The whole app runs on one server with Docker Compose, behind Caddy:
 - **Backups:** `deploy/backup.sh` copies MongoDB to S3 nightly from cron and keeps a week of copies on the server.
 - **Monitoring:** `GET /api/health` answers 200 only when the web server reaches a ready gateway (503 otherwise), so one uptime monitor covers Caddy, the web server, the gateway and Redis.
 
-See [`deploy/compose.yml`](deploy/compose.yml) for the files the server needs.
+[`deploy/README.md`](deploy/README.md) walks through putting the app on a fresh server, and lists the everyday commands.
 
 ## Project layout
 
