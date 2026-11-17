@@ -95,11 +95,11 @@ test.describe('credits', () => {
 });
 
 test.describe('account', () => {
-  test('signs out and is sent to sign-in', async ({ page }) => {
+  test('logs out and is sent to sign-in', async ({ page }) => {
     await signIn(page);
     await page.goto('/');
-    await page.getByRole('button', { name: /E2E Tester/ }).click();
-    await page.getByRole('menuitem', { name: 'Sign out' }).click();
+    await page.getByRole('button', { name: 'Account menu' }).click();
+    await page.getByRole('menuitem', { name: 'Log out' }).click();
 
     await expect(page).toHaveURL(/\/login$/);
     await page.goto('/');

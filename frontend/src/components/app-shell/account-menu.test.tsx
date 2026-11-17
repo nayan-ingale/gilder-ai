@@ -3,6 +3,8 @@ import { cleanup, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ToastProvider } from '@/components/ui/toast';
+import { StoreProvider } from '@/store/store';
+import { json, mockApi } from '@/test/mock-api';
 import type { Profile } from '@/server/session';
 import { AccountMenu } from './account-menu';
 
@@ -41,41 +43,58 @@ afterEach(() => {
   vi.clearAllMocks();
 });
 
-function openMenu() {
+function renderMenu() {
   render(
-    <ToastProvider>
-      <AccountMenu user={user} />
-    </ToastProvider>,
+    <StoreProvider>
+      <ToastProvider>
+        <AccountMenu user={user} />
+      </ToastProvider>
+    </StoreProvider>,
   );
-  return userEvent.click(screen.getByRole('button', { name: /Nayan Ingale/ }));
+}
+
+function openMenu() {
+  renderMenu();
+  return userEvent.click(screen.getByRole('button', { name: 'Account menu' }));
 }
 
 describe('AccountMenu', () => {
-  it('shows who is signed in', () => {
-    render(
-      <ToastProvider>
-        <AccountMenu user={user} />
-      </ToastProvider>,
-    );
+  it('shows who is signed in, with the email until the plan has loaded', () => {
+    renderMenu();
 
     expect(screen.getByText('Nayan Ingale')).toBeTruthy();
     expect(screen.getByText('nayan@example.com')).toBeTruthy();
   });
 
-  it('changes the theme and marks the current choice', async () => {
-    await openMenu();
-    await userEvent.click(screen.getByRole('menuitem', { name: /Dark/ }));
+  it('shows the plan under the name once billing answers', async () => {
+    mockApi(
+      () => (call) =>
+        call.path === '/api/billing/account'
+          ? json({ account: { plan: 'starter', planExpiresAt: null, balance: 40 } })
+          : new Response(null, { status: 204 }),
+    );
+    renderMenu();
 
-    expect(chooseTheme).toHaveBeenCalledWith('dark');
-    await userEvent.click(screen.getByRole('button', { name: /Nayan Ingale/ }));
-    expect(
-      screen.getByRole('menuitem', { name: /Dark/ }).querySelector('[aria-label="selected"]'),
-    ).not.toBeNull();
+    expect(await screen.findByText('Starter plan')).toBeTruthy();
   });
 
-  it('signs out and goes to the sign-in page', async () => {
+  it('changes the theme and marks the current choice', async () => {
     await openMenu();
-    await userEvent.click(screen.getByRole('menuitem', { name: 'Sign out' }));
+    expect(screen.getByRole('menuitemradio', { name: 'System' }).getAttribute('aria-checked')).toBe(
+      'true',
+    );
+    await userEvent.click(screen.getByRole('menuitemradio', { name: 'Dark' }));
+
+    expect(chooseTheme).toHaveBeenCalledWith('dark');
+    // Picking a theme keeps the menu open, with the new choice marked.
+    expect(screen.getByRole('menuitemradio', { name: 'Dark' }).getAttribute('aria-checked')).toBe(
+      'true',
+    );
+  });
+
+  it('logs out and goes to the sign-in page', async () => {
+    await openMenu();
+    await userEvent.click(screen.getByRole('menuitem', { name: 'Log out' }));
 
     await waitFor(() => expect(router.replace).toHaveBeenCalledWith('/login'));
     expect(fetchMock).toHaveBeenCalledWith(
@@ -89,7 +108,7 @@ describe('AccountMenu', () => {
       new Response(JSON.stringify({ code: 'unauthorized' }), { status: 401 }),
     );
     await openMenu();
-    await userEvent.click(screen.getByRole('menuitem', { name: 'Sign out' }));
+    await userEvent.click(screen.getByRole('menuitem', { name: 'Log out' }));
 
     await waitFor(() => expect(router.replace).toHaveBeenCalledWith('/login'));
   });

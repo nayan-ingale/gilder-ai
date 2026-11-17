@@ -3648,9 +3648,33 @@ export const notes: SymbolNote[] = [
     symbol: 'frontend/src/components/app-shell/sidebar.tsx#SidebarFrame',
     status: 'verified',
     summary:
-      'The sidebar on medium and larger screens: brand, New chat, Search chats, the chat list, the credits card and the account part.',
-    why: 'New chat is a link to /, which creates nothing: an empty new chat. SearchButton opens the search dialog, and ChatList and CreditsCard load in the browser. The account part comes in as children, because it needs the session and sits in a Suspense boundary. Below the md breakpoint the sidebar is hidden and MobileBar takes over.',
+      'The sidebar on medium and larger screens: logo and collapse button, New chat (⌘⇧O), Search chats (⌘K), the chat list, the credits card and the account row.',
+    how: [
+      'Expanded it is 272 px wide. Collapsed (SidebarToggle) it becomes a 64 px rail with only the expand button, New chat, search and the avatar; the `sidebar-collapsed:` variant in globals.css switches the parts.',
+      'New chat is a link to /, which creates nothing: an empty new chat. SearchButton opens the search dialog; ChatList and CreditsCard load in the browser.',
+      'The account parts need the session, so they come in as props (account and railAccount), each in a Suspense boundary.',
+    ],
+    why: 'Below the md breakpoint the sidebar is hidden and MobileBar takes over. The rail gives the chat more room without losing the main actions.',
     returns: 'The <aside> as JSX.',
+  },
+  {
+    symbol: 'frontend/src/components/app-shell/sidebar-toggle.tsx#SidebarToggle',
+    status: 'verified',
+    summary: 'The button that collapses the sidebar to a rail or expands it again.',
+    how: [
+      "It sets or clears data-sidebar='collapsed' on <html>, which the sidebar-collapsed: styles follow, and saves the choice in localStorage (gilder_sidebar).",
+      "It reads the state with useSyncExternalStore, so the server's expanded render and a collapsed page agree without a hydration mismatch; the label and aria-expanded follow it.",
+    ],
+    why: 'A per-browser preference, like the theme; blocked storage only means it lasts until the next reload.',
+    returns: 'The button as JSX.',
+  },
+  {
+    symbol: 'frontend/src/components/app-shell/sidebar-state.ts#SIDEBAR_SCRIPT',
+    status: 'verified',
+    summary:
+      'The script in <head> that collapses the sidebar before the first paint when it was left collapsed.',
+    why: 'Without it the sidebar would open on every page load and then jump shut once React ran.',
+    returns: 'The script as a string.',
   },
   {
     symbol: 'frontend/src/components/app-shell/sidebar.tsx#MobileBar',
@@ -3703,15 +3727,15 @@ export const notes: SymbolNote[] = [
     symbol: 'frontend/src/components/app-shell/account-menu.tsx#AccountMenu',
     status: 'verified',
     summary:
-      'The account button: who is signed in, the theme, Billing and credits, Usage, and sign out.',
+      'Who is signed in, with their plan, and the account menu: Appearance (System, Light, Dark), Billing, Usage and Log out.',
     how: [
-      'The button shows the avatar and the name (with the email under it), or only the avatar in the small-screen top bar.',
-      'The theme items (System, Light, Dark) save the choice and mark the current one.',
-      "'Billing and credits' opens /settings/billing and 'Usage' opens /settings/usage.",
-      "Sign out ends the session and goes to the sign-in page, also when the session had already ended (a 401); any other failure shows 'Could not sign out'.",
+      "The row shows the avatar, the name and '<Plan> plan' (the email until billing answers); the sliders button ('Account menu') opens the menu. In the small-screen top bar and the collapsed sidebar only the avatar shows.",
+      'Appearance is a radio group laid out as three segments; picking one saves the choice and keeps the menu open.',
+      "'Billing' opens /settings/billing and 'Usage' opens /settings/usage.",
+      "Log out ends the session and goes to the sign-in page, also when the session had already ended (a 401); any other failure shows 'Could not log out'.",
     ],
-    why: 'Everything about the account sits behind one button at the bottom of the sidebar.',
-    returns: 'The menu as JSX.',
+    why: 'Everything about the account sits in one place at the bottom of the sidebar.',
+    returns: 'The row and menu as JSX.',
     tests: ['frontend/src/components/app-shell/account-menu.test.tsx'],
   },
 
@@ -3810,8 +3834,9 @@ export const notes: SymbolNote[] = [
     how: [
       "The link has aria-current='page' when its chat is open.",
       'Rename opens a dialog with the title selected. Save sends updateChat with the trimmed title; an empty or unchanged title just closes it.',
-      "Pin or Unpin sends updateChat with pinned flipped, then puts keyboard focus on the row's menu button in its new group.",
-      "Delete asks first ('Delete chat?'). After the delete it goes to / if the deleted chat was open.",
+      "'Pin to top' or 'Unpin' sends updateChat with pinned flipped, then puts keyboard focus on the row's menu button in its new group.",
+      "'Delete chat' asks first ('Delete chat?'). After the delete it goes to / if the deleted chat was open.",
+      'The open chat is tinted with the accent and always shows its … button; other rows show it on hover.',
       "A failed call shows a toast, such as 'Could not rename the chat', with the service's message and request ID (errorMessage).",
       'A dialog picked from the menu opens only after the menu has closed and given focus back to its button, so the dialog can return focus there.',
     ],
@@ -3935,12 +3960,13 @@ export const notes: SymbolNote[] = [
   {
     symbol: 'frontend/src/components/billing/credits-card.tsx#CreditsCard',
     status: 'verified',
-    summary: 'The balance and plan, above the account menu.',
+    summary:
+      'The balance, plan and a credits bar, above the account row; the whole card opens billing.',
     how: [
       'getAccount loads GET /api/billing/account in the browser; a skeleton shows meanwhile.',
-      "It shows the balance (with Indian digit grouping, and 'credit' for exactly 1) and a badge with the plan's name.",
-      "Below LOW_BALANCE (10) the coin turns to the warning color and 'Running low' appears.",
-      "A 'Get more' link opens the billing page (/settings/billing).",
+      "It shows the balance (with Indian digit grouping, and 'credit' for exactly 1) and a pill with the plan's name, accent-coloured for paid plans.",
+      "The bar shows the balance against the plan's credits (PLAN_CREDITS), never less than a sliver.",
+      "Below the bar: 'Plan active until <date>' for a paid plan, else 'Get more credits'. Below LOW_BALANCE (10) the bolt and the bar turn to the warning color and it says 'Running low'.",
       'If billing cannot answer, the card renders nothing: the rest of the app works without it.',
     ],
     why: 'Every answer costs credits, so the balance stays in view, in the sidebar and in the small-screen panel.',
@@ -3961,6 +3987,15 @@ export const notes: SymbolNote[] = [
     summary: 'Below this many credits the card warns that the balance is running low: 10.',
     why: 'Ten credits is one answer from most agents, so the warning comes while there is still something left.',
     returns: 'The number 10.',
+    tests: [FRONTEND_CREDITS_TEST],
+  },
+  {
+    symbol: 'frontend/src/lib/billing.ts#PLAN_CREDITS',
+    status: 'verified',
+    summary:
+      "The credits each plan comes with: Free 100, Starter 500, Pro 1,000 (billing's PLANS).",
+    why: "The credits card's bar measures the balance against the current plan's credits.",
+    returns: 'A map from plan ID to credits.',
     tests: [FRONTEND_CREDITS_TEST],
   },
   {

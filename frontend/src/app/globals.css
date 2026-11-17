@@ -1,6 +1,9 @@
 @import 'tailwindcss';
 @import '../styles/tokens.css';
 
+/* Styles for the collapsed sidebar: <html data-sidebar="collapsed">, set by SIDEBAR_SCRIPT. */
+@custom-variant sidebar-collapsed (&:where([data-sidebar='collapsed'] *));
+
 /* Tailwind names for the design tokens: bg-canvas, bg-surface, text-fg-muted, border-line... */
 @theme inline {
   --color-canvas: var(--bg);

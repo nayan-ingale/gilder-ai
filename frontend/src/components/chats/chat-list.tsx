@@ -20,7 +20,7 @@ export function ChatList() {
 
   if (isLoading) {
     return (
-      <div className="flex flex-col gap-2 px-2" aria-label="Loading your chats">
+      <div className="flex flex-col gap-2 px-2.5 pt-3.5" aria-label="Loading your chats">
         {['w-3/4', 'w-2/3', 'w-4/5', 'w-1/2'].map((width) => (
           <Skeleton key={width} className={`h-5 ${width}`} />
         ))}
@@ -30,7 +30,7 @@ export function ChatList() {
 
   if (isError) {
     return (
-      <div className="flex flex-col items-start gap-2 px-2 text-xs text-fg-subtle">
+      <div className="flex flex-col items-start gap-2 px-2.5 pt-3.5 text-xs text-fg-subtle">
         <p>Could not load your chats.</p>
         <Button size="sm" variant="secondary" onClick={() => void refetch()}>
           Try again
@@ -40,17 +40,22 @@ export function ChatList() {
   }
 
   if (groups.length === 0) {
-    return <p className="px-2 text-xs text-fg-subtle">No chats yet. Start one with New chat.</p>;
+    return (
+      <p className="px-2.5 pt-3.5 text-xs text-fg-subtle">No chats yet. Start one with New chat.</p>
+    );
   }
 
   return (
-    <div className="flex flex-col gap-4 pb-4">
+    <div className="flex flex-col pb-4">
       {groups.map((group) => (
         <section key={group.label} aria-labelledby={`chat-group-${group.label}`}>
-          <h2 id={`chat-group-${group.label}`} className="px-2 pb-1 text-xs text-fg-subtle">
+          <h2
+            id={`chat-group-${group.label}`}
+            className="px-2.5 pt-3.5 pb-1.5 text-xs font-medium text-fg-subtle"
+          >
             {group.label}
           </h2>
-          <ul className="flex flex-col">
+          <ul className="flex flex-col gap-0.5">
             {group.chats.map((chat) => (
               <ChatRow key={chat.id} chat={chat} />
             ))}
@@ -61,7 +66,7 @@ export function ChatList() {
         <Button
           size="sm"
           variant="ghost"
-          className="self-start"
+          className="mt-2 self-start"
           disabled={isFetchingNextPage}
           onClick={() => void fetchNextPage()}
         >

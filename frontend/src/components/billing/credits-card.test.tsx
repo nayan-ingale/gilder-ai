@@ -37,6 +37,16 @@ describe('CreditsCard', () => {
     expect(calls).toEqual([{ method: 'GET', path: '/api/billing/account', body: undefined }]);
   });
 
+  it('says until when a paid plan is active, and links to billing', async () => {
+    answer = () =>
+      json({ account: { plan: 'pro', planExpiresAt: '2026-12-04T10:00:00.000Z', balance: 600 } });
+    renderCard();
+
+    const card = await screen.findByRole('region', { name: 'Credits' });
+    expect(card.textContent).toContain('Plan active until 4 Dec');
+    expect(card.querySelector('a')?.getAttribute('href')).toBe('/settings/billing');
+  });
+
   it('warns when the balance is running low', async () => {
     answer = () => json({ account: { plan: 'free', planExpiresAt: null, balance: 1 } });
     renderCard();

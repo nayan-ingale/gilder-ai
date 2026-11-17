@@ -1,42 +1,81 @@
-import { Plus } from 'lucide-react';
+import { Plus, SquarePen } from 'lucide-react';
 import Link from 'next/link';
 import { redirect } from 'next/navigation';
+import type { ReactNode } from 'react';
 import { CreditsCard } from '@/components/billing/credits-card';
 import { SearchButton, SearchIconButton } from '@/components/chats/chat-commands';
 import { ChatList } from '@/components/chats/chat-list';
+import { Kbd } from '@/components/ui/kbd';
 import { Skeleton } from '@/components/ui/skeleton';
 import { getCurrentUser } from '@/server/session';
 import { AccountMenu } from './account-menu';
+import { Logo, Wordmark } from './brand';
 import { MobileNav } from './mobile-nav';
+import { SidebarToggle } from './sidebar-toggle';
 import { ThemeSync } from './theme-sync';
 
-/** The sidebar: brand, New chat, search and the chat list; the account part needs the session. */
-export function SidebarFrame({ children }: { children: React.ReactNode }) {
+/**
+ * The sidebar: brand, New chat, search, the chat list, credits and the account. Collapsed, it is a
+ * narrow rail with just the buttons; the account parts need the session, so they come in as props.
+ */
+export function SidebarFrame({
+  account,
+  railAccount,
+}: {
+  account: ReactNode;
+  railAccount: ReactNode;
+}) {
   return (
     <aside
       aria-label="Sidebar"
-      className="hidden w-64 shrink-0 flex-col border-r border-line bg-surface md:flex"
+      className="hidden w-[272px] shrink-0 flex-col gap-1.5 border-r border-line bg-surface px-3 pt-3.5 pb-3 md:flex sidebar-collapsed:w-16 sidebar-collapsed:items-center sidebar-collapsed:px-2"
     >
-      <div className="flex h-14 items-center px-4">
-        <Link href="/" className="text-base font-semibold tracking-tight text-fg">
-          GilderAi
-        </Link>
-      </div>
-      <div className="flex flex-col gap-1 px-3">
+      <div className="flex items-center gap-2.5 px-1 pt-0.5 pb-2 sidebar-collapsed:px-0">
         <Link
           href="/"
-          className="flex h-9 items-center gap-2 rounded-md border border-line bg-raised px-3 text-sm font-medium text-fg hover:bg-sunken"
+          aria-label="GilderAi home"
+          className="flex items-center gap-2.5 rounded-sm sidebar-collapsed:hidden"
         >
-          <Plus size={16} aria-hidden="true" />
-          New chat
+          <Logo size={22} />
+          <Wordmark className="text-xl" />
         </Link>
+        <SidebarToggle className="ml-auto sidebar-collapsed:ml-0" />
+      </div>
+
+      <Link
+        href="/"
+        className="flex min-h-[42px] items-center gap-2.5 rounded-md border border-line bg-raised pr-2.5 pl-3 text-sm font-medium text-fg hover:bg-sunken sidebar-collapsed:hidden"
+      >
+        <SquarePen size={16} strokeWidth={1.75} aria-hidden="true" />
+        <span className="flex-1">New chat</span>
+        <Kbd aria-hidden="true">⌘⇧O</Kbd>
+      </Link>
+      <Link
+        href="/"
+        aria-label="New chat"
+        title="New chat"
+        className="hidden size-10 items-center justify-center rounded-md border border-line bg-raised text-fg hover:bg-sunken sidebar-collapsed:flex"
+      >
+        <SquarePen size={18} strokeWidth={1.75} aria-hidden="true" />
+      </Link>
+      <div className="sidebar-collapsed:hidden">
         <SearchButton />
       </div>
-      <nav aria-label="Chats" className="mt-4 flex-1 overflow-y-auto px-3">
+      <div className="hidden sidebar-collapsed:block">
+        <SearchIconButton />
+      </div>
+
+      <nav
+        aria-label="Chats"
+        className="-mx-1 min-h-0 flex-1 overflow-y-auto px-1 sidebar-collapsed:hidden"
+      >
         <ChatList />
       </nav>
-      <CreditsCard />
-      <div className="border-t border-line p-2">{children}</div>
+      <div className="sidebar-collapsed:hidden">
+        <CreditsCard />
+      </div>
+      <div className="sidebar-collapsed:hidden">{account}</div>
+      <div className="mt-auto hidden sidebar-collapsed:block">{railAccount}</div>
     </aside>
   );
 }
@@ -86,8 +125,8 @@ export async function SidebarAccount({ compact = false }: { compact?: boolean })
 
 export function SidebarAccountSkeleton() {
   return (
-    <div className="flex items-center gap-2 p-2" aria-label="Loading your account">
-      <Skeleton className="size-7 rounded-full" />
+    <div className="flex items-center gap-2.5 pt-1.5 pr-0.5 pl-1" aria-label="Loading your account">
+      <Skeleton className="size-8 rounded-full" />
       <Skeleton className="h-4 flex-1" />
     </div>
   );

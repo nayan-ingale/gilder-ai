@@ -85,8 +85,10 @@ export function ChatRow({ chat }: { chat: ChatSummary }) {
         href={href}
         aria-current={active ? 'page' : undefined}
         className={cn(
-          'flex h-9 items-center rounded-md pr-9 pl-2 text-sm',
-          active ? 'bg-sunken text-fg' : 'text-fg-muted hover:bg-sunken hover:text-fg',
+          'flex h-10 items-center rounded-sm pr-11 pl-2.5 text-[13.5px]',
+          active
+            ? 'bg-accent-soft font-medium text-fg'
+            : 'text-fg-muted hover:bg-sunken hover:text-fg',
         )}
       >
         <span className="truncate">{chat.title}</span>
@@ -95,12 +97,16 @@ export function ChatRow({ chat }: { chat: ChatSummary }) {
         <DropdownMenuTrigger
           aria-label={`Options for ${chat.title}`}
           data-chat-options={chat.id}
-          className="absolute top-1/2 right-1 inline-flex size-7 -translate-y-1/2 items-center justify-center rounded-md text-fg-subtle opacity-0 group-hover:opacity-100 hover:bg-surface hover:text-fg focus-visible:opacity-100 data-[state=open]:opacity-100 pointer-coarse:opacity-100"
+          className={cn(
+            'absolute top-0 right-0.5 inline-flex size-10 items-center justify-center rounded-sm text-fg-muted group-hover:opacity-100 hover:text-fg focus-visible:opacity-100 data-[state=open]:opacity-100 pointer-coarse:opacity-100',
+            active ? 'opacity-100' : 'opacity-0',
+          )}
         >
-          <MoreHorizontal size={16} aria-hidden="true" />
+          <MoreHorizontal size={18} aria-hidden="true" />
         </DropdownMenuTrigger>
         <DropdownMenuContent
           align="start"
+          className="w-[196px]"
           onCloseAutoFocus={() => {
             const next = pendingDialog.current;
             pendingDialog.current = null;
@@ -111,7 +117,7 @@ export function ChatRow({ chat }: { chat: ChatSummary }) {
           }}
         >
           <DropdownMenuItem
-            icon={<Pencil size={14} />}
+            icon={<Pencil size={16} strokeWidth={1.75} />}
             onSelect={() => {
               pendingDialog.current = 'rename';
             }}
@@ -119,20 +125,26 @@ export function ChatRow({ chat }: { chat: ChatSummary }) {
             Rename
           </DropdownMenuItem>
           <DropdownMenuItem
-            icon={chat.pinned ? <PinOff size={14} /> : <Pin size={14} />}
+            icon={
+              chat.pinned ? (
+                <PinOff size={16} strokeWidth={1.75} />
+              ) : (
+                <Pin size={16} strokeWidth={1.75} />
+              )
+            }
             onSelect={togglePin}
           >
-            {chat.pinned ? 'Unpin' : 'Pin'}
+            {chat.pinned ? 'Unpin' : 'Pin to top'}
           </DropdownMenuItem>
           <DropdownMenuSeparator />
           <DropdownMenuItem
-            icon={<Trash2 size={14} />}
+            icon={<Trash2 size={16} strokeWidth={1.75} />}
             tone="danger"
             onSelect={() => {
               pendingDialog.current = 'delete';
             }}
           >
-            Delete
+            Delete chat
           </DropdownMenuItem>
         </DropdownMenuContent>
       </DropdownMenu>

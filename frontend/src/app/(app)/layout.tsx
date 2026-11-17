@@ -16,11 +16,18 @@ export default function AppLayout({ children }: LayoutProps<'/'>) {
   return (
     <ChatCommands>
       <div className="flex h-dvh overflow-hidden">
-        <SidebarFrame>
-          <Suspense fallback={<SidebarAccountSkeleton />}>
-            <SidebarAccount />
-          </Suspense>
-        </SidebarFrame>
+        <SidebarFrame
+          account={
+            <Suspense fallback={<SidebarAccountSkeleton />}>
+              <SidebarAccount />
+            </Suspense>
+          }
+          railAccount={
+            <Suspense fallback={<Skeleton className="size-8 rounded-full" />}>
+              <SidebarAccount compact />
+            </Suspense>
+          }
+        />
         <div className="flex min-w-0 flex-1 flex-col">
           <MobileBar>
             <Suspense fallback={<Skeleton className="size-7 rounded-full" />}>

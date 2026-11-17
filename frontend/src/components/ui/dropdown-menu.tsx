@@ -19,7 +19,7 @@ export function DropdownMenuContent({
         align={align}
         sideOffset={6}
         className={cn(
-          'z-50 min-w-44 rounded-lg border border-line bg-raised p-1 text-sm text-fg shadow-lg',
+          'z-50 min-w-44 rounded-md border border-line bg-raised p-1.5 text-[13.5px] text-fg shadow-raised',
           className,
         )}
         {...props}
@@ -43,14 +43,14 @@ export function DropdownMenuItem({
   return (
     <Menu.Item
       className={cn(
-        'flex cursor-default items-center gap-2 rounded-sm px-2 py-1.5 outline-none select-none data-[disabled]:opacity-50 data-[highlighted]:bg-surface',
+        'flex min-h-[38px] cursor-default items-center gap-2.5 rounded-sm px-2.5 outline-none select-none data-[disabled]:opacity-50 data-[highlighted]:bg-sunken',
         tone === 'danger' ? 'text-danger' : 'text-fg',
         className,
       )}
       {...props}
     >
       {icon ? (
-        <span aria-hidden="true" className="inline-flex text-fg-subtle">
+        <span aria-hidden="true" className="inline-flex">
           {icon}
         </span>
       ) : null}
@@ -68,4 +68,21 @@ export function DropdownMenuLabel({
   ...props
 }: ComponentPropsWithoutRef<typeof Menu.Label>) {
   return <Menu.Label className={cn('px-2 py-1.5 text-xs text-fg-subtle', className)} {...props} />;
+}
+
+/** A group of choices in a menu where exactly one is on, such as the theme. */
+export const DropdownMenuRadioGroup = Menu.RadioGroup;
+
+/** One choice in a DropdownMenuRadioGroup; picking it keeps the menu open. */
+export function DropdownMenuRadioItem({
+  className,
+  ...props
+}: ComponentPropsWithoutRef<typeof Menu.RadioItem>) {
+  return (
+    <Menu.RadioItem
+      onSelect={(event) => event.preventDefault()}
+      className={cn('cursor-default outline-none select-none', className)}
+      {...props}
+    />
+  );
 }

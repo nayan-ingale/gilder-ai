@@ -121,7 +121,7 @@ describe('ChatList', () => {
     renderWithStore(<ChatList />);
 
     await userEvent.click(await screen.findByRole('button', { name: 'Options for Goa' }));
-    await userEvent.click(screen.getByRole('menuitem', { name: 'Pin' }));
+    await userEvent.click(screen.getByRole('menuitem', { name: 'Pin to top' }));
 
     expect(await screen.findByText('Could not pin the chat')).toBeTruthy();
     expect(screen.getByText('No such chat')).toBeTruthy();
@@ -141,7 +141,7 @@ describe('ChatList', () => {
     renderWithStore(<ChatList />);
 
     await userEvent.click(await screen.findByRole('button', { name: 'Options for Goa' }));
-    await userEvent.click(screen.getByRole('menuitem', { name: 'Delete' }));
+    await userEvent.click(screen.getByRole('menuitem', { name: 'Delete chat' }));
     const dialog = await screen.findByRole('dialog', { name: 'Delete chat?' });
     await userEvent.click(within(dialog).getByRole('button', { name: 'Delete' }));
 

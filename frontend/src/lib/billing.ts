@@ -14,6 +14,13 @@ export const PLAN_NAMES: Record<Account['plan'], string> = {
 /** Below this many credits the card warns that the balance is running low. */
 export const LOW_BALANCE = 10;
 
+/** The credits each plan comes with (billing's PLANS); the credits bar measures against them. */
+export const PLAN_CREDITS: Record<Account['plan'], number> = {
+  free: 100,
+  starter: 500,
+  pro: 1_000,
+};
+
 export interface Plan {
   id: 'starter' | 'pro';
   name: string;

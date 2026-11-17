@@ -52,9 +52,9 @@ export function SearchButton() {
       type="button"
       onClick={openSearch}
       data-closes-nav
-      className="flex h-9 w-full items-center gap-2 rounded-md px-3 text-sm text-fg-muted hover:bg-sunken hover:text-fg"
+      className="flex min-h-[42px] w-full items-center gap-2 rounded-md border border-line bg-sunken pr-2.5 pl-3 text-[13.5px] text-fg-muted hover:text-fg"
     >
-      <Search size={16} aria-hidden="true" />
+      <Search size={16} strokeWidth={1.75} aria-hidden="true" />
       <span className="flex-1 text-left">Search chats</span>
       <Kbd aria-hidden="true">⌘K</Kbd>
     </button>
