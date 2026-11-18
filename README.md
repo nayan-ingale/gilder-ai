@@ -7,23 +7,26 @@ A multi-agent AI workspace. One chat interface sends each request to the right s
 ## Features
 
 - **Auto-routing across 8 agents.** A small, fast model picks the agent for each message, or you choose one from the menu or with a shortcut: `/search`, `/code`, `/pdf`, `/slides`, `/image`.
-- **Streaming answers** with stop, regenerate and edit-and-resend. A stop works even when the answer is being written by another server instance.
-- **Web search** answers with numbered, clickable sources.
-- **Code projects** split into files, with a sandboxed live preview, copy and download as a zip.
+- **Streaming answers** with stop, regenerate and edit-and-resend. A stop works even when the answer is being written by another server instance. Each answer shows its agent, what it cost and how long it took.
+- **Web search** answers with source cards and numbered citations.
+- **Code projects** split into files, in a panel beside the chat with a sandboxed live preview, copy and download as a zip.
 - **PDF, slide and image generation** with live progress. The model fills a checked outline and the server draws the file, so an answer can't put scripts or links into it.
 - **Questions about your PDFs** with page citations, and questions about images.
 - **Credits** reserved before each answer and settled afterwards, backed by a ledger. Plans can be bought through Razorpay (test mode).
-- **Usage dashboard**, chat search (⌘K), pin and rename, light and dark themes, and a phone layout.
+- **Usage dashboard** (credits per day and by agent, time to first token) and printable payment receipts.
+- **Voice input**, chat search (⌘K), pin and rename, light and dark themes, and a phone layout.
 
 ## Screenshots
 
-| Web search with sources                                            | Code with a live preview                                                   |
-| ------------------------------------------------------------------ | -------------------------------------------------------------------------- |
-| ![A web search answer with sources](.github/assets/search.png)     | ![The file panel showing a live preview](.github/assets/code-preview.png)  |
-| **Dark theme**                                                     | **Usage**                                                                  |
-| ![The same chat in the dark theme](.github/assets/search-dark.png) | ![Credits per day and by agent](.github/assets/usage.png)                  |
-| **Billing (test mode)**                                            | **On a phone**                                                             |
-| ![Plans and the current balance](.github/assets/billing.png)       | <img src=".github/assets/phone.png" alt="The chat on a phone" width="260"> |
+| New chat                                                                              | Web search with sources                                                          |
+| ------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------- |
+| ![The new-chat page with a greeting and suggestions](.github/assets/home.png)         | ![A web search answer with source cards](.github/assets/search.png)              |
+| **Code with a live preview**                                                          | **Generated PDF**                                                                |
+| ![The code panel beside the chat, showing a preview](.github/assets/code-preview.png) | ![A PDF answer with its file card](.github/assets/documents.png)                 |
+| **Dark theme**                                                                        | **Usage**                                                                        |
+| ![The same chat in the dark theme](.github/assets/search-dark.png)                    | ![Credits per day, spend by agent and recent activity](.github/assets/usage.png) |
+| **Billing (test mode)**                                                               | **On a phone**                                                                   |
+| ![Plans, costs and the current balance](.github/assets/billing.png)                   | <img src=".github/assets/phone.png" alt="The chat on a phone" width="260">       |
 
 ## How it works
 
