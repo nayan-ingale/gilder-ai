@@ -36,6 +36,7 @@ const CHAT_TEST = 'backend/services/chat/src/app.test.ts';
 const CHAT_MODELS_TEST = 'backend/services/chat/src/models.test.ts';
 const CHAT_ROUTES_TEST = 'backend/services/chat/src/chat-routes.test.ts';
 const CHAT_INTERNAL_ROUTES_TEST = 'backend/services/chat/src/internal-routes.test.ts';
+const CHAT_SWEEPER_TEST = 'backend/services/chat/src/sweeper.test.ts';
 const AGENT_TEST = 'backend/services/agent/src/app.test.ts';
 const AGENT_ENV_SCHEMA_TEST = 'backend/services/agent/src/env-schema.test.ts';
 const AGENT_LLM_TEST = 'backend/services/agent/src/llm/llm.test.ts';
@@ -82,6 +83,7 @@ const FRONTEND_BILLING_LIB_TEST = 'frontend/src/lib/billing.test.ts';
 const FRONTEND_GENERAL_SETTINGS_TEST = 'frontend/src/components/settings/general-settings.test.tsx';
 const FRONTEND_SETTINGS_TABS_TEST = 'frontend/src/components/settings/settings-tabs.test.tsx';
 const FRONTEND_RECEIPT_VIEW_TEST = 'frontend/src/components/settings/receipt-view.test.tsx';
+const FRONTEND_LOAD_ERROR_TEST = 'frontend/src/components/app-shell/load-error.test.tsx';
 const FRONTEND_LOAD_RECEIPT_TEST =
   'frontend/src/app/(app)/settings/billing/receipts/[orderId]/load-receipt.test.ts';
 
@@ -1698,6 +1700,37 @@ export const notes: SymbolNote[] = [
     why: 'chatRouter reads the history and searches message text with it; internalRouter saves, replaces and fills in messages. Mongoose builds the unique and text indexes when the model first connects.',
     returns: 'A Mongoose model of Message documents.',
     tests: [CHAT_MODELS_TEST, CHAT_ROUTES_TEST, CHAT_INTERNAL_ROUTES_TEST],
+  },
+  {
+    symbol: 'backend/services/chat/src/sweeper.ts#STALE_ANSWER_MS',
+    status: 'verified',
+    summary:
+      'How long an answer may stay "being written" before the sweeper marks it failed: 10 minutes.',
+    why: "An answer's text is saved only when the agent settles the turn, so one still streaming after this long was left behind, for example when the agent stopped mid-answer. It is the same cutoff as billing's STALE_RESERVATION_MS, which no answer outlives.",
+    returns: '600,000 milliseconds.',
+    tests: [CHAT_SWEEPER_TEST],
+  },
+  {
+    symbol: 'backend/services/chat/src/sweeper.ts#failStaleAnswers',
+    status: 'verified',
+    summary: 'Marks every answer still streaming after 10 minutes as failed.',
+    how: [
+      "One updateMany sets status 'failed' on messages with status 'streaming' and updatedAt before the cutoff.",
+      'A partial index on updatedAt holds only streaming messages, so the query reads just those few.',
+    ],
+    why: "Regenerate and edit refuse an answer that is still being written ('This answer is still being written'), so without this an answer whose agent stopped mid-turn would block them for good. The update is conditional, so sweeps on several chat instances mark each answer once (the test runs them side by side). Billing's sweeper gives back the credits the same answer held.",
+    returns: 'A promise of the number marked.',
+    sideEffects: ['Marks messages failed, in MongoDB.'],
+    tests: [CHAT_SWEEPER_TEST],
+  },
+  {
+    symbol: 'backend/services/chat/src/sweeper.ts#startStaleAnswerSweeper',
+    status: 'verified',
+    summary: 'Runs the stale-answer sweep every minute, never two at once.',
+    why: "chat's index.ts starts it at startup and stops it on shutdown. A run that finds work logs 'marked answers left streaming as failed' with the count; a failure is logged at error and the next run tries again. The timer is unref'd, so it never keeps the process alive on its own.",
+    returns: 'A function that stops the sweeper.',
+    sideEffects: ['Sets an interval timer.'],
+    tests: [CHAT_SWEEPER_TEST],
   },
   {
     symbol: 'backend/services/chat/src/models.ts#findOwnedConversation',
@@ -4044,6 +4077,31 @@ export const notes: SymbolNote[] = [
     summary: "The page for a chat that isn't available.",
     why: 'A chat that does not exist, was deleted or belongs to someone else all lead here, with the same words, so the page cannot tell which. It links to / to start a new chat.',
     returns: 'The page as JSX.',
+  },
+  {
+    symbol: 'frontend/src/components/app-shell/load-error.tsx#LoadError',
+    status: 'verified',
+    summary:
+      "What shows in place of a page that failed to render: 'This page didn’t load', a Try again button and the error's reference.",
+    why: 'A server render can fail on a gateway error, most often a 429 after a burst of requests, or while a service restarts. The words cover both, and the reference is the digest that matches the server log line.',
+    returns: 'The message as JSX.',
+    tests: [FRONTEND_LOAD_ERROR_TEST],
+  },
+  {
+    symbol: 'frontend/src/app/(app)/error.tsx#AppPageError',
+    status: 'verified',
+    summary:
+      'The error boundary for signed-in pages: LoadError in place of the page, with the sidebar kept.',
+    why: "Try again calls Next's retry, which refreshes the server render and resets the boundary. Without a boundary the error ends the render, and in development Next's Fast Refresh then reloads the whole page on its next update; with the gateway answering 429, each reload used up more of the per-user limit, so the page reloaded several times a second.",
+    returns: 'The boundary as JSX.',
+  },
+  {
+    symbol: 'frontend/src/app/error.tsx#RootError',
+    status: 'verified',
+    summary:
+      'The error boundary for everything under the root layout, including the signed-in layout.',
+    why: "The signed-in layout's account check (SidebarAccount, through getCurrentUser) calls the gateway, and an error in a layout goes to the boundary above it, which is this one. It shows LoadError full height.",
+    returns: 'The boundary as JSX.',
   },
 
   // -------------------------------------------------------------------------------------------

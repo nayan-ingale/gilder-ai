@@ -8,6 +8,7 @@ import {
 } from '@gilder/shared';
 import { createApp } from './app.ts';
 import { env } from './env.ts';
+import { startStaleAnswerSweeper } from './sweeper.ts';
 
 const logger = createLogger({
   service: 'chat',
@@ -24,10 +25,13 @@ const app = createApp({
   agentPublicKey: await importInternalPublicKey(env.AGENT_PUBLIC_KEY),
 });
 
+const stopSweeper = startStaleAnswerSweeper({ logger });
+
 await startService(app, {
   port: env.PORT,
   logger,
   onShutdown: async () => {
+    stopSweeper();
     await disconnectMongo();
   },
 });

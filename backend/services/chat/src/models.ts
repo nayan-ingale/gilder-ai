@@ -71,6 +71,8 @@ messageSchema.index(
 );
 // Search message text within one user's chats.
 messageSchema.index({ userId: 1, content: 'text' });
+// The sweeper looks for answers left streaming. Only those few are in this index.
+messageSchema.index({ updatedAt: 1 }, { partialFilterExpression: { status: 'streaming' } });
 
 export type Conversation = InferSchemaType<typeof conversationSchema>;
 export type ConversationDocument = HydratedDocument<Conversation>;

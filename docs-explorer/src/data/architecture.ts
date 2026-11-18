@@ -506,7 +506,7 @@ export const links: ArchLink[] = [
     to: 'mongodb',
     kind: 'data',
     label:
-      'Connects at startup; /readyz pings it. Reads and writes conversations and messages in gilder_chat, always filtered by the user, and soft-deletes chats',
+      'Connects at startup; /readyz pings it. Reads and writes conversations and messages in gilder_chat, always filtered by the user, soft-deletes chats, and marks answers left streaming as failed',
     status: 'verified',
     evidence: [
       'backend/services/chat/src/index.ts#(module)',
@@ -518,6 +518,7 @@ export const links: ArchLink[] = [
       'backend/services/chat/src/models.ts#findOwnedConversation',
       'backend/services/chat/src/chat-routes.ts#chatRouter',
       'backend/services/chat/src/internal-routes.ts#internalRouter',
+      'backend/services/chat/src/sweeper.ts#failStaleAnswers',
     ],
   },
   {
